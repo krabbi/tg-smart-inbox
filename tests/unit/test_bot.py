@@ -1,3 +1,4 @@
+import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 
@@ -15,12 +16,31 @@ def test_create_bot_uses_html_parse_mode(fake_config: Config) -> None:
     assert bot.default.parse_mode == ParseMode.HTML  # type: ignore[union-attr]
 
 
-def test_create_dispatcher_returns_dispatcher() -> None:
-    dp = create_dispatcher()
-    assert isinstance(dp, Dispatcher)
+# Dispatcher can only be created once per process because aiogram routers are
+# module-level singletons — re-attaching them raises RuntimeError.
+# Use a session-scoped fixture to create it exactly once.
+@pytest.fixture(scope="session")
+def dispatcher(fake_config: Config) -> Dispatcher:
+    return create_dispatcher(fake_config)
 
 
-def test_create_dispatcher_is_independent() -> None:
-    dp1 = create_dispatcher()
-    dp2 = create_dispatcher()
-    assert dp1 is not dp2
+@pytest.fixture(scope="session")
+def fake_config() -> Config:  # type: ignore[override]
+    return Config(
+        telegram_bot_token="1234567890:AAFakeTokenForTestingPurposesOnly",
+        anthropic_api_key="sk-ant-fake-key-for-testing",
+        database_url="sqlite+aiosqlite:///:memory:",
+        allowed_user_ids=[123456789],
+    )
+
+
+def test_create_dispatcher_returns_dispatcher(dispatcher: Dispatcher) -> None:
+    assert isinstance(dispatcher, Dispatcher)
+
+
+def test_create_dispatcher_includes_routers(dispatcher: Dispatcher) -> None:
+    from bot.handlers import commands, messages
+
+    router_names = [r.name for r in dispatcher.sub_routers]
+    assert commands.router.name in router_names
+    assert messages.router.name in router_names
