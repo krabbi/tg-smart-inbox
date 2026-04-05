@@ -3,7 +3,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from bot.config import Config
-from bot.handlers import commands, messages
+from bot.handlers import commands, links, messages
 from bot.middlewares.auth import AuthMiddleware
 
 
@@ -20,5 +20,6 @@ def create_dispatcher(config: Config) -> Dispatcher:
     dp = Dispatcher()
     dp.message.middleware(AuthMiddleware(config))
     dp.include_router(commands.router)
+    dp.include_router(links.router)
     dp.include_router(messages.router)
     return dp

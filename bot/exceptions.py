@@ -8,3 +8,7 @@ class DriveUploadError(Exception):
 
 class ReminderParseError(Exception):
     """Raised when reminder time cannot be parsed from user input."""
+
+
+class ScrapingError(Exception):
+    """Raised when a URL cannot be fetched or parsed."""
