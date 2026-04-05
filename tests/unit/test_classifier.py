@@ -36,6 +36,7 @@ async def test_url_with_surrounding_text_is_link() -> None:
     svc = ClassifierService(claude)
     result = await svc.classify("Посмотри https://habr.com/article/123 интересная статья")
     assert result == MessageType.LINK
+    claude.complete.assert_not_called()  # type: ignore[attr-defined]
 
 
 async def test_http_url_is_link() -> None:
@@ -43,6 +44,7 @@ async def test_http_url_is_link() -> None:
     svc = ClassifierService(claude)
     result = await svc.classify("http://example.com/page")
     assert result == MessageType.LINK
+    claude.complete.assert_not_called()  # type: ignore[attr-defined]
 
 
 # ── Claude-backed classification ─────────────────────────────────────────────
