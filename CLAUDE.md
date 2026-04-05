@@ -27,8 +27,11 @@ Handler (aiogram)  →  Service (business logic)  →  Repository (DB access)
 # Good
 async def handle_link(message: Message, link_service: LinkService) -> None:
     """Handle incoming link message."""
-    result = await link_service.process(message.text, message.from_user.id)
-    await message.answer(result.reply_text, reply_markup=result.keyboard)
+    try:
+        result = await link_service.process(message.text, message.from_user.id)
+        await message.answer(result.reply_text, reply_markup=result.keyboard)
+    except LinkProcessingError:
+        await message.answer("Не удалось обработать ссылку. Попробуй ещё раз.")
 
 # Bad — business logic in handler
 async def handle_link(message: Message, session: AsyncSession) -> None:
@@ -42,73 +45,132 @@ async def handle_link(message: Message, session: AsyncSession) -> None:
 - No direct SQLAlchemy session usage — call repositories instead.
 - No Telegram API calls (no `message.answer()` etc).
 - External APIs (Claude, Google Drive) are wrapped in dedicated service classes (`claude_service.py`, `drive_service.py`).
+- Services return result dataclasses defined alongside them (see Result objects below).
 
 ```python
 # Good
 class LinkService:
+    """Processes incoming links: saves to DB and prepares user response."""
+
     def __init__(self, item_repo: ItemRepository, claude: ClaudeService) -> None:
         self._repo = item_repo
         self._claude = claude
 
     async def process(self, url: str, user_id: int) -> LinkResult:
-        """Save link and return keyboard for user actions."""
+        """Save link and return action keyboard for user."""
         item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
-        return LinkResult(item_id=item.id, reply_text="Saved!", keyboard=build_link_keyboard(item.id))
+        return LinkResult(item_id=item.id, reply_text="Сохранено!", keyboard=build_link_keyboard(item.id))
 ```
 
 ### Repositories (`bot/repositories/`)
 - The only layer that holds an `AsyncSession` and runs SQLAlchemy queries.
 - No business logic. Only CRUD and query operations.
 - One repository class per model (e.g. `ItemRepository`, `ReminderRepository`).
+- Use `flush()` + `refresh()` inside repositories, not `commit()`. Transaction boundaries are owned by the **service layer** (or middleware). This allows services to batch multiple repository calls into one atomic transaction.
 
 ```python
 # Good
 class ItemRepository:
+    """CRUD access for Item records."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def create(self, *, user_id: int, type: ItemType, content: str) -> Item:
-        """Create and persist a new Item."""
+        """Create and flush a new Item; caller is responsible for commit."""
         item = Item(user_id=user_id, type=type, content=content)
         self._session.add(item)
-        await self._session.commit()
+        await self._session.flush()
         await self._session.refresh(item)
         return item
+```
+
+Services commit after all repository calls succeed:
+
+```python
+async def process(self, url: str, user_id: int) -> LinkResult:
+    """Save link atomically."""
+    item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
+    await self._session.commit()   # service owns the transaction boundary
+    return LinkResult(...)
+```
+
+---
+
+## Result objects
+
+Services return simple frozen dataclasses, defined in the same file as the service:
+
+```python
+from dataclasses import dataclass
+import uuid
+from aiogram.types import InlineKeyboardMarkup
+
+@dataclass(frozen=True)
+class LinkResult:
+    item_id: uuid.UUID
+    reply_text: str
+    keyboard: InlineKeyboardMarkup
 ```
 
 ---
 
 ## Dependency injection
 
-Use aiogram's middleware system to inject dependencies into handlers.
+Dependencies are wired at startup in `bot/__main__.py` and injected into handlers via a custom aiogram middleware.
 
-Register services and DB sessions via a custom middleware that attaches them to `data` dict:
+The middleware attaches services and the session factory to the `data` dict on each update:
 
 ```python
-# In bot.py or middleware setup:
-dp["db_session_factory"] = session_factory
-dp["config"] = config
+# bot/middleware.py
+class DependencyMiddleware(BaseMiddleware):
+    def __init__(self, session_factory, config: Config) -> None:
+        self._factory = session_factory
+        self._config = config
 
-# Handler receives injected deps automatically:
-async def handler(message: Message, item_service: ItemService) -> None: ...
+    async def __call__(self, handler, event, data: dict) -> Any:
+        async with self._factory() as session:
+            data["session"] = session
+            data["config"] = self._config
+            # build and inject services
+            item_repo = ItemRepository(session)
+            data["link_service"] = LinkService(item_repo, ClaudeService(self._config))
+            return await handler(event, data)
 ```
 
-Services receive their dependencies (repos, external clients) in `__init__`. Build the dependency graph at startup in `bot/__main__.py`.
+```python
+# bot/__main__.py
+init_db(config.database_url)
+factory = get_session_factory()
+dp.update.middleware(DependencyMiddleware(factory, config))
+```
+
+Handlers declare injected services as keyword arguments — aiogram resolves them from `data`:
+
+```python
+async def handle_link(message: Message, link_service: LinkService) -> None: ...
+```
 
 ---
 
 ## Error handling
 
+- Define all domain exceptions in `bot/exceptions.py`. Import from there in both services and handlers.
 - Services raise specific domain exceptions: `ClassificationError`, `DriveUploadError`, `ReminderParseError`, etc.
 - Handlers catch domain exceptions and send user-friendly Telegram messages.
 - Raw exceptions must never reach the user.
 - Log errors with context at the service level before re-raising.
 
 ```python
-# Service raises:
+# bot/exceptions.py
 class ClassificationError(Exception):
     """Raised when Claude API fails to classify a message."""
 
+class DriveUploadError(Exception):
+    """Raised when Google Drive upload fails."""
+```
+
+```python
 # Handler catches:
 try:
     result = await classifier.classify(text)
@@ -134,14 +196,15 @@ bot/repositories/item.py     →  tests/unit/test_item_repository.py
 - Fast — no I/O, no network.
 
 ### Integration tests (`tests/integration/`)
-- Use in-memory SQLite via the `db_session` fixture from `conftest.py`.
+- Test the **Service → Repository** chain against an in-memory SQLite `db_session` fixture.
 - External APIs (Claude, Drive) are still mocked.
-- Test the full Handler → Service → Repository chain.
+- Handler-level integration (full update pipeline) requires aiogram's `process_update` / `InMemoryStorage` — out of scope for most tests in this project.
 
 ### Rules
 - Use `pytest-asyncio` for all async tests. `asyncio_mode = "auto"` is set in `pyproject.toml`.
 - Use `fake_config` and `db_session` fixtures from `tests/conftest.py`.
-- Target: **≥ 80% coverage** on all new code. Run with `make coverage`.
+- Target: **≥ 80% coverage** on all new code. Run with `make coverage` (runs pytest with `--cov`).
+- `make test` runs pytest without coverage; use it for quick iteration. CI gate uses `make coverage`.
 - Never use real API keys, tokens, or production DB in tests.
 
 ---
@@ -196,9 +259,9 @@ Rules:
 
 Run before every commit:
 ```bash
-make lint    # ruff check .
-make format  # ruff format .
-make test    # pytest
+make lint      # ruff check .
+make format    # ruff format .
+make coverage  # pytest with --cov; fails if coverage < 80%
 ```
 
 All three must pass. CI will reject PRs that fail any of these.
@@ -213,14 +276,16 @@ bot/
   bot.py               # Bot + Dispatcher factories
   config.py            # pydantic-settings Config
   db.py                # async engine + session factory
+  exceptions.py        # all domain exceptions
+  middleware.py        # DependencyMiddleware — DI wiring
   handlers/            # one file per feature domain
   services/            # business logic + external API wrappers
-  repositories/        # SQLAlchemy CRUD
+  repositories/        # SQLAlchemy CRUD (flush, no commit)
   models/              # SQLAlchemy ORM models
   utils/               # shared pure helpers (no I/O)
 alembic/               # migrations
 tests/
   conftest.py          # shared fixtures: fake_config, db_session
   unit/                # fast, mocked tests
-  integration/         # db tests with in-memory SQLite
+  integration/         # service+repository tests with in-memory SQLite
 ```
