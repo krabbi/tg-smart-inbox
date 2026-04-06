@@ -118,6 +118,48 @@ async def test_receive_reminder_time_parse_error() -> None:
     svc.create.assert_not_awaited()
 
 
+async def test_receive_reminder_time_parse_error_increments_attempts() -> None:
+    """Each failed parse increments the attempt counter without clearing state."""
+    msg = make_message("непонятно")
+    state = make_state({"reminder_item_id": str(uuid.uuid4()), "reminder_attempts": 0})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(side_effect=TimeParseError("unparseable"))
+
+    svc = MagicMock(spec=ReminderService)
+
+    await receive_reminder_time(msg, state, time_parser=time_parser, reminder_service=svc)
+
+    state.clear.assert_not_called()
+    state.update_data.assert_awaited_once_with({"reminder_attempts": 1})
+    assert "1/3" in msg.answer.call_args[0][0]
+
+
+async def test_receive_reminder_time_aborts_after_max_attempts() -> None:
+    """After MAX_ATTEMPTS failures the dialog is cancelled automatically."""
+    msg = make_message("непонятно")
+    # Already at 2 attempts — this is the 3rd (final)
+    state = make_state({"reminder_item_id": str(uuid.uuid4()), "reminder_attempts": 2})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(side_effect=TimeParseError("unparseable"))
+
+    svc = MagicMock(spec=ReminderService)
+
+    await receive_reminder_time(msg, state, time_parser=time_parser, reminder_service=svc)
+
+    state.clear.assert_awaited_once()
+    assert "Не удалось" in msg.answer.call_args[0][0]
+
+
+async def test_cb_remind_yes_resets_attempt_counter() -> None:
+    """Confirming a reminder resets the attempt counter to 0."""
+    cb = make_callback("remind:yes")
+    state = make_state()
+    await cb_remind_yes(cb, state)
+    state.update_data.assert_awaited_once_with({"reminder_attempts": 0})
+
+
 async def test_receive_reminder_time_save_error() -> None:
     msg = make_message("завтра в 10")
     item_id = str(uuid.uuid4())

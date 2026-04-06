@@ -58,3 +58,29 @@ async def test_claude_api_error_raises_time_parse_error() -> None:
     parser = TimeParser(client)
     with pytest.raises(TimeParseError, match="Time parsing failed"):
         await parser.parse("завтра", now=NOW)
+
+
+async def test_parse_json_in_markdown_fence() -> None:
+    """Claude sometimes wraps JSON in ```json ... ``` — must still parse."""
+    parser = make_parser('```json\n{"datetime": "2026-06-02T10:00:00"}\n```')
+    result = await parser.parse("завтра в 10", now=NOW)
+    assert result == datetime(2026, 6, 2, 10, 0)
+
+
+async def test_parse_json_in_plain_fence() -> None:
+    """Claude sometimes wraps JSON in ``` ... ``` without language tag."""
+    parser = make_parser('```\n{"datetime": "2026-06-02T10:00:00"}\n```')
+    result = await parser.parse("завтра в 10", now=NOW)
+    assert result == datetime(2026, 6, 2, 10, 0)
+
+
+async def test_parse_in_10_minutes() -> None:
+    parser = make_parser('{"datetime": "2026-06-01T08:10:00"}')
+    result = await parser.parse("через 10 минут", now=NOW)
+    assert result == datetime(2026, 6, 1, 8, 10)
+
+
+async def test_parse_in_english() -> None:
+    parser = make_parser('{"datetime": "2026-06-01T10:00:00"}')
+    result = await parser.parse("in 2 hours", now=NOW)
+    assert result == datetime(2026, 6, 1, 10, 0)

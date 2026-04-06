@@ -46,9 +46,19 @@ class TimeParser:
 
     @staticmethod
     def _parse_response(raw: str, original_text: str) -> datetime:
-        """Parse Claude's JSON response into a datetime."""
+        """Parse Claude's JSON response into a datetime.
+
+        Strips markdown code fences (```json ... ```) that Claude sometimes wraps around JSON.
+        """
+        cleaned = raw.strip()
+        # Remove optional ```json ... ``` or ``` ... ``` fences
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[1]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
         try:
-            data = json.loads(raw.strip())
+            data = json.loads(cleaned)
             if "error" in data:
                 raise TimeParseError(f"Cannot parse time: {original_text!r}")
             dt_str = data["datetime"]
