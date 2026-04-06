@@ -14,7 +14,9 @@ from bot.services.claude_client import ClaudeClient
 from bot.services.drive_service import DriveService
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
+from bot.services.list_service import ListService
 from bot.services.media_service import MediaService
+from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
 from bot.services.vision_service import VisionService
 
@@ -46,8 +48,9 @@ class DependencyMiddleware(BaseMiddleware):
             data["link_service"] = LinkService(
                 session=session, item_repo=item_repo, scraper=Scraper(), claude=claude
             )
-            data["reminder_service"] = None  # injected in reminder handlers via FSM data
+            data["reminder_service"] = ReminderService(session=session, repo=reminder_repo)
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
+            data["list_service"] = ListService(item_repo=item_repo)
 
             # Drive-dependent services are only available when credentials are configured
             if self._config.google_drive_folder_id:
@@ -57,8 +60,7 @@ class DependencyMiddleware(BaseMiddleware):
             else:
                 data["media_service"] = None
 
-            # Make repos available for command handlers and scheduler
-            data["item_repo"] = item_repo
+            # Make reminder_repo available for scheduler
             data["reminder_repo"] = reminder_repo
 
             return await handler(event, data)

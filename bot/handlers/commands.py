@@ -9,17 +9,14 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.item import ItemType
-from bot.repositories.item_repository import ItemRepository
-from bot.repositories.reminder_repository import ReminderRepository
+from bot.services.list_service import _SEARCH_LIMIT, ListPage, ListService
+from bot.services.reminder_service import ReminderService
 
 logger = logging.getLogger(__name__)
 
 router = Router(name="commands")
-
-_PAGE_SIZE = 10
 
 _TYPE_EMOJI = {
     ItemType.link: "🔗",
@@ -40,29 +37,31 @@ WELCOME_TEXT = (
 )
 
 
-def _list_keyboard(page: int, total: int) -> InlineKeyboardMarkup | None:
-    """Build prev/next pagination keyboard; return None if single page."""
-    has_prev = page > 0
-    has_next = (page + 1) * _PAGE_SIZE < total
-    if not has_prev and not has_next:
+def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup | None:
+    """Build prev/next pagination keyboard; return None if only one page."""
+    if not list_page.has_prev and not list_page.has_next:
         return None
     buttons = []
-    if has_prev:
-        buttons.append(InlineKeyboardButton(text="← Назад", callback_data=f"list_page:{page - 1}"))
-    if has_next:
-        buttons.append(InlineKeyboardButton(text="Вперёд →", callback_data=f"list_page:{page + 1}"))
+    if list_page.has_prev:
+        buttons.append(
+            InlineKeyboardButton(text="← Назад", callback_data=f"list_page:{list_page.page - 1}")
+        )
+    if list_page.has_next:
+        buttons.append(
+            InlineKeyboardButton(text="Вперёд →", callback_data=f"list_page:{list_page.page + 1}")
+        )
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
-def _format_list_page(items: list, page: int, total: int) -> str:
+def _format_list_page(list_page: ListPage) -> str:
     """Format a page of items as a text message."""
-    lines = [f"📋 <b>Последние записи</b> (стр. {page + 1}):\n"]
-    for item in items:
+    lines = [f"📋 <b>Последние записи</b> (стр. {list_page.page + 1}):\n"]
+    for item in list_page.items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
         snippet = item.content[:60] + ("…" if len(item.content) > 60 else "")
         date_str = item.created_at.strftime("%d.%m.%Y")
         lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
-    lines.append(f"\n<i>Всего: {total}</i>")
+    lines.append(f"\n<i>Всего: {list_page.total}</i>")
     return "\n".join(lines)
 
 
@@ -75,58 +74,63 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("list"))
 async def cmd_list(
     message: Message,
-    item_repo: ItemRepository | None = None,
+    list_service: ListService | None = None,
 ) -> None:
     """Show the last 10 items for the user with pagination."""
-    if item_repo is None:
-        logger.warning("item_repo not injected — DI misconfiguration")
+    if list_service is None:
+        logger.warning("list_service not injected — DI misconfiguration")
         await message.answer("Команда /list скоро будет доступна.")
         return
 
     user_id = message.from_user.id if message.from_user else 0
-    total = await item_repo.count_by_user(user_id)
+    list_page = await list_service.list_recent(user_id, page=0)
 
-    if total == 0:
+    if list_page.total == 0:
         await message.answer(
             "У тебя пока ничего не сохранено.\nПришли ссылку, задачу, идею или фото — я запомню!"
         )
         return
 
-    items = await item_repo.get_recent(user_id, limit=_PAGE_SIZE, offset=0)
-    reply = _format_list_page(items, page=0, total=total)
-    kb = _list_keyboard(page=0, total=total)
+    reply = _format_list_page(list_page)
+    kb = _list_keyboard(list_page)
     await message.answer(reply, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("list_page:"))
 async def cb_list_page(
     callback: CallbackQuery,
-    item_repo: ItemRepository | None = None,
+    list_service: ListService | None = None,
 ) -> None:
     """Handle pagination for /list."""
     await callback.answer()
-    if item_repo is None or callback.message is None:
+    if list_service is None or callback.message is None:
         return
 
-    page = int(callback.data.split(":")[1])  # type: ignore[union-attr]
-    user_id = callback.from_user.id
-    total = await item_repo.count_by_user(user_id)
-    items = await item_repo.get_recent(user_id, limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
+    try:
+        page = int(callback.data.split(":")[1])  # type: ignore[union-attr]
+    except (ValueError, IndexError):
+        logger.warning("Invalid list_page callback data: %s", callback.data)
+        return
 
-    reply = _format_list_page(items, page=page, total=total)
-    kb = _list_keyboard(page=page, total=total)
-    await callback.message.edit_text(reply, reply_markup=kb)
+    user_id = callback.from_user.id
+    list_page = await list_service.list_recent(user_id, page=page)
+    reply = _format_list_page(list_page)
+    kb = _list_keyboard(list_page)
+    try:
+        await callback.message.edit_text(reply, reply_markup=kb)
+    except Exception:
+        logger.warning("Could not edit list message (already deleted or unchanged)")
 
 
 @router.message(Command("search"))
 async def cmd_search(
     message: Message,
     command: CommandObject,
-    item_repo: ItemRepository | None = None,
+    list_service: ListService | None = None,
 ) -> None:
     """Full-text search across saved items."""
-    if item_repo is None:
-        logger.warning("item_repo not injected — DI misconfiguration")
+    if list_service is None:
+        logger.warning("list_service not injected — DI misconfiguration")
         await message.answer("Команда /search скоро будет доступна.")
         return
 
@@ -136,7 +140,7 @@ async def cmd_search(
         return
 
     user_id = message.from_user.id if message.from_user else 0
-    items = await item_repo.search(user_id, query)
+    items = await list_service.search(user_id, query)
 
     if not items:
         await message.answer(f"Ничего не найдено по запросу: <b>{query}</b>")
@@ -149,22 +153,25 @@ async def cmd_search(
         date_str = item.created_at.strftime("%d.%m.%Y")
         lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
 
+    if len(items) == _SEARCH_LIMIT:
+        lines.append(f"\n<i>Показаны первые {_SEARCH_LIMIT} результатов</i>")
+
     await message.answer("\n".join(lines))
 
 
 @router.message(Command("reminders"))
 async def cmd_reminders(
     message: Message,
-    reminder_repo: ReminderRepository | None = None,
+    reminder_service: ReminderService | None = None,
 ) -> None:
     """List upcoming reminders with cancel buttons."""
-    if reminder_repo is None:
-        logger.warning("reminder_repo not injected — DI misconfiguration")
+    if reminder_service is None:
+        logger.warning("reminder_service not injected — DI misconfiguration")
         await message.answer("Команда /reminders скоро будет доступна.")
         return
 
     user_id = message.from_user.id if message.from_user else 0
-    reminders = await reminder_repo.get_upcoming(user_id)
+    reminders = await reminder_service.get_upcoming(user_id)
 
     if not reminders:
         await message.answer("У тебя нет предстоящих напоминаний.")
@@ -190,18 +197,29 @@ async def cmd_reminders(
 @router.callback_query(F.data.startswith("cancel_reminder:"))
 async def cb_cancel_reminder(
     callback: CallbackQuery,
-    reminder_repo: ReminderRepository | None = None,
-    session: AsyncSession | None = None,
+    reminder_service: ReminderService | None = None,
 ) -> None:
-    """Cancel a specific reminder and update the message."""
+    """Cancel a reminder — ownership is verified before cancelling."""
     await callback.answer()
-    if reminder_repo is None or session is None or callback.message is None:
+    if reminder_service is None or callback.message is None:
         return
 
-    reminder_id = uuid.UUID(callback.data.split(":")[1])  # type: ignore[union-attr]
-    await reminder_repo.cancel(reminder_id)
-    await session.commit()
-    await callback.message.edit_text(
-        callback.message.text + "\n\n<i>✅ Напоминание отменено</i>",  # type: ignore[operator]
-        reply_markup=None,
-    )
+    try:
+        reminder_id = uuid.UUID(callback.data.split(":")[1])  # type: ignore[union-attr]
+    except (ValueError, IndexError):
+        logger.warning("Invalid cancel_reminder callback data: %s", callback.data)
+        await callback.answer("Неверный запрос.")
+        return
+
+    cancelled = await reminder_service.cancel_for_user(reminder_id, callback.from_user.id)
+    if not cancelled:
+        await callback.answer("Напоминание не найдено или уже отменено.")
+        return
+
+    try:
+        await callback.message.edit_text(
+            callback.message.text + "\n\n<i>✅ Напоминание отменено</i>",  # type: ignore[operator]
+            reply_markup=None,
+        )
+    except Exception:
+        logger.warning("Could not edit reminder message after cancel")

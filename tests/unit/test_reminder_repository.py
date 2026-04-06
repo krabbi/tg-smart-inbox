@@ -96,7 +96,7 @@ async def test_cancel_nonexistent_id_does_nothing(db_session: AsyncSession) -> N
     await repo.cancel(uuid.uuid4())  # should not raise
 
 
-async def test_get_by_user_pending(db_session: AsyncSession) -> None:
+async def test_get_upcoming(db_session: AsyncSession) -> None:
     item1 = Item(user_id=10, type=ItemType.task, content="task user 10")
     item2 = Item(user_id=20, type=ItemType.task, content="task user 20")
     db_session.add_all([item1, item2])
@@ -107,6 +107,33 @@ async def test_get_by_user_pending(db_session: AsyncSession) -> None:
     await repo.create(item_id=item2.id, remind_at=datetime(2026, 6, 2, tzinfo=UTC))
     await db_session.commit()
 
-    results = await repo.get_by_user_pending(10)
+    results = await repo.get_upcoming(10)
     assert len(results) == 1
     assert results[0].item_id == item1.id
+
+
+async def test_get_by_id_for_user_returns_owned(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="my task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    reminder = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    await db_session.commit()
+
+    found = await repo.get_by_id_for_user(reminder.id, user_id=1)
+    assert found is not None
+    assert found.id == reminder.id
+
+
+async def test_get_by_id_for_user_returns_none_for_wrong_user(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="my task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    reminder = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    await db_session.commit()
+
+    found = await repo.get_by_id_for_user(reminder.id, user_id=999)
+    assert found is None
