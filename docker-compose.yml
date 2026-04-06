@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: inbox
       POSTGRES_USER: inbox
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inbox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,10 +15,12 @@ services:
 
   # Production: code baked into image, restarts on failure
   bot:
-    build: .
+    build:
+      context: .
+      target: base
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:-inbox}@db/inbox
+      DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
     depends_on:
       db:
         condition: service_healthy
@@ -27,10 +29,12 @@ services:
 
   # Development: source mounted as volume, hot-reload via watchfiles
   bot-dev:
-    build: .
+    build:
+      context: .
+      target: dev
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:-inbox}@db/inbox
+      DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
     depends_on:
       db:
         condition: service_healthy
