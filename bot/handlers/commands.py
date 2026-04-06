@@ -200,8 +200,8 @@ async def cb_cancel_reminder(
     reminder_service: ReminderService | None = None,
 ) -> None:
     """Cancel a reminder — ownership is verified before cancelling."""
-    await callback.answer()
     if reminder_service is None or callback.message is None:
+        await callback.answer()
         return
 
     try:
@@ -215,6 +215,8 @@ async def cb_cancel_reminder(
     if not cancelled:
         await callback.answer("Напоминание не найдено или уже отменено.")
         return
+
+    await callback.answer()
 
     try:
         await callback.message.edit_text(

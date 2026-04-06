@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.exceptions import ScrapingError
@@ -73,6 +74,18 @@ async def cb_link_save(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:remind:"))
-async def cb_link_remind(callback: CallbackQuery) -> None:
-    """Handle [Напомнить] button — stub for reminder flow."""
-    await callback.answer("⏰ Напоминание будет реализовано в следующей версии.")
+async def cb_link_remind(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle [⏰ Напомнить] button — start the reminder FSM for this link."""
+    await callback.answer()
+    if callback.message is None:
+        return
+
+    item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
+    # URL is the last line of the saved link message: "🔗 Ссылка сохранена:\n{url}"
+    url = (callback.message.text or "").split("\n")[-1]
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    from bot.handlers.reminders import ask_reminder
+
+    await ask_reminder(message=callback.message, task_text=url, item_id=item_id, state=state)

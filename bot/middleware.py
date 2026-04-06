@@ -18,6 +18,7 @@ from bot.services.list_service import ListService
 from bot.services.media_service import MediaService
 from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
+from bot.services.time_parser import TimeParser
 from bot.services.vision_service import VisionService
 
 
@@ -49,6 +50,7 @@ class DependencyMiddleware(BaseMiddleware):
                 session=session, item_repo=item_repo, scraper=Scraper(), claude=claude
             )
             data["reminder_service"] = ReminderService(session=session, repo=reminder_repo)
+            data["time_parser"] = TimeParser(claude)
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
             data["list_service"] = ListService(item_repo=item_repo)
 

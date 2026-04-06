@@ -122,6 +122,14 @@ async def test_cb_link_save_removes_keyboard() -> None:
 
 
 async def test_cb_link_remind_answers() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from aiogram.fsm.context import FSMContext
+
     cb = make_callback("link:remind:abc")
-    await cb_link_remind(cb)
+    state = MagicMock(spec=FSMContext)
+
+    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()):
+        await cb_link_remind(cb, state=state)
+
     cb.answer.assert_awaited_once()
