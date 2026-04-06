@@ -18,9 +18,14 @@ services:
     build:
       context: .
       target: base
-    env_file: ${BOT_ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
+      TELEGRAM_BOT_TOKEN:
+      ANTHROPIC_API_KEY:
+      ALLOWED_USER_IDS:
+      GROQ_API_KEY:
+      GOOGLE_DRIVE_CREDENTIALS_FILE:
+      GOOGLE_DRIVE_FOLDER_ID:
     depends_on:
       db:
         condition: service_healthy
@@ -32,9 +37,14 @@ services:
     build:
       context: .
       target: dev
-    env_file: ${BOT_ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
+      TELEGRAM_BOT_TOKEN:
+      ANTHROPIC_API_KEY:
+      ALLOWED_USER_IDS:
+      GROQ_API_KEY:
+      GOOGLE_DRIVE_CREDENTIALS_FILE:
+      GOOGLE_DRIVE_FOLDER_ID:
     depends_on:
       db:
         condition: service_healthy
