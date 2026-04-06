@@ -143,7 +143,9 @@ async def handle_text(
             await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
             return
         try:
-            await ask_reminder(message=message, task_text=text, item_id=str(saved.item.id), state=state)
+            await ask_reminder(
+                message=message, task_text=text, item_id=str(saved.item.id), state=state
+            )
         except Exception:
             logger.exception("Failed to start reminder dialog for user %s", user_id)
             await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
