@@ -18,7 +18,7 @@ services:
     build:
       context: .
       target: base
-    env_file: .env
+    env_file: ${BOT_ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
     depends_on:
@@ -32,7 +32,7 @@ services:
     build:
       context: .
       target: dev
-    env_file: .env
+    env_file: ${BOT_ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
     depends_on:
