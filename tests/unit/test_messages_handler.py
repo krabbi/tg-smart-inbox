@@ -2,8 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import Message, User
 
-from bot.handlers.messages import _extract_url, handle_text
+from bot.handlers.messages import _extract_url, _is_suggestion_query, handle_text
 from bot.services.classifier import ClassifierService, MessageType
+from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
 
 
@@ -26,6 +27,7 @@ def make_classifier(msg_type: MessageType) -> ClassifierService:
 
 # ── _extract_url helper ───────────────────────────────────────────────────────
 
+
 def test_extract_url_finds_https() -> None:
     assert _extract_url("Check https://example.com") == "https://example.com"
 
@@ -41,6 +43,7 @@ def test_extract_url_finds_first_url() -> None:
 
 # ── handle_text with no classifier ───────────────────────────────────────────
 
+
 async def test_handle_text_no_classifier_gives_stub_reply() -> None:
     msg = make_message("hello")
     await handle_text(msg, classifier=None)
@@ -48,6 +51,7 @@ async def test_handle_text_no_classifier_gives_stub_reply() -> None:
 
 
 # ── handle_text with classifier ──────────────────────────────────────────────
+
 
 async def test_handle_text_link_calls_link_handler() -> None:
     msg = make_message("https://example.com")
@@ -74,11 +78,60 @@ async def test_handle_text_note_gives_type_reply() -> None:
     msg.answer.assert_awaited_once()
 
 
-async def test_handle_text_idea_gives_type_reply() -> None:
+async def test_handle_text_idea_saves_and_shows_tags() -> None:
     msg = make_message("хочу сделать приложение")
     classifier = make_classifier(MessageType.IDEA)
-    await handle_text(msg, classifier=classifier)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    mock_idea = MagicMock()
+    mock_idea.tags = ["app", "mobile"]
+    idea_svc.save_idea = AsyncMock(return_value=MagicMock(spec=SavedIdea, idea=mock_idea))
+
+    await handle_text(msg, classifier=classifier, idea_service=idea_svc)
     msg.answer.assert_awaited_once()
+    reply = msg.answer.call_args[0][0]
+    assert "💡" in reply
+    assert "#app" in reply
+
+
+async def test_handle_text_idea_no_service_gives_stub() -> None:
+    msg = make_message("хочу сделать приложение")
+    classifier = make_classifier(MessageType.IDEA)
+    await handle_text(msg, classifier=classifier, idea_service=None)
+    msg.answer.assert_awaited_once()
+
+
+# ── suggestion query detection ────────────────────────────────────────────────
+
+
+def test_is_suggestion_query_russian_variants() -> None:
+    assert _is_suggestion_query("что поделать?")
+    assert _is_suggestion_query("чем заняться сегодня?")
+    assert _is_suggestion_query("куда порекомендуешь?")
+
+
+def test_is_suggestion_query_english() -> None:
+    assert _is_suggestion_query("give me an idea")
+    assert _is_suggestion_query("what should I do today?")
+    assert _is_suggestion_query("suggest something interesting")
+
+
+def test_is_suggestion_query_negative() -> None:
+    assert not _is_suggestion_query("хочу сделать приложение")
+    assert not _is_suggestion_query("купить молоко")
+    assert not _is_suggestion_query("https://example.com")
+
+
+async def test_handle_text_suggestion_query_calls_suggest() -> None:
+    msg = make_message("чем заняться?")
+    classifier = make_classifier(MessageType.NOTE)
+    idea_svc = MagicMock(spec=IdeaService)
+    idea_svc.suggest = AsyncMock(return_value="Вот что можно сделать: ...")
+
+    await handle_text(msg, classifier=classifier, idea_service=idea_svc)
+    idea_svc.suggest.assert_awaited_once()
+    # classifier should NOT be called — fast path
+    classifier.classify.assert_not_awaited()
 
 
 async def test_handle_text_link_without_link_service_gives_stub() -> None:

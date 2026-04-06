@@ -6,14 +6,21 @@ from aiogram.types import TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Config
+from bot.repositories.idea_repository import IdeaRepository
+from bot.repositories.item_repository import ItemRepository
+from bot.repositories.reminder_repository import ReminderRepository
+from bot.services.classifier import ClassifierService
+from bot.services.claude_client import ClaudeClient
+from bot.services.drive_service import DriveService
+from bot.services.idea_service import IdeaService
+from bot.services.link_service import LinkService
+from bot.services.media_service import MediaService
+from bot.services.scraper import Scraper
+from bot.services.vision_service import VisionService
 
 
 class DependencyMiddleware(BaseMiddleware):
-    """Inject config and DB session into handler data on every update.
-
-    Future service instances (LinkService, ClassifierService, etc.) should be
-    constructed here once their implementations exist and injected via data dict.
-    """
+    """Inject per-request services and DB session into handler data on every update."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config: Config) -> None:
         self._factory = session_factory
@@ -25,8 +32,30 @@ class DependencyMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        """Open a DB session, inject deps, then call the handler."""
+        """Open a DB session, build and inject all services, then call the handler."""
         async with self._factory() as session:
             data["session"] = session
             data["config"] = self._config
+
+            claude = ClaudeClient(self._config)
+            item_repo = ItemRepository(session)
+            reminder_repo = ReminderRepository(session)
+            idea_repo = IdeaRepository(session)
+
+            data["classifier"] = ClassifierService(claude)
+            data["link_service"] = LinkService(item_repo, Scraper(), claude, session)
+            data["reminder_service"] = None  # injected in reminder handlers via FSM data
+            data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
+
+            # Drive-dependent services are only available when credentials are configured
+            if self._config.google_drive_folder_id:
+                drive = DriveService(self._config)
+                vision = VisionService(self._config)
+                data["media_service"] = MediaService(session, item_repo, vision, drive)
+            else:
+                data["media_service"] = None
+
+            # Make reminder_repo available for scheduler and reminder handlers
+            data["reminder_repo"] = reminder_repo
+
             return await handler(event, data)

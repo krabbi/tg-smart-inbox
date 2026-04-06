@@ -1,0 +1,132 @@
+import uuid
+from unittest.mock import AsyncMock, MagicMock
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.models.idea import Idea
+from bot.models.item import Item, ItemType
+from bot.repositories.idea_repository import IdeaRepository
+from bot.repositories.item_repository import ItemRepository
+from bot.services.claude_client import ClaudeClient
+from bot.services.idea_service import IdeaService, SavedIdea
+
+
+def make_service(
+    tag_response: str = '["app", "mobile"]',
+    suggest_response: str = "Вот идея: сделай приложение.",
+) -> tuple[IdeaService, MagicMock, MagicMock, MagicMock]:
+    """Build IdeaService with all dependencies mocked."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+
+    mock_item = MagicMock(spec=Item)
+    mock_item.id = uuid.uuid4()
+    mock_item.type = ItemType.idea
+    mock_item.content = "Build a mobile app"
+
+    item_repo = MagicMock(spec=ItemRepository)
+    item_repo.create = AsyncMock(return_value=mock_item)
+
+    mock_idea = MagicMock(spec=Idea)
+    mock_idea.tags = ["app", "mobile"]
+
+    idea_repo = MagicMock(spec=IdeaRepository)
+    idea_repo.save = AsyncMock(return_value=mock_idea)
+    idea_repo.get_all = AsyncMock(return_value=[])
+
+    claude = MagicMock(spec=ClaudeClient)
+    claude.complete = AsyncMock(side_effect=[tag_response, suggest_response])
+
+    svc = IdeaService(session=session, item_repo=item_repo, idea_repo=idea_repo, claude=claude)
+    return svc, item_repo, idea_repo, claude
+
+
+async def test_save_idea_extracts_tags_and_saves() -> None:
+    svc, item_repo, idea_repo, claude = make_service()
+
+    result = await svc.save_idea("Build a mobile app", user_id=1)
+
+    assert isinstance(result, SavedIdea)
+    item_repo.create.assert_awaited_once_with(
+        user_id=1, type=ItemType.idea, content="Build a mobile app"
+    )
+    idea_repo.save.assert_awaited_once()
+    assert result.idea.tags == ["app", "mobile"]
+
+
+async def test_save_idea_commits_session() -> None:
+    svc, _, _, _ = make_service()
+    await svc.save_idea("test idea", user_id=42)
+    svc._session.commit.assert_awaited_once()
+
+
+async def test_save_idea_empty_tags_on_malformed_json() -> None:
+    svc, _, idea_repo, _ = make_service(tag_response="not json")
+    await svc.save_idea("some idea", user_id=1)
+    _, kwargs = idea_repo.save.call_args
+    assert kwargs.get("tags", []) == [] or idea_repo.save.call_args[0][1] == []
+
+
+async def test_save_idea_empty_tags_on_api_error() -> None:
+    svc, _, idea_repo, claude = make_service()
+    claude.complete = AsyncMock(side_effect=Exception("API down"))
+    await svc.save_idea("some idea", user_id=1)
+    call_kwargs = idea_repo.save.call_args[1]
+    assert call_kwargs["tags"] == []
+
+
+async def test_suggest_returns_claude_response() -> None:
+    svc, _, idea_repo, claude = make_service(suggest_response="Попробуй сделать приложение!")
+    idea_repo.get_all = AsyncMock(
+        return_value=[
+            (MagicMock(content="Build app", spec=Item), MagicMock(tags=["app"], spec=Idea))
+        ]
+    )
+    claude.complete = AsyncMock(return_value="Попробуй сделать приложение!")
+
+    result = await svc.suggest(user_id=1, query="что поделать?")
+    assert "приложение" in result
+
+
+async def test_suggest_empty_list_returns_friendly_message() -> None:
+    svc, _, idea_repo, _ = make_service()
+    idea_repo.get_all = AsyncMock(return_value=[])
+
+    result = await svc.suggest(user_id=1, query="чем заняться?")
+    assert "нет" in result.lower() or "идей" in result.lower()
+
+
+async def test_suggest_api_error_returns_fallback() -> None:
+    svc, _, idea_repo, claude = make_service()
+    idea_repo.get_all = AsyncMock(
+        return_value=[(MagicMock(content="idea", spec=Item), MagicMock(tags=[], spec=Idea))]
+    )
+    claude.complete = AsyncMock(side_effect=Exception("API error"))
+
+    result = await svc.suggest(user_id=1, query="что делать?")
+    assert "Не удалось" in result
+
+
+async def test_get_all_delegates_to_repo() -> None:
+    svc, _, idea_repo, _ = make_service()
+    idea_repo.get_all = AsyncMock(return_value=["row1", "row2"])
+
+    result = await svc.get_all(user_id=5)
+    assert result == ["row1", "row2"]
+    idea_repo.get_all.assert_awaited_once_with(5)
+
+
+async def test_extract_tags_limits_to_five() -> None:
+    svc, _, _, claude = make_service()
+    claude.complete = AsyncMock(return_value='["a","b","c","d","e","f","g"]')
+
+    tags = await svc._extract_tags("many tags idea")
+    assert len(tags) == 5
+
+
+async def test_extract_tags_lowercases() -> None:
+    svc, _, _, claude = make_service()
+    claude.complete = AsyncMock(return_value='["Mobile", "APP"]')
+
+    tags = await svc._extract_tags("test")
+    assert tags == ["mobile", "app"]
