@@ -8,6 +8,7 @@ from aiogram.types import Message
 
 from bot.exceptions import TranscriptionError
 from bot.handlers.links import handle_link_message
+from bot.handlers.reminders import ask_reminder
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
@@ -87,11 +88,13 @@ async def handle_voice(
             logger.exception("Task save failed for user %s", user_id)
             await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
             return
-        from bot.handlers.reminders import ask_reminder
-
-        await ask_reminder(
-            message=message, task_text=transcript, item_id=str(saved.item.id), state=state
-        )
+        try:
+            await ask_reminder(
+                message=message, task_text=transcript, item_id=str(saved.item.id), state=state
+            )
+        except Exception:
+            logger.exception("Failed to start reminder dialog for user %s", user_id)
+            await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
     elif msg_type == MessageType.NOTE and note_service is not None:
         try:
             await note_service.save(transcript, user_id)

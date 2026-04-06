@@ -149,7 +149,7 @@ async def test_handle_voice_routes_task_and_asks_reminder() -> None:
     task_svc = MagicMock(spec=TaskService)
     task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()) as mock_ask:
+    with patch("bot.handlers.voice.ask_reminder", new=AsyncMock()) as mock_ask:
         await handle_voice(
             msg,
             state=make_state(),

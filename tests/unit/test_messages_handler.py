@@ -85,7 +85,7 @@ async def test_handle_text_task_saves_and_asks_reminder() -> None:
     task_svc = MagicMock(spec=TaskService)
     task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()) as mock_ask:
+    with patch("bot.handlers.messages.ask_reminder", new=AsyncMock()) as mock_ask:
         await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
         mock_ask.assert_awaited_once()
         assert mock_ask.call_args[1]["item_id"] == "item-uuid"
