@@ -3,13 +3,17 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.exceptions import TranscriptionError
 from bot.handlers.links import handle_link_message
+from bot.handlers.reminders import ask_reminder
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
+from bot.services.note_service import NoteService
+from bot.services.task_service import TaskService
 from bot.services.transcription_service import TranscriptionService
 from bot.utils.text import extract_url
 
@@ -21,10 +25,13 @@ router = Router(name="voice")
 @router.message(F.voice)
 async def handle_voice(
     message: Message,
+    state: FSMContext,
     transcription_service: TranscriptionService | None = None,
     classifier: ClassifierService | None = None,
     link_service: LinkService | None = None,
     idea_service: IdeaService | None = None,
+    task_service: TaskService | None = None,
+    note_service: NoteService | None = None,
 ) -> None:
     """Download voice message, transcribe it, then route through the classifier pipeline."""
     if transcription_service is None:
@@ -66,7 +73,6 @@ async def handle_voice(
         try:
             saved = await idea_service.save_idea(transcript, user_id)
         except Exception:
-            # IdeaService wraps SQLAlchemy + Claude errors without a domain exception yet
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
             return
@@ -75,6 +81,27 @@ async def handle_voice(
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)
+    elif msg_type == MessageType.TASK and task_service is not None:
+        try:
+            saved = await task_service.save(transcript, user_id)
+        except Exception:
+            logger.exception("Task save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
+            return
+        try:
+            await ask_reminder(
+                message=message, task_text=transcript, item_id=str(saved.item.id), state=state
+            )
+        except Exception:
+            logger.exception("Failed to start reminder dialog for user %s", user_id)
+            await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
+    elif msg_type == MessageType.NOTE and note_service is not None:
+        try:
+            await note_service.save(transcript, user_id)
+        except Exception:
+            logger.exception("Note save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить заметку. Попробуй ещё раз.")
+            return
+        await message.answer("📝 Заметка сохранена!")
     else:
-        # TODO(#25): route TASK and REMINDER types through their respective pipelines
         await message.answer("Голосовое сообщение сохранено!")
