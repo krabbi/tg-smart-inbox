@@ -8,6 +8,7 @@ from aiogram.types import Message, Voice
 
 from bot.exceptions import TranscriptionError
 from bot.handlers.voice import handle_voice
+from bot.models.idea import IdeaComplexity, IdeaEffort
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
@@ -136,6 +137,35 @@ async def test_handle_voice_downloads_audio_and_transcribes() -> None:
     await handle_voice(msg, state=make_state(), transcription_service=svc, classifier=None)
 
     svc.transcribe.assert_awaited_once_with(b"fake-audio")
+
+
+async def test_handle_voice_routes_idea_shows_complexity_labels() -> None:
+    msg = make_message()
+    svc = MagicMock(spec=TranscriptionService)
+    svc.transcribe = AsyncMock(return_value="купить вертолёт")
+
+    classifier = MagicMock(spec=ClassifierService)
+    classifier.classify = AsyncMock(return_value=MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    saved = MagicMock(spec=SavedIdea)
+    saved.idea = MagicMock()
+    saved.idea.tags = []
+    saved.idea.complexity = IdeaComplexity.complex
+    saved.idea.effort = IdeaEffort.longterm
+    idea_svc.save_idea = AsyncMock(return_value=saved)
+
+    await handle_voice(
+        msg,
+        state=make_state(),
+        transcription_service=svc,
+        classifier=classifier,
+        idea_service=idea_svc,
+    )
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("сложная" in r for r in replies)
+    assert any("долгосрочно" in r for r in replies)
 
 
 async def test_handle_voice_routes_task_and_asks_reminder() -> None:

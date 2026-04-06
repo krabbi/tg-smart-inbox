@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -119,8 +120,6 @@ class IdeaService:
         self, text: str
     ) -> tuple[list[str], IdeaComplexity | None, IdeaEffort | None]:
         """Extract tags and estimate complexity/effort concurrently; return defaults on failure."""
-        import asyncio
-
         tags_coro = self._extract_tags(text)
         classify_coro = self._classify_complexity(text)
         tags, (complexity, effort) = await asyncio.gather(tags_coro, classify_coro)

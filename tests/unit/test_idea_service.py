@@ -47,9 +47,7 @@ def make_service(
     # save_idea calls _extract_tags and _classify_complexity concurrently (asyncio.gather),
     # then suggest calls claude once more — order within gather is not guaranteed, but
     # side_effect list is consumed in call order which matches gather's task scheduling.
-    claude.complete = AsyncMock(
-        side_effect=[tag_response, complexity_response, suggest_response]
-    )
+    claude.complete = AsyncMock(side_effect=[tag_response, complexity_response, suggest_response])
 
     svc = IdeaService(session=session, item_repo=item_repo, idea_repo=idea_repo, claude=claude)
     return svc, item_repo, idea_repo, claude

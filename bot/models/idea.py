@@ -18,9 +18,9 @@ class IdeaComplexity(enum.Enum):
 class IdeaEffort(enum.Enum):
     """Estimated time effort to execute an idea."""
 
-    quick = "quick"        # < 1 hour
-    halfday = "halfday"    # 1–4 hours
-    day = "day"            # 4–8 hours
+    quick = "quick"  # < 1 hour
+    halfday = "halfday"  # 1–4 hours
+    day = "day"  # 4–8 hours
     longterm = "longterm"  # days or more
 
 
@@ -31,11 +31,7 @@ class Idea(UUIDMixin, Base):
         ForeignKey("items.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    complexity: Mapped[IdeaComplexity | None] = mapped_column(
-        Enum(IdeaComplexity), nullable=True
-    )
-    effort: Mapped[IdeaEffort | None] = mapped_column(
-        Enum(IdeaEffort), nullable=True
-    )
+    complexity: Mapped[IdeaComplexity | None] = mapped_column(Enum(IdeaComplexity), nullable=True)
+    effort: Mapped[IdeaEffort | None] = mapped_column(Enum(IdeaEffort), nullable=True)
 
     item: Mapped["Item"] = relationship("Item", back_populates="idea")  # noqa: F821

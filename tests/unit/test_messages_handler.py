@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, User
 
 from bot.handlers.messages import _is_suggestion_query, handle_text
+from bot.models.idea import IdeaComplexity, IdeaEffort
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
@@ -154,6 +155,23 @@ async def test_handle_text_idea_saves_and_shows_tags() -> None:
     reply = msg.answer.call_args[0][0]
     assert "💡" in reply
     assert "#app" in reply
+
+
+async def test_handle_text_idea_shows_complexity_labels() -> None:
+    msg = make_message("купить вертолёт")
+    classifier = make_classifier(MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    mock_idea = MagicMock()
+    mock_idea.tags = []
+    mock_idea.complexity = IdeaComplexity.complex
+    mock_idea.effort = IdeaEffort.longterm
+    idea_svc.save_idea = AsyncMock(return_value=MagicMock(spec=SavedIdea, idea=mock_idea))
+
+    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+    reply = msg.answer.call_args[0][0]
+    assert "сложная" in reply
+    assert "долгосрочно" in reply
 
 
 async def test_handle_text_idea_no_service_gives_stub() -> None:
