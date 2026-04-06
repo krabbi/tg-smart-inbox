@@ -87,6 +87,8 @@ async def test_handle_voice_routes_idea_to_idea_service() -> None:
     saved = MagicMock(spec=SavedIdea)
     saved.idea = MagicMock()
     saved.idea.tags = ["tech"]
+    saved.idea.complexity = None
+    saved.idea.effort = None
     idea_svc.save_idea = AsyncMock(return_value=saved)
 
     await handle_voice(

@@ -145,6 +145,8 @@ async def test_handle_text_idea_saves_and_shows_tags() -> None:
     idea_svc = MagicMock(spec=IdeaService)
     mock_idea = MagicMock()
     mock_idea.tags = ["app", "mobile"]
+    mock_idea.complexity = None
+    mock_idea.effort = None
     idea_svc.save_idea = AsyncMock(return_value=MagicMock(spec=SavedIdea, idea=mock_idea))
 
     await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
