@@ -19,6 +19,7 @@ from bot.services.media_service import MediaService
 from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
 from bot.services.time_parser import TimeParser
+from bot.services.transcription_service import TranscriptionService
 from bot.services.vision_service import VisionService
 
 
@@ -53,6 +54,12 @@ class DependencyMiddleware(BaseMiddleware):
             data["time_parser"] = TimeParser(claude)
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
             data["list_service"] = ListService(item_repo=item_repo)
+
+            # Whisper transcription — only available when OpenAI key is configured
+            if self._config.openai_api_key:
+                data["transcription_service"] = TranscriptionService(self._config)
+            else:
+                data["transcription_service"] = None
 
             # Drive-dependent services are only available when credentials are configured
             if self._config.google_drive_folder_id:

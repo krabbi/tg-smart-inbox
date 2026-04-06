@@ -16,3 +16,7 @@ class ScrapingError(Exception):
 
 class TimeParseError(Exception):
     """Raised when a natural language time expression cannot be parsed."""
+
+
+class TranscriptionError(Exception):
+    """Raised when Whisper API fails to transcribe audio."""
