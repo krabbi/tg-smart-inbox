@@ -4,12 +4,14 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.filters import CommandObject
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
 from bot.handlers.commands import (
     _list_keyboard,
     cb_cancel_reminder,
     cb_list_page,
+    cmd_cancel,
     cmd_list,
     cmd_reminders,
     cmd_search,
@@ -286,6 +288,33 @@ async def test_cb_cancel_reminder_edit_failure_is_silenced() -> None:
 
     # Should not raise
     await cb_cancel_reminder(cb, reminder_service=svc)
+
+
+# ── /cancel ───────────────────────────────────────────────────────────────────
+
+
+async def test_cmd_cancel_with_active_state_clears_and_confirms() -> None:
+    msg = make_message()
+    state = MagicMock(spec=FSMContext)
+    state.get_state = AsyncMock(return_value="reminders:waiting_for_time")
+    state.clear = AsyncMock()
+
+    await cmd_cancel(msg, state=state)
+
+    state.clear.assert_awaited_once()
+    assert "Отменено" in msg.answer.call_args[0][0]
+
+
+async def test_cmd_cancel_with_no_active_state_notifies_user() -> None:
+    msg = make_message()
+    state = MagicMock(spec=FSMContext)
+    state.get_state = AsyncMock(return_value=None)
+    state.clear = AsyncMock()
+
+    await cmd_cancel(msg, state=state)
+
+    state.clear.assert_not_awaited()
+    assert "Нет активного" in msg.answer.call_args[0][0]
 
 
 # ── _list_keyboard helper ─────────────────────────────────────────────────────

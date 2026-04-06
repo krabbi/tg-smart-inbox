@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import UTC, datetime
 
 from aiogram import F, Router
@@ -26,6 +27,8 @@ class ReminderStates(StatesGroup):
 
 _ITEM_ID_KEY = "reminder_item_id"
 _TASK_TEXT_KEY = "reminder_task_text"
+_ATTEMPTS_KEY = "reminder_attempts"
+_MAX_ATTEMPTS = 3
 
 _ASK_REMIND_KB = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -57,8 +60,10 @@ async def cb_remind_yes(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await callback.message.edit_reply_markup(reply_markup=None)  # type: ignore[union-attr]
     await state.set_state(ReminderStates.waiting_for_time)
+    await state.update_data({_ATTEMPTS_KEY: 0})
     await callback.message.answer(  # type: ignore[union-attr]
-        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу»)"
+        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу»)\n"
+        "Для отмены — /cancel"
     )
 
 
@@ -90,12 +95,21 @@ async def receive_reminder_time(
     try:
         remind_at = await time_parser.parse(message.text or "", now=datetime.now(UTC))
     except TimeParseError:
+        data = await state.get_data()
+        attempts = data.get(_ATTEMPTS_KEY, 0) + 1
+        if attempts >= _MAX_ATTEMPTS:
+            await state.clear()
+            await message.answer(
+                "Не удалось разобрать время после нескольких попыток. Напоминание не создано."
+            )
+            return
+        await state.update_data({_ATTEMPTS_KEY: attempts})
         await message.answer(
-            "Не смог понять время. Попробуй ещё раз: «завтра в 10», «через 2 часа»…"
+            f"Не смог понять время ({attempts}/{_MAX_ATTEMPTS}). "
+            "Попробуй: «завтра в 10», «через 2 часа», «в пятницу в 15:00»\n"
+            "Для отмены — /cancel"
         )
         return
-
-    import uuid
 
     try:
         item_id = uuid.UUID(item_id_str)

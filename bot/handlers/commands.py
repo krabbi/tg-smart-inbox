@@ -3,6 +3,7 @@ import uuid
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -69,6 +70,17 @@ def _format_list_page(list_page: ListPage) -> str:
 async def cmd_start(message: Message) -> None:
     """Handle /start command with a welcome message."""
     await message.answer(WELCOME_TEXT)
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    """Cancel any active FSM dialog (e.g. reminder time input)."""
+    current = await state.get_state()
+    if current is None:
+        await message.answer("Нет активного действия для отмены.")
+        return
+    await state.clear()
+    await message.answer("Отменено.")
 
 
 @router.message(Command("list"))
