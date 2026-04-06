@@ -28,6 +28,7 @@ You forward links, photos, and notes to Telegram "Saved Messages" with the inten
 | 📝 Task or note | Detects intent, asks if you want a reminder, schedules it |
 | 🖼️ Photo / file | Uploads to Google Drive, sends back a shareable link |
 | 💡 Idea | Classifies as an idea, stores it — ask the bot "what should I work on?" anytime |
+| 🎤 Voice message | Transcribes with Whisper, then processes the text through the same pipeline |
 | 💬 Any text | Classifies intelligently and stores with full-text search |
 
 ## Bot Commands
@@ -59,7 +60,8 @@ aiogram bot (Python)
 - Python 3.11+
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Anthropic API key
-- Google Drive API credentials
+- Google Drive API credentials *(optional — for photo/file upload)*
+- Groq API key *(optional — for voice transcription, free at [console.groq.com](https://console.groq.com))*
 
 ### Installation
 
@@ -88,8 +90,14 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 TELEGRAM_BOT_TOKEN=your_token_here
 ANTHROPIC_API_KEY=your_key_here
-GOOGLE_DRIVE_CREDENTIALS_FILE=credentials.json
 DATABASE_URL=sqlite:///data/inbox.db
+
+# Optional: voice message transcription (free tier at console.groq.com)
+GROQ_API_KEY=your_groq_key_here
+
+# Optional: photo/file upload to Google Drive
+GOOGLE_DRIVE_CREDENTIALS_FILE=credentials.json
+GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
 ```
 
 ## Contributing
@@ -99,8 +107,8 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 ## Roadmap
 
 - [x] MVP: classify, summarize, remind, store
+- [x] Voice message transcription (Groq Whisper Large v3)
 - [ ] Morning digest with curated content
-- [ ] Voice message transcription
 - [ ] Web dashboard for browsing saved items
 - [ ] Multi-user support
 
