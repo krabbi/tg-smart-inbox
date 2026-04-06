@@ -27,14 +27,28 @@ async def test_cmd_start_sends_welcome() -> None:
 
 
 async def test_handle_text_replies() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aiogram.fsm.context import FSMContext
+
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
     message = make_message(text="Hello bot")
-    await handle_text(message)
+    await handle_text(message, state=state)
     message.answer.assert_awaited_once()
 
 
 async def test_handle_text_forwarded_replies() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aiogram.fsm.context import FSMContext
+
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
     message = make_message(text="Forwarded text", forwarded=True)
-    await handle_text(message)
+    await handle_text(message, state=state)
     message.answer.assert_awaited_once()
 
 
@@ -53,7 +67,14 @@ async def test_handle_document_replies() -> None:
 
 
 async def test_handle_text_without_user() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from aiogram.fsm.context import FSMContext
+
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
     message = make_message(text="hi")
     message.from_user = None
-    await handle_text(message)
+    await handle_text(message, state=state)
     message.answer.assert_awaited_once()

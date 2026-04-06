@@ -16,8 +16,10 @@ from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.list_service import ListService
 from bot.services.media_service import MediaService
+from bot.services.note_service import NoteService
 from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
+from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
 from bot.services.vision_service import VisionService
@@ -53,6 +55,8 @@ class DependencyMiddleware(BaseMiddleware):
             data["reminder_service"] = ReminderService(session=session, repo=reminder_repo)
             data["time_parser"] = TimeParser(claude)
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
+            data["task_service"] = TaskService(session, item_repo)
+            data["note_service"] = NoteService(session, item_repo)
             data["list_service"] = ListService(item_repo=item_repo)
 
             # Whisper transcription — only available when Groq key is configured

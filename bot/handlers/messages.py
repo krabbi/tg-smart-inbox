@@ -2,12 +2,15 @@ import logging
 import re
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.media_service import MediaService
+from bot.services.note_service import NoteService
+from bot.services.task_service import TaskService
 from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
@@ -89,9 +92,12 @@ async def handle_document(
 @router.message(F.text)
 async def handle_text(
     message: Message,
+    state: FSMContext,
     classifier: ClassifierService | None = None,
     link_service: LinkService | None = None,
     idea_service: IdeaService | None = None,
+    task_service: TaskService | None = None,
+    note_service: NoteService | None = None,
 ) -> None:
     """Route incoming text to the correct pipeline based on AI classification."""
     text = message.text or ""
@@ -128,6 +134,24 @@ async def handle_text(
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)
+    elif msg_type == MessageType.TASK and task_service is not None:
+        try:
+            saved = await task_service.save(text, user_id)
+        except Exception:
+            logger.exception("Task save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
+            return
+        from bot.handlers.reminders import ask_reminder
+
+        await ask_reminder(message=message, task_text=text, item_id=str(saved.item.id), state=state)
+    elif msg_type == MessageType.NOTE and note_service is not None:
+        try:
+            await note_service.save(text, user_id)
+        except Exception:
+            logger.exception("Note save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить заметку. Попробуй ещё раз.")
+            return
+        await message.answer("📝 Заметка сохранена!")
     else:
         await message.answer(
             f"Тип: <b>{msg_type.value}</b>. Полная обработка будет добавлена позже."

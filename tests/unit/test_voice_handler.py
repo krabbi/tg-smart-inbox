@@ -3,6 +3,7 @@
 import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, Voice
 
 from bot.exceptions import TranscriptionError
@@ -10,7 +11,16 @@ from bot.handlers.voice import handle_voice
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
+from bot.services.note_service import NoteService, SavedNote
+from bot.services.task_service import SavedTask, TaskService
 from bot.services.transcription_service import TranscriptionService
+
+
+def make_state() -> FSMContext:
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+    return state
 
 
 def make_message(voice_file_id: str = "voice-file-id", user_id: int = 1) -> MagicMock:
@@ -38,7 +48,7 @@ def make_message(voice_file_id: str = "voice-file-id", user_id: int = 1) -> Magi
 
 async def test_handle_voice_no_service_replies_setup_instructions() -> None:
     msg = make_message()
-    await handle_voice(msg, transcription_service=None)
+    await handle_voice(msg, state=make_state(), transcription_service=None)
     msg.answer.assert_awaited_once()
     assert "GROQ_API_KEY" in msg.answer.call_args[0][0]
 
@@ -48,7 +58,7 @@ async def test_handle_voice_transcription_error_shows_error_message() -> None:
     svc = MagicMock(spec=TranscriptionService)
     svc.transcribe = AsyncMock(side_effect=TranscriptionError("Неверный GROQ_API_KEY."))
 
-    await handle_voice(msg, transcription_service=svc)
+    await handle_voice(msg, state=make_state(), transcription_service=svc)
     msg.answer.assert_awaited_once()
     assert "GROQ_API_KEY" in msg.answer.call_args[0][0]
 
@@ -58,7 +68,7 @@ async def test_handle_voice_shows_transcript() -> None:
     svc = MagicMock(spec=TranscriptionService)
     svc.transcribe = AsyncMock(return_value="купить молоко")
 
-    await handle_voice(msg, transcription_service=svc, classifier=None)
+    await handle_voice(msg, state=make_state(), transcription_service=svc, classifier=None)
 
     first_reply = msg.answer.call_args_list[0][0][0]
     assert "купить молоко" in first_reply
@@ -81,6 +91,7 @@ async def test_handle_voice_routes_idea_to_idea_service() -> None:
 
     await handle_voice(
         msg,
+        state=make_state(),
         transcription_service=svc,
         classifier=classifier,
         idea_service=idea_svc,
@@ -104,6 +115,7 @@ async def test_handle_voice_routes_link_to_link_handler() -> None:
     with patch("bot.handlers.voice.handle_link_message", new=AsyncMock()) as mock_link:
         await handle_voice(
             msg,
+            state=make_state(),
             transcription_service=svc,
             classifier=classifier,
             link_service=link_svc,
@@ -119,6 +131,58 @@ async def test_handle_voice_downloads_audio_and_transcribes() -> None:
     svc = MagicMock(spec=TranscriptionService)
     svc.transcribe = AsyncMock(return_value="test")
 
-    await handle_voice(msg, transcription_service=svc, classifier=None)
+    await handle_voice(msg, state=make_state(), transcription_service=svc, classifier=None)
 
     svc.transcribe.assert_awaited_once_with(b"fake-audio")
+
+
+async def test_handle_voice_routes_task_and_asks_reminder() -> None:
+    msg = make_message()
+    svc = MagicMock(spec=TranscriptionService)
+    svc.transcribe = AsyncMock(return_value="купить молоко")
+
+    classifier = MagicMock(spec=ClassifierService)
+    classifier.classify = AsyncMock(return_value=MessageType.TASK)
+
+    mock_item = MagicMock()
+    mock_item.id = "task-uuid"
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+
+    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()) as mock_ask:
+        await handle_voice(
+            msg,
+            state=make_state(),
+            transcription_service=svc,
+            classifier=classifier,
+            task_service=task_svc,
+        )
+
+    task_svc.save.assert_awaited_once_with("купить молоко", 1)
+    mock_ask.assert_awaited_once()
+    assert mock_ask.call_args[1]["item_id"] == "task-uuid"
+
+
+async def test_handle_voice_routes_note_and_confirms() -> None:
+    msg = make_message()
+    svc = MagicMock(spec=TranscriptionService)
+    svc.transcribe = AsyncMock(return_value="Байкал — самое глубокое озеро")
+
+    classifier = MagicMock(spec=ClassifierService)
+    classifier.classify = AsyncMock(return_value=MessageType.NOTE)
+
+    mock_item = MagicMock()
+    note_svc = MagicMock(spec=NoteService)
+    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item))
+
+    await handle_voice(
+        msg,
+        state=make_state(),
+        transcription_service=svc,
+        classifier=classifier,
+        note_service=note_svc,
+    )
+
+    note_svc.save.assert_awaited_once_with("Байкал — самое глубокое озеро", 1)
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("📝" in r for r in replies)
