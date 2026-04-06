@@ -13,7 +13,7 @@ class ClaudeClient:
     def __init__(self, config: Config) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, *, max_tokens: int | None = None) -> str:
         """Send a prompt and return the text response.
 
         Raises ClassificationError if the API call fails.
@@ -21,7 +21,7 @@ class ClaudeClient:
         try:
             message = await self._client.messages.create(
                 model=self.MODEL,
-                max_tokens=self.MAX_TOKENS,
+                max_tokens=max_tokens or self.MAX_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
             return message.content[0].text  # type: ignore[union-attr]

@@ -5,6 +5,7 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from bot.services.classifier import ClassifierService, MessageType
+from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.media_service import MediaService
 
@@ -14,11 +15,23 @@ router = Router(name="messages")
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
+# Detects free-form suggestion queries without a Claude API call
+_SUGGESTION_RE = re.compile(
+    r"(что|чем|куда|о\s*чём?)\s*(поделать|заняться|делать|почитать|порекомендуешь)"
+    r"|give me an idea|what should (i|we) (do|work on)|suggest something",
+    re.IGNORECASE,
+)
+
 
 def _extract_url(text: str) -> str | None:
     """Return the first URL found in text, or None."""
     match = _URL_RE.search(text)
     return match.group(0) if match else None
+
+
+def _is_suggestion_query(text: str) -> bool:
+    """Return True if the text looks like a request for idea suggestions."""
+    return bool(_SUGGESTION_RE.search(text))
 
 
 @router.message(F.photo)
@@ -85,6 +98,7 @@ async def handle_text(
     message: Message,
     classifier: ClassifierService | None = None,
     link_service: LinkService | None = None,
+    idea_service: IdeaService | None = None,
 ) -> None:
     """Route incoming text to the correct pipeline based on AI classification."""
     text = message.text or ""
@@ -96,6 +110,12 @@ async def handle_text(
         await message.answer("Сообщение получено. Классификация скоро будет доступна.")
         return
 
+    # Fast path: suggestion queries bypass the classifier
+    if _is_suggestion_query(text) and idea_service is not None:
+        suggestion = await idea_service.suggest(user_id, text)
+        await message.answer(suggestion)
+        return
+
     msg_type = await classifier.classify(text, has_media=False)
 
     if msg_type == MessageType.LINK and link_service is not None:
@@ -103,6 +123,18 @@ async def handle_text(
         from bot.handlers.links import handle_link_message
 
         await handle_link_message(message, url, link_service)
+    elif msg_type == MessageType.IDEA and idea_service is not None:
+        try:
+            saved = await idea_service.save_idea(text, user_id)
+        except Exception:
+            logger.exception("Idea save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
+            return
+        tags_str = " ".join(f"#{t}" for t in saved.idea.tags) if saved.idea.tags else ""
+        reply = "💡 Идея сохранена!"
+        if tags_str:
+            reply += f"\n{tags_str}"
+        await message.answer(reply)
     else:
         await message.answer(
             f"Тип: <b>{msg_type.value}</b>. Полная обработка будет добавлена позже."

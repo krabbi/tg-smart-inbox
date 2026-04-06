@@ -54,10 +54,7 @@ async def cb_link_summary(callback: CallbackQuery, link_service: LinkService) ->
     await callback.answer("Загружаю страницу...")
     try:
         summary = await link_service.summarize(url)
-        text = (
-            f"📋 <b>{summary.title}</b>\n\n"
-            f"{summary.summary}"
-        )
+        text = f"📋 <b>{summary.title}</b>\n\n{summary.summary}"
         if summary.takeaways:
             text += "\n\n<b>Ключевые моменты:</b>\n" + "\n".join(
                 f"• {t}" for t in summary.takeaways

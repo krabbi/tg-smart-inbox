@@ -15,6 +15,7 @@ def make_claude(response: str) -> ClaudeClient:
 
 # ── Fast-path rules (no API call) ────────────────────────────────────────────
 
+
 async def test_media_short_circuits() -> None:
     claude = MagicMock(spec=ClaudeClient)
     svc = ClassifierService(claude)
@@ -49,6 +50,7 @@ async def test_http_url_is_link() -> None:
 
 # ── Claude-backed classification ─────────────────────────────────────────────
 
+
 async def test_claude_task_response() -> None:
     svc = ClassifierService(make_claude('{"type": "task"}'))
     result = await svc.classify("купить молоко")
@@ -68,6 +70,7 @@ async def test_claude_note_response() -> None:
 
 
 # ── Fallback on malformed response ───────────────────────────────────────────
+
 
 async def test_malformed_json_falls_back_to_note() -> None:
     svc = ClassifierService(make_claude("not valid json"))
@@ -96,6 +99,7 @@ async def test_claude_api_error_falls_back_to_note() -> None:
 
 
 # ── Russian-language samples ──────────────────────────────────────────────────
+
 
 @pytest.mark.parametrize(
     "text",

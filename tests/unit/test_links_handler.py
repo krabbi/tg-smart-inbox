@@ -24,7 +24,9 @@ def make_message(text: str = "https://example.com", user_id: int = 1) -> Message
     return msg
 
 
-def make_callback(data: str, message_text: str = "🔗 Ссылка сохранена:\nhttps://example.com") -> CallbackQuery:
+def make_callback(
+    data: str, message_text: str = "🔗 Ссылка сохранена:\nhttps://example.com"
+) -> CallbackQuery:
     msg = MagicMock()
     msg.text = message_text
     msg.edit_text = AsyncMock()

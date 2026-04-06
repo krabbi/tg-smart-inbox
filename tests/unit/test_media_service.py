@@ -27,7 +27,9 @@ def make_media_service(
     repo.create = AsyncMock(return_value=mock_item)
 
     vision = MagicMock(spec=VisionService)
-    vision.analyze = AsyncMock(return_value=MediaAnalysis(category=category, description=description))
+    vision.analyze = AsyncMock(
+        return_value=MediaAnalysis(category=category, description=description)
+    )
 
     drive = MagicMock(spec=DriveService)
     drive.upload = MagicMock(
