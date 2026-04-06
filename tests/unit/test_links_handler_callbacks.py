@@ -1,6 +1,6 @@
 """Tests for link button callbacks — summary, save, and remind."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -84,26 +84,42 @@ async def test_cb_link_save_answers_and_removes_keyboard() -> None:
 # ── cb_link_remind ────────────────────────────────────────────────────────────
 
 
-async def test_cb_link_remind_triggers_ask_reminder() -> None:
+async def test_cb_link_remind_goes_directly_to_time_input() -> None:
+    """Clicking Напомнить skips yes/no and immediately asks for time."""
     cb = make_callback("link:remind:some-item-id")
     state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()) as mock_ask:
-        await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state)
 
-    mock_ask.assert_awaited_once()
-    call_kwargs = mock_ask.call_args[1]
-    assert call_kwargs["item_id"] == "some-item-id"
-    assert call_kwargs["task_text"] == "https://example.com"
-    assert call_kwargs["state"] is state
+    from bot.handlers.reminders import ReminderStates
+
+    state.set_state.assert_awaited_once_with(ReminderStates.waiting_for_time)
+    cb.message.answer.assert_awaited_once()
+    assert "Когда напомнить" in cb.message.answer.call_args[0][0]
 
 
-async def test_cb_link_remind_removes_keyboard_before_fsm() -> None:
+async def test_cb_link_remind_stores_item_id_in_fsm() -> None:
+    cb = make_callback("link:remind:some-item-id")
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+
+    await cb_link_remind(cb, state=state)
+
+    data_stored = state.update_data.call_args[0][0]
+    assert data_stored["reminder_item_id"] == "some-item-id"
+    assert data_stored["reminder_attempts"] == 0
+
+
+async def test_cb_link_remind_removes_keyboard() -> None:
     cb = make_callback("link:remind:uuid")
     state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()):
-        await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state)
 
     cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
 
@@ -111,9 +127,10 @@ async def test_cb_link_remind_removes_keyboard_before_fsm() -> None:
 async def test_cb_link_remind_answers_callback() -> None:
     cb = make_callback("link:remind:uuid")
     state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()):
-        await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state)
 
     cb.answer.assert_awaited_once()
 
@@ -122,8 +139,9 @@ async def test_cb_link_remind_no_message_returns_early() -> None:
     cb = make_callback("link:remind:uuid")
     cb.message = None
     state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()) as mock_ask:
-        await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state)
 
-    mock_ask.assert_not_awaited()
+    state.set_state.assert_not_awaited()

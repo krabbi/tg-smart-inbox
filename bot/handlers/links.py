@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.exceptions import ScrapingError
+from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY, ReminderStates
 from bot.services.link_service import LinkService
 
 logger = logging.getLogger(__name__)
@@ -75,17 +76,18 @@ async def cb_link_save(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:remind:"))
 async def cb_link_remind(callback: CallbackQuery, state: FSMContext) -> None:
-    """Handle [⏰ Напомнить] button — start the reminder FSM for this link."""
+    """Handle [⏰ Напомнить] button — go directly to time input, skip yes/no confirmation."""
     await callback.answer()
     if callback.message is None:
         return
 
     item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
-    # URL is the last line of the saved link message: "🔗 Ссылка сохранена:\n{url}"
-    url = (callback.message.text or "").split("\n")[-1]
 
     await callback.message.edit_reply_markup(reply_markup=None)
 
-    from bot.handlers.reminders import ask_reminder
-
-    await ask_reminder(message=callback.message, task_text=url, item_id=item_id, state=state)
+    await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
+    await state.set_state(ReminderStates.waiting_for_time)
+    await callback.message.answer(
+        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу в 15:00»)\n"
+        "Для отмены — /cancel"
+    )

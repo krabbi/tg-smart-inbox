@@ -31,6 +31,7 @@ def make_callback(
     msg.text = message_text
     msg.edit_text = AsyncMock()
     msg.edit_reply_markup = AsyncMock()
+    msg.answer = AsyncMock()
     cb = MagicMock(spec=CallbackQuery)
     cb.data = data
     cb.message = msg
@@ -122,14 +123,13 @@ async def test_cb_link_save_removes_keyboard() -> None:
 
 
 async def test_cb_link_remind_answers() -> None:
-    from unittest.mock import AsyncMock, patch
-
     from aiogram.fsm.context import FSMContext
 
     cb = make_callback("link:remind:abc")
     state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
 
-    with patch("bot.handlers.reminders.ask_reminder", new=AsyncMock()):
-        await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state)
 
     cb.answer.assert_awaited_once()
