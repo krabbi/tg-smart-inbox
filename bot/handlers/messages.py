@@ -28,6 +28,7 @@ async def handle_photo(
 ) -> None:
     """Handle incoming photo — categorize with Vision, upload to Drive."""
     if media_service is None:
+        logger.warning("media_service not injected — DI misconfiguration")
         await message.answer("Фото получено. Обработка медиа скоро будет доступна.")
         return
 
@@ -56,6 +57,7 @@ async def handle_document(
 ) -> None:
     """Handle incoming document/file — categorize and upload to Drive."""
     if media_service is None:
+        logger.warning("media_service not injected — DI misconfiguration")
         await message.answer("Файл получен. Обработка медиа скоро будет доступна.")
         return
 

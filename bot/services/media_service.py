@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +54,9 @@ class MediaService:
         Raises VisionService fallback errors or DriveUploadError on failure.
         """
         analysis = await self._vision.analyze(file_bytes, media_type)
-        drive_file = self._drive.upload(file_bytes, filename, analysis.category)
+        drive_file = await asyncio.get_running_loop().run_in_executor(
+            None, self._drive.upload, file_bytes, filename, analysis.category
+        )
         item = await self._repo.create(
             user_id=user_id,
             type=ItemType.media,

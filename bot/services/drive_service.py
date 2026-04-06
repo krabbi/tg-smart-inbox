@@ -1,6 +1,7 @@
 import io
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -40,7 +41,7 @@ class DriveService:
         self._credentials_file = config.google_drive_credentials_file
         self._service = self._build_service()
 
-    def _build_service(self):  # type: ignore[return]
+    def _build_service(self) -> Any:
         """Build an authenticated Google Drive API service."""
         credentials = service_account.Credentials.from_service_account_file(
             self._credentials_file, scopes=_SCOPES
@@ -50,14 +51,14 @@ class DriveService:
     def get_or_create_folder(self, name: str, parent_id: str | None = None) -> str:
         """Return the folder ID for the given name, creating it if it doesn't exist."""
         parent = parent_id or self._root_folder_id
+        # Escape single quotes per Drive API query syntax
+        escaped_name = name.replace("'", "\\'")
         query = (
-            f"name='{name}' and mimeType='application/vnd.google-apps.folder'"
+            f"name='{escaped_name}' and mimeType='application/vnd.google-apps.folder'"
             f" and '{parent}' in parents and trashed=false"
         )
         results = (
-            self._service.files()
-            .list(q=query, fields="files(id, name)", spaces="drive")
-            .execute()
+            self._service.files().list(q=query, fields="files(id, name)", spaces="drive").execute()
         )
         files = results.get("files", [])
         if files:

@@ -10,6 +10,7 @@ from bot.config import Config
 logger = logging.getLogger(__name__)
 
 _VALID_CATEGORIES = {"receipt", "document", "screenshot", "photo", "meme", "other"}
+_SUPPORTED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 _ANALYZE_PROMPT = """\
 Analyze this image and return a JSON object with:
@@ -47,8 +48,16 @@ class VisionService:
     async def analyze(self, image_bytes: bytes, media_type: str = "image/jpeg") -> MediaAnalysis:
         """Analyze image bytes and return category + description.
 
-        Falls back to category 'other' if Claude returns an unknown category.
+        Falls back to category 'other' if Claude returns an unknown category or
+        if the media type is not supported by Claude Vision.
         """
+        if media_type not in _SUPPORTED_MEDIA_TYPES:
+            logger.warning(
+                "Unsupported media type for vision analysis: %s, defaulting to 'other'", media_type
+            )
+            return MediaAnalysis(
+                category="other", description="Формат файла не поддерживается для анализа."
+            )
         b64 = base64.standard_b64encode(image_bytes).decode()
         try:
             response = await self._client.messages.create(

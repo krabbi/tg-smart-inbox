@@ -71,17 +71,26 @@ def test_parse_response_case_insensitive() -> None:
     assert result.category == "receipt"
 
 
+async def test_analyze_unsupported_media_type_falls_back_to_other() -> None:
+    svc = VisionService(make_config())
+    svc._client = MagicMock()
+    result = await svc.analyze(b"pdf bytes", media_type="application/pdf")
+    assert result.category == "other"
+    assert "не поддерживается" in result.description
+    svc._client.messages.create.assert_not_called()
+
+
 async def test_analyze_passes_media_type() -> None:
     svc = VisionService(make_config())
     mock_content = MagicMock()
-    mock_content.text = '{"category": "document", "description": "PDF doc"}'
+    mock_content.text = '{"category": "document", "description": "PNG doc"}'
     mock_response = MagicMock()
     mock_response.content = [mock_content]
     svc._client = MagicMock()
     svc._client.messages.create = AsyncMock(return_value=mock_response)
 
-    result = await svc.analyze(b"pdf bytes", media_type="application/pdf")
+    result = await svc.analyze(b"png bytes", media_type="image/png")
     assert result.category == "document"
     call_kwargs = svc._client.messages.create.call_args[1]
     msg_content = call_kwargs["messages"][0]["content"]
-    assert msg_content[0]["source"]["media_type"] == "application/pdf"
+    assert msg_content[0]["source"]["media_type"] == "image/png"
