@@ -13,9 +13,14 @@ _CLASSIFY_PROMPT = """\
 Classify the following message into exactly one category.
 
 Categories:
-- task: something the user needs to do, a reminder, an action item (e.g. "buy milk", "call the dentist", "надо позвонить маме")
-- idea: a creative idea, project concept, or something to explore later (e.g. "хочу сделать приложение", "idea for a startup")
+- task: something the user needs to do, a reminder, or an action item \
+(e.g. "buy milk", "call the dentist", "надо позвонить маме", "remind me to submit report")
+- idea: a creative idea, invention concept, project proposal, or something to explore or build later \
+(e.g. "хочу сделать приложение", "idea for a startup", "что если построить X но с Y", \
+"надо построить вертолёт но с колёсами вместо винтов", "a new way to do Z")
 - note: everything else — a fact, observation, quote, or general information
+
+When in doubt between idea and note, prefer idea for anything inventive or hypothetical.
 
 Respond with JSON only, no explanation:
 {"type": "task"} or {"type": "idea"} or {"type": "note"}
@@ -65,9 +70,18 @@ class ClassifierService:
 
     @staticmethod
     def _parse_response(response: str) -> MessageType:
-        """Parse Claude's JSON response into a MessageType, defaulting to NOTE."""
+        """Parse Claude's JSON response into a MessageType, defaulting to NOTE.
+
+        Strips markdown code fences (```json ... ```) that Claude sometimes adds.
+        """
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[1]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
         try:
-            data = json.loads(response.strip())
+            data = json.loads(cleaned)
             type_str = data.get("type", "").lower()
             mapping = {
                 "task": MessageType.TASK,

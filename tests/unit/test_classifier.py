@@ -98,6 +98,21 @@ async def test_claude_api_error_falls_back_to_note() -> None:
     assert result == MessageType.NOTE
 
 
+# ── Markdown fence stripping ─────────────────────────────────────────────────
+
+
+async def test_json_in_markdown_fence_parsed_correctly() -> None:
+    svc = ClassifierService(make_claude('```json\n{"type": "idea"}\n```'))
+    result = await svc.classify("вертолёт с колёсами вместо винтов")
+    assert result == MessageType.IDEA
+
+
+async def test_json_in_plain_fence_parsed_correctly() -> None:
+    svc = ClassifierService(make_claude('```\n{"type": "task"}\n```'))
+    result = await svc.classify("купить молоко")
+    assert result == MessageType.TASK
+
+
 # ── Russian-language samples ──────────────────────────────────────────────────
 
 
