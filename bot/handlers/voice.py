@@ -11,6 +11,7 @@ from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.transcription_service import TranscriptionService
+from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ async def handle_voice(
             message.from_user and message.from_user.id,
             exc,
         )
+        # exc carries a user-facing message prepared by TranscriptionService
         await message.answer(str(exc))
         return
 
@@ -58,15 +60,13 @@ async def handle_voice(
     msg_type = await classifier.classify(transcript, has_media=False)
 
     if msg_type == MessageType.LINK and link_service is not None:
-        import re
-
-        url_match = re.search(r"https?://\S+", transcript, re.IGNORECASE)
-        url = url_match.group(0) if url_match else transcript
+        url = extract_url(transcript) or transcript
         await handle_link_message(message, url, link_service)
     elif msg_type == MessageType.IDEA and idea_service is not None:
         try:
             saved = await idea_service.save_idea(transcript, user_id)
         except Exception:
+            # IdeaService wraps SQLAlchemy + Claude errors without a domain exception yet
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
             return
@@ -76,6 +76,5 @@ async def handle_voice(
             reply += f"\n{tags_str}"
         await message.answer(reply)
     else:
-        await message.answer(
-            f"Тип: <b>{msg_type.value}</b>. Полная обработка будет добавлена позже."
-        )
+        # TODO(#25): route TASK and REMINDER types through their respective pipelines
+        await message.answer("Голосовое сообщение сохранено!")

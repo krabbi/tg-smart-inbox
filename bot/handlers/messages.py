@@ -8,12 +8,11 @@ from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.media_service import MediaService
+from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
 
 router = Router(name="messages")
-
-_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # Detects free-form suggestion queries without a Claude API call
 _SUGGESTION_RE = re.compile(
@@ -21,12 +20,6 @@ _SUGGESTION_RE = re.compile(
     r"|give me an idea|what should (i|we) (do|work on)|suggest something",
     re.IGNORECASE,
 )
-
-
-def _extract_url(text: str) -> str | None:
-    """Return the first URL found in text, or None."""
-    match = _URL_RE.search(text)
-    return match.group(0) if match else None
 
 
 def _is_suggestion_query(text: str) -> bool:
@@ -119,7 +112,7 @@ async def handle_text(
     msg_type = await classifier.classify(text, has_media=False)
 
     if msg_type == MessageType.LINK and link_service is not None:
-        url = _extract_url(text) or text
+        url = extract_url(text) or text
         from bot.handlers.links import handle_link_message
 
         await handle_link_message(message, url, link_service)

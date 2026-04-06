@@ -52,7 +52,9 @@ async def test_transcribe_auth_error_raises_with_key_message(fake_config) -> Non
         patch.object(
             svc._client.audio.transcriptions,
             "create",
-            new=AsyncMock(side_effect=groq.AuthenticationError("invalid key", response=MagicMock(), body={})),
+            new=AsyncMock(
+                side_effect=groq.AuthenticationError("invalid key", response=MagicMock(), body={})
+            ),
         ),
         pytest.raises(TranscriptionError) as exc_info,
     ):
@@ -84,7 +86,9 @@ async def test_transcribe_generic_groq_error_raises_transcription_error(fake_con
         patch.object(
             svc._client.audio.transcriptions,
             "create",
-            new=AsyncMock(side_effect=groq.InternalServerError("server error", response=MagicMock(), body={})),
+            new=AsyncMock(
+                side_effect=groq.InternalServerError("server error", response=MagicMock(), body={})
+            ),
         ),
         pytest.raises(TranscriptionError),
     ):
