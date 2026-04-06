@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import UTC, datetime
 
 from aiogram import F, Router
@@ -109,8 +110,6 @@ async def receive_reminder_time(
             "Для отмены — /cancel"
         )
         return
-
-    import uuid
 
     try:
         item_id = uuid.UUID(item_id_str)
