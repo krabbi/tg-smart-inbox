@@ -2,10 +2,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import Message, User
 
-from bot.handlers.messages import _extract_url, _is_suggestion_query, handle_text
+from bot.handlers.messages import _is_suggestion_query, handle_text
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
+from bot.utils.text import extract_url as _extract_url
 
 
 def make_message(text: str, user_id: int = 1, forwarded: bool = False) -> Message:
