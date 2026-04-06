@@ -4,9 +4,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.filters import CommandObject
-from aiogram.types import CallbackQuery, Message, User
-
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message, User
 
 from bot.handlers.commands import (
     _list_keyboard,
