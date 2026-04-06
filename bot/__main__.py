@@ -1,11 +1,21 @@
 import asyncio
 import logging
 
+from aiogram.types import BotCommand
+
 from bot.bot import create_bot, create_dispatcher
 from bot.config import get_config
 from bot.db import get_session_factory, init_db
 from bot.middleware import DependencyMiddleware
 from bot.scheduler import start_scheduler
+
+_BOT_COMMANDS = [
+    BotCommand(command="start", description="Начать работу"),
+    BotCommand(command="list", description="Последние записи"),
+    BotCommand(command="search", description="Поиск по записям"),
+    BotCommand(command="reminders", description="Предстоящие напоминания"),
+    BotCommand(command="ideas", description="Мои идеи"),
+]
 
 
 async def main() -> None:
@@ -18,6 +28,7 @@ async def main() -> None:
     factory = get_session_factory()
     dp.update.middleware(DependencyMiddleware(factory, config))
     start_scheduler(bot, factory)
+    await bot.set_my_commands(_BOT_COMMANDS)
     await dp.start_polling(bot)
 
 

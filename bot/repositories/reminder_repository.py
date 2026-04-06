@@ -32,8 +32,8 @@ class ReminderRepository:
         )
         return list(result.scalars().all())
 
-    async def get_by_user_pending(self, user_id: int) -> list[Reminder]:
-        """Return unsent, non-cancelled reminders for a user via Item join."""
+    async def get_upcoming(self, user_id: int) -> list[Reminder]:
+        """Return unsent, non-cancelled reminders for a user, soonest first."""
         from bot.models.item import Item
 
         result = await self._session.execute(
@@ -47,6 +47,17 @@ class ReminderRepository:
             .order_by(Reminder.remind_at.asc())
         )
         return list(result.scalars().all())
+
+    async def get_by_id_for_user(self, reminder_id: uuid.UUID, user_id: int) -> Reminder | None:
+        """Return a reminder only if it belongs to user_id; None otherwise."""
+        from bot.models.item import Item
+
+        result = await self._session.execute(
+            select(Reminder)
+            .join(Item, Reminder.item_id == Item.id)
+            .where(Reminder.id == reminder_id, Item.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     async def cancel(self, reminder_id: uuid.UUID) -> None:
         """Mark a reminder as cancelled."""

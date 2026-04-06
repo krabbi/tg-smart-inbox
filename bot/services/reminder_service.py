@@ -29,6 +29,19 @@ class ReminderService:
         await self._repo.cancel(reminder_id)
         await self._session.commit()
 
+    async def cancel_for_user(self, reminder_id: uuid.UUID, user_id: int) -> bool:
+        """Cancel a reminder only if it belongs to user_id; return False if not found/owned."""
+        reminder = await self._repo.get_by_id_for_user(reminder_id, user_id)
+        if reminder is None:
+            return False
+        await self._repo.cancel(reminder_id)
+        await self._session.commit()
+        return True
+
+    async def get_upcoming(self, user_id: int) -> list[Reminder]:
+        """Return upcoming (unsent, non-cancelled) reminders for a user."""
+        return await self._repo.get_upcoming(user_id)
+
     async def mark_sent(self, reminder: Reminder) -> None:
         """Mark a reminder as sent and commit."""
         reminder.is_sent = True
