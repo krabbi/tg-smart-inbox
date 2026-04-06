@@ -12,3 +12,7 @@ class ReminderParseError(Exception):
 
 class ScrapingError(Exception):
     """Raised when a URL cannot be fetched or parsed."""
+
+
+class TimeParseError(Exception):
+    """Raised when a natural language time expression cannot be parsed."""
