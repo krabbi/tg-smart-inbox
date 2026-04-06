@@ -3,19 +3,26 @@ from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models.idea import Idea
+from bot.models.idea import Idea, IdeaComplexity, IdeaEffort
 from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
 from bot.services.idea_service import IdeaService, SavedIdea
 
+_DEFAULT_COMPLEXITY = '{"complexity": "simple", "effort": "quick"}'
+
 
 def make_service(
     tag_response: str = '["app", "mobile"]',
+    complexity_response: str = _DEFAULT_COMPLEXITY,
     suggest_response: str = "Вот идея: сделай приложение.",
 ) -> tuple[IdeaService, MagicMock, MagicMock, MagicMock]:
-    """Build IdeaService with all dependencies mocked."""
+    """Build IdeaService with all dependencies mocked.
+
+    save_idea triggers two concurrent Claude calls (tags + complexity),
+    so side_effect supplies tag_response and complexity_response first.
+    """
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
 
@@ -29,13 +36,18 @@ def make_service(
 
     mock_idea = MagicMock(spec=Idea)
     mock_idea.tags = ["app", "mobile"]
+    mock_idea.complexity = IdeaComplexity.simple
+    mock_idea.effort = IdeaEffort.quick
 
     idea_repo = MagicMock(spec=IdeaRepository)
     idea_repo.save = AsyncMock(return_value=mock_idea)
     idea_repo.get_all = AsyncMock(return_value=[])
 
     claude = MagicMock(spec=ClaudeClient)
-    claude.complete = AsyncMock(side_effect=[tag_response, suggest_response])
+    # save_idea calls _extract_tags and _classify_complexity concurrently (asyncio.gather),
+    # then suggest calls claude once more — order within gather is not guaranteed, but
+    # side_effect list is consumed in call order which matches gather's task scheduling.
+    claude.complete = AsyncMock(side_effect=[tag_response, complexity_response, suggest_response])
 
     svc = IdeaService(session=session, item_repo=item_repo, idea_repo=idea_repo, claude=claude)
     return svc, item_repo, idea_repo, claude
@@ -72,6 +84,46 @@ async def test_save_idea_empty_tags_on_api_error() -> None:
     await svc.save_idea("some idea", user_id=1)
     call_kwargs = idea_repo.save.call_args[1]
     assert call_kwargs["tags"] == []
+
+
+async def test_save_idea_passes_complexity_and_effort_to_repo() -> None:
+    svc, _, idea_repo, _ = make_service(
+        complexity_response='{"complexity": "complex", "effort": "longterm"}'
+    )
+    await svc.save_idea("build a helicopter", user_id=1)
+    call_kwargs = idea_repo.save.call_args[1]
+    assert call_kwargs["complexity"] == IdeaComplexity.complex
+    assert call_kwargs["effort"] == IdeaEffort.longterm
+
+
+async def test_save_idea_handles_unknown_complexity_values() -> None:
+    svc, _, idea_repo, _ = make_service(
+        complexity_response='{"complexity": "unknown", "effort": "unknown"}'
+    )
+    await svc.save_idea("some idea", user_id=1)
+    call_kwargs = idea_repo.save.call_args[1]
+    assert call_kwargs["complexity"] is None
+    assert call_kwargs["effort"] is None
+
+
+async def test_save_idea_complexity_on_api_error_defaults_to_none() -> None:
+    svc, _, idea_repo, claude = make_service()
+    # Both concurrent calls fail
+    claude.complete = AsyncMock(side_effect=Exception("API down"))
+    await svc.save_idea("some idea", user_id=1)
+    call_kwargs = idea_repo.save.call_args[1]
+    assert call_kwargs["complexity"] is None
+    assert call_kwargs["effort"] is None
+
+
+async def test_classify_complexity_strips_markdown_fence() -> None:
+    svc, _, _, claude = make_service()
+    claude.complete = AsyncMock(
+        return_value='```json\n{"complexity": "medium", "effort": "halfday"}\n```'
+    )
+    complexity, effort = await svc._classify_complexity("do something")
+    assert complexity == IdeaComplexity.medium
+    assert effort == IdeaEffort.halfday
 
 
 async def test_suggest_returns_claude_response() -> None:

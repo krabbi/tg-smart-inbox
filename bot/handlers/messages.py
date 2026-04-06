@@ -5,6 +5,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
 from bot.handlers.reminders import ask_reminder
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
@@ -130,8 +131,15 @@ async def handle_text(
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
             return
-        tags_str = " ".join(f"#{t}" for t in saved.idea.tags) if saved.idea.tags else ""
         reply = "💡 Идея сохранена!"
+        meta = []
+        if saved.idea.complexity:
+            meta.append(_COMPLEXITY_LABEL[saved.idea.complexity])
+        if saved.idea.effort:
+            meta.append(_EFFORT_LABEL[saved.idea.effort])
+        if meta:
+            reply += f" ({', '.join(meta)})"
+        tags_str = " ".join(f"#{t}" for t in saved.idea.tags) if saved.idea.tags else ""
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)

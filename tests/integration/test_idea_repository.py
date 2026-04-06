@@ -2,6 +2,7 @@ from datetime import UTC
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.models.idea import IdeaComplexity, IdeaEffort
 from bot.models.item import ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
@@ -74,6 +75,26 @@ async def test_get_all_empty(db_session: AsyncSession) -> None:
     idea_repo = IdeaRepository(db_session)
     rows = await idea_repo.get_all(user_id=99)
     assert rows == []
+
+
+async def test_save_and_get_with_complexity_and_effort(db_session: AsyncSession) -> None:
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item = await item_repo.create(user_id=1, type=ItemType.idea, content="Buy a helicopter")
+    await idea_repo.save(
+        item_id=item.id,
+        tags=["vehicle"],
+        complexity=IdeaComplexity.complex,
+        effort=IdeaEffort.longterm,
+    )
+    await db_session.commit()
+
+    rows = await idea_repo.get_all(user_id=1)
+    assert len(rows) == 1
+    _, returned_idea = rows[0]
+    assert returned_idea.complexity == IdeaComplexity.complex
+    assert returned_idea.effort == IdeaEffort.longterm
 
 
 async def test_save_empty_tags(db_session: AsyncSession) -> None:

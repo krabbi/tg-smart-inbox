@@ -1,10 +1,11 @@
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models.idea import Idea
+from bot.models.idea import Idea, IdeaComplexity, IdeaEffort
 from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
@@ -19,6 +20,34 @@ Respond with a JSON array of lowercase strings only. No explanation.
 Example: ["mobile", "app", "startup"]
 
 Idea: """
+
+_CLASSIFY_PROMPT = """\
+Estimate the complexity and effort required to execute the following idea.
+
+Complexity options: simple, medium, complex
+Effort options:
+  quick    = less than 1 hour
+  halfday  = 1-4 hours
+  day      = 4-8 hours
+  longterm = days or more
+
+Respond with JSON only, no explanation:
+{"complexity": "simple|medium|complex", "effort": "quick|halfday|day|longterm"}
+
+Idea: """
+
+_COMPLEXITY_MAP: dict[str, IdeaComplexity] = {
+    "simple": IdeaComplexity.simple,
+    "medium": IdeaComplexity.medium,
+    "complex": IdeaComplexity.complex,
+}
+
+_EFFORT_MAP: dict[str, IdeaEffort] = {
+    "quick": IdeaEffort.quick,
+    "halfday": IdeaEffort.halfday,
+    "day": IdeaEffort.day,
+    "longterm": IdeaEffort.longterm,
+}
 
 _SUGGEST_PROMPT = """\
 The user has the following saved ideas:
@@ -57,10 +86,12 @@ class IdeaService:
         self._claude = claude
 
     async def save_idea(self, text: str, user_id: int) -> SavedIdea:
-        """Extract tags with Claude, persist Item + Idea, return SavedIdea."""
-        tags = await self._extract_tags(text)
+        """Extract tags and classify complexity/effort with Claude, persist Item + Idea."""
+        tags, complexity, effort = await self._analyse(text)
         item = await self._item_repo.create(user_id=user_id, type=ItemType.idea, content=text)
-        idea = await self._idea_repo.save(item_id=item.id, tags=tags)
+        idea = await self._idea_repo.save(
+            item_id=item.id, tags=tags, complexity=complexity, effort=effort
+        )
         await self._session.commit()
         return SavedIdea(item=item, idea=idea)
 
@@ -85,13 +116,48 @@ class IdeaService:
         """Return all (Item, Idea) pairs for user, newest first."""
         return await self._idea_repo.get_all(user_id)
 
+    async def _analyse(
+        self, text: str
+    ) -> tuple[list[str], IdeaComplexity | None, IdeaEffort | None]:
+        """Extract tags and estimate complexity/effort concurrently; return defaults on failure."""
+        tags_coro = self._extract_tags(text)
+        classify_coro = self._classify_complexity(text)
+        tags, (complexity, effort) = await asyncio.gather(tags_coro, classify_coro)
+        return tags, complexity, effort
+
     async def _extract_tags(self, text: str) -> list[str]:
         """Call Claude to extract tags from idea text; return empty list on failure."""
         try:
             response = await self._claude.complete(_TAG_PROMPT + text)
-            tags = json.loads(response.strip())
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("```")[1]
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.strip()
+            tags = json.loads(cleaned)
             if isinstance(tags, list):
                 return [str(t).lower()[:30] for t in tags[:5]]
         except Exception:
             logger.exception("Tag extraction failed, saving idea without tags")
         return []
+
+    async def _classify_complexity(
+        self, text: str
+    ) -> tuple[IdeaComplexity | None, IdeaEffort | None]:
+        """Call Claude to estimate complexity and effort; return (None, None) on failure."""
+        try:
+            response = await self._claude.complete(_CLASSIFY_PROMPT + text)
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("```")[1]
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.strip()
+            data = json.loads(cleaned)
+            complexity = _COMPLEXITY_MAP.get(data.get("complexity", ""))
+            effort = _EFFORT_MAP.get(data.get("effort", ""))
+            return complexity, effort
+        except Exception:
+            logger.exception("Complexity classification failed, saving without complexity")
+            return None, None

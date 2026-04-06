@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models.idea import Idea
+from bot.models.idea import Idea, IdeaComplexity, IdeaEffort
 from bot.models.item import Item, ItemType
 
 
@@ -13,9 +13,15 @@ class IdeaRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def save(self, item_id: uuid.UUID, tags: list[str]) -> Idea:
+    async def save(
+        self,
+        item_id: uuid.UUID,
+        tags: list[str],
+        complexity: IdeaComplexity | None = None,
+        effort: IdeaEffort | None = None,
+    ) -> Idea:
         """Create and flush a new Idea linked to item_id; caller commits."""
-        idea = Idea(item_id=item_id, tags=tags)
+        idea = Idea(item_id=item_id, tags=tags, complexity=complexity, effort=effort)
         self._session.add(idea)
         await self._session.flush()
         await self._session.refresh(idea)

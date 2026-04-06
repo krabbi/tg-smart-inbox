@@ -4,7 +4,21 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.models.idea import IdeaComplexity, IdeaEffort
 from bot.services.idea_service import IdeaService
+
+_COMPLEXITY_LABEL = {
+    IdeaComplexity.simple: "простая",
+    IdeaComplexity.medium: "средняя",
+    IdeaComplexity.complex: "сложная",
+}
+
+_EFFORT_LABEL = {
+    IdeaEffort.quick: "< 1ч",
+    IdeaEffort.halfday: "1–4ч",
+    IdeaEffort.day: "4–8ч",
+    IdeaEffort.longterm: "долгосрочно",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +51,13 @@ async def handle_ideas_command(
         tags_str = " ".join(f"#{t}" for t in idea.tags) if idea.tags else ""
         date_str = item.created_at.strftime("%d.%m.%Y")
         entry = f"{i}. {snippet}"
+        meta_parts = []
+        if idea.complexity:
+            meta_parts.append(_COMPLEXITY_LABEL[idea.complexity])
+        if idea.effort:
+            meta_parts.append(_EFFORT_LABEL[idea.effort])
+        if meta_parts:
+            entry += f" <i>({', '.join(meta_parts)})</i>"
         if tags_str:
             entry += f"\n   {tags_str}"
         entry += f"  <i>{date_str}</i>"
