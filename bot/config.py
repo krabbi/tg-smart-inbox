@@ -10,8 +10,8 @@ class Config(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/bot.db"
     allowed_user_ids: list[int] = []
 
-    # OpenAI (optional — required only for voice transcription)
-    openai_api_key: str = ""
+    # Groq (optional — required only for voice transcription)
+    groq_api_key: str = ""
 
     # Google Drive (optional — required only for media handling)
     google_drive_credentials_file: str = "credentials.json"

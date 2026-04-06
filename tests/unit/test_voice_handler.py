@@ -36,21 +36,21 @@ def make_message(voice_file_id: str = "voice-file-id", user_id: int = 1) -> Magi
     return msg
 
 
-async def test_handle_voice_no_service_replies_unavailable() -> None:
+async def test_handle_voice_no_service_replies_setup_instructions() -> None:
     msg = make_message()
     await handle_voice(msg, transcription_service=None)
     msg.answer.assert_awaited_once()
-    assert "скоро" in msg.answer.call_args[0][0]
+    assert "GROQ_API_KEY" in msg.answer.call_args[0][0]
 
 
-async def test_handle_voice_transcription_error_replies_error() -> None:
+async def test_handle_voice_transcription_error_shows_error_message() -> None:
     msg = make_message()
     svc = MagicMock(spec=TranscriptionService)
-    svc.transcribe = AsyncMock(side_effect=TranscriptionError("fail"))
+    svc.transcribe = AsyncMock(side_effect=TranscriptionError("Неверный GROQ_API_KEY."))
 
     await handle_voice(msg, transcription_service=svc)
     msg.answer.assert_awaited_once()
-    assert "Не удалось" in msg.answer.call_args[0][0]
+    assert "GROQ_API_KEY" in msg.answer.call_args[0][0]
 
 
 async def test_handle_voice_shows_transcript() -> None:

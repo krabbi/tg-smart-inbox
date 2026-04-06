@@ -27,7 +27,10 @@ async def handle_voice(
 ) -> None:
     """Download voice message, transcribe it, then route through the classifier pipeline."""
     if transcription_service is None:
-        await message.answer("Голосовые сообщения скоро будут поддерживаться.")
+        await message.answer(
+            "Голосовые сообщения не настроены.\n"
+            "Добавь <code>GROQ_API_KEY</code> в конфигурацию (бесплатно: console.groq.com)."
+        )
         return
 
     voice = message.voice  # type: ignore[union-attr]
@@ -37,9 +40,13 @@ async def handle_voice(
 
     try:
         transcript = await transcription_service.transcribe(audio_bytes)
-    except TranscriptionError:
-        logger.exception("Transcription failed for user %s", message.from_user and message.from_user.id)
-        await message.answer("Не удалось распознать голосовое сообщение. Попробуй ещё раз.")
+    except TranscriptionError as exc:
+        logger.warning(
+            "Transcription failed for user %s: %s",
+            message.from_user and message.from_user.id,
+            exc,
+        )
+        await message.answer(str(exc))
         return
 
     await message.answer(f"🎤 Распознал: <i>«{transcript}»</i>")

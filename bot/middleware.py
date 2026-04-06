@@ -55,8 +55,8 @@ class DependencyMiddleware(BaseMiddleware):
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
             data["list_service"] = ListService(item_repo=item_repo)
 
-            # Whisper transcription — only available when OpenAI key is configured
-            if self._config.openai_api_key:
+            # Whisper transcription — only available when Groq key is configured
+            if self._config.groq_api_key:
                 data["transcription_service"] = TranscriptionService(self._config)
             else:
                 data["transcription_service"] = None
