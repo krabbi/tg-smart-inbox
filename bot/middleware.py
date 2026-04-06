@@ -57,7 +57,8 @@ class DependencyMiddleware(BaseMiddleware):
             else:
                 data["media_service"] = None
 
-            # Make reminder_repo available for scheduler and reminder handlers
+            # Make repos available for command handlers and scheduler
+            data["item_repo"] = item_repo
             data["reminder_repo"] = reminder_repo
 
             return await handler(event, data)

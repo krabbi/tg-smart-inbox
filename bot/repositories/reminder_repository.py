@@ -48,6 +48,10 @@ class ReminderRepository:
         )
         return list(result.scalars().all())
 
+    async def get_upcoming(self, user_id: int) -> list[Reminder]:
+        """Return all pending (unsent, non-cancelled) reminders for a user, soonest first."""
+        return await self.get_by_user_pending(user_id)
+
     async def cancel(self, reminder_id: uuid.UUID) -> None:
         """Mark a reminder as cancelled."""
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
