@@ -32,9 +32,7 @@ class TranscriptionService:
             ) from exc
         except groq.APIConnectionError as exc:
             logger.error("Groq connection error: %s", exc)
-            raise TranscriptionError(
-                "Сервис транскрипции недоступен. Попробуй позже."
-            ) from exc
+            raise TranscriptionError("Сервис транскрипции недоступен. Попробуй позже.") from exc
         except groq.GroqError as exc:
             logger.error("Groq API error: %s", exc)
             raise TranscriptionError(
