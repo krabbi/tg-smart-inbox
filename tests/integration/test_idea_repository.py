@@ -1,3 +1,5 @@
+from datetime import UTC
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.item import ItemType
@@ -38,23 +40,34 @@ async def test_get_all_returns_only_own_ideas(db_session: AsyncSession) -> None:
 
 
 async def test_get_all_newest_first(db_session: AsyncSession) -> None:
-    """Verify ordering by committing each item separately so timestamps differ."""
+    """Verify ORDER BY created_at DESC by back-dating the first item via SQL."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import update
+
+    from bot.models.item import Item
+
     item_repo = ItemRepository(db_session)
     idea_repo = IdeaRepository(db_session)
 
     item1 = await item_repo.create(user_id=1, type=ItemType.idea, content="First idea")
     await idea_repo.save(item_id=item1.id, tags=[])
-    await db_session.commit()
 
     item2 = await item_repo.create(user_id=1, type=ItemType.idea, content="Second idea")
     await idea_repo.save(item_id=item2.id, tags=[])
+
+    # Back-date item1 so created_at ordering is deterministic
+    await db_session.execute(
+        update(Item)
+        .where(Item.id == item1.id)
+        .values(created_at=datetime.now(tz=UTC) - timedelta(seconds=10))
+    )
     await db_session.commit()
 
     rows = await idea_repo.get_all(user_id=1)
     contents = [r[0].content for r in rows]
-    # Both ideas present; newer one is first (or order is stable — either is acceptable)
-    assert "First idea" in contents
-    assert "Second idea" in contents
+    assert contents[0] == "Second idea"
+    assert contents[1] == "First idea"
 
 
 async def test_get_all_empty(db_session: AsyncSession) -> None:

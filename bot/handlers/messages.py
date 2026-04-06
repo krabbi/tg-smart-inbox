@@ -124,7 +124,12 @@ async def handle_text(
 
         await handle_link_message(message, url, link_service)
     elif msg_type == MessageType.IDEA and idea_service is not None:
-        saved = await idea_service.save_idea(text, user_id)
+        try:
+            saved = await idea_service.save_idea(text, user_id)
+        except Exception:
+            logger.exception("Idea save failed for user %s", user_id)
+            await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
+            return
         tags_str = " ".join(f"#{t}" for t in saved.idea.tags) if saved.idea.tags else ""
         reply = "💡 Идея сохранена!"
         if tags_str:

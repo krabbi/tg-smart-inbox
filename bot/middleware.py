@@ -43,7 +43,9 @@ class DependencyMiddleware(BaseMiddleware):
             idea_repo = IdeaRepository(session)
 
             data["classifier"] = ClassifierService(claude)
-            data["link_service"] = LinkService(item_repo, Scraper(), claude, session)
+            data["link_service"] = LinkService(
+                session=session, item_repo=item_repo, scraper=Scraper(), claude=claude
+            )
             data["reminder_service"] = None  # injected in reminder handlers via FSM data
             data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
 

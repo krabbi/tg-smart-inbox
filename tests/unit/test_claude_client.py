@@ -33,9 +33,12 @@ async def test_complete_raises_classification_error_on_api_failure() -> None:
     config = make_config()
     client = ClaudeClient(config)
 
-    with patch.object(
-        client._client.messages,
-        "create",
-        new=AsyncMock(side_effect=Exception("rate limit")),
-    ), pytest.raises(ClassificationError, match="Claude API error"):
+    with (
+        patch.object(
+            client._client.messages,
+            "create",
+            new=AsyncMock(side_effect=Exception("rate limit")),
+        ),
+        pytest.raises(ClassificationError, match="Claude API error"),
+    ):
         await client.complete("classify this")

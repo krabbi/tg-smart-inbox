@@ -50,9 +50,7 @@ class ReminderRepository:
 
     async def cancel(self, reminder_id: uuid.UUID) -> None:
         """Mark a reminder as cancelled."""
-        result = await self._session.execute(
-            select(Reminder).where(Reminder.id == reminder_id)
-        )
+        result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder:
             reminder.is_cancelled = True

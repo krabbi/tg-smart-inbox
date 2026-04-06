@@ -101,6 +101,17 @@ async def test_handle_text_idea_no_service_gives_stub() -> None:
     msg.answer.assert_awaited_once()
 
 
+async def test_handle_text_idea_save_error_sends_error_reply() -> None:
+    msg = make_message("хочу сделать приложение")
+    classifier = make_classifier(MessageType.IDEA)
+    idea_svc = MagicMock(spec=IdeaService)
+    idea_svc.save_idea = AsyncMock(side_effect=Exception("DB error"))
+
+    await handle_text(msg, classifier=classifier, idea_service=idea_svc)
+    msg.answer.assert_awaited_once()
+    assert "Не удалось" in msg.answer.call_args[0][0]
+
+
 # ── suggestion query detection ────────────────────────────────────────────────
 
 

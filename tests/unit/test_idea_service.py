@@ -63,8 +63,7 @@ async def test_save_idea_commits_session() -> None:
 async def test_save_idea_empty_tags_on_malformed_json() -> None:
     svc, _, idea_repo, _ = make_service(tag_response="not json")
     await svc.save_idea("some idea", user_id=1)
-    _, kwargs = idea_repo.save.call_args
-    assert kwargs.get("tags", []) == [] or idea_repo.save.call_args[0][1] == []
+    assert idea_repo.save.call_args[1]["tags"] == []
 
 
 async def test_save_idea_empty_tags_on_api_error() -> None:
