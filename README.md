@@ -77,7 +77,20 @@ cp .env.example .env
 # Fill in your credentials in .env
 ```
 
-### Running
+### Running with Docker (recommended)
+
+```bash
+cp .env.example .env
+# Fill in your credentials in .env
+
+# Development — hot-reload on code changes
+docker compose --profile dev up
+
+# Production
+docker compose --profile prod up -d
+```
+
+### Running locally (without Docker)
 
 ```bash
 python -m bot
@@ -90,7 +103,12 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 TELEGRAM_BOT_TOKEN=your_token_here
 ANTHROPIC_API_KEY=your_key_here
-DATABASE_URL=sqlite:///data/inbox.db
+
+# PostgreSQL password used by docker-compose
+POSTGRES_PASSWORD=change_me
+
+# Set automatically by docker-compose; override for local runs without Docker
+DATABASE_URL=postgresql+asyncpg://inbox:change_me@localhost/inbox
 
 # Optional: voice message transcription (free tier at console.groq.com)
 GROQ_API_KEY=your_groq_key_here
