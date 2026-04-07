@@ -64,9 +64,12 @@ class LinkService:
     def _parse_summary(raw: str, url: str) -> LinkSummary:
         """Parse Claude's JSON response into a LinkSummary."""
         import json
+        import re
 
+        # Strip markdown code fences that Claude sometimes wraps JSON in
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE).strip()
         try:
-            data = json.loads(raw.strip())
+            data = json.loads(text)
             return LinkSummary(
                 title=str(data.get("title", url)),
                 summary=str(data.get("summary", "")),

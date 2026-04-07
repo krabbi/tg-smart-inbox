@@ -61,7 +61,7 @@ async def cb_link_summary(callback: CallbackQuery, link_service: LinkService) ->
             text += "\n\n<b>Ключевые моменты:</b>\n" + "\n".join(
                 f"• {t}" for t in summary.takeaways
             )
-        await callback.message.edit_text(text)  # type: ignore[union-attr]
+        await callback.message.edit_text(text, parse_mode="HTML")  # type: ignore[union-attr]
     except ScrapingError as exc:
         logger.warning("Scraping failed for item %s: %s", item_id, exc)
         await callback.message.edit_text("❌ Не удалось загрузить страницу.")  # type: ignore[union-attr]
