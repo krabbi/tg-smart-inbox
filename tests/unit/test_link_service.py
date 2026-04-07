@@ -135,3 +135,12 @@ async def test_parse_summary_with_preamble_no_fence_uses_fallback() -> None:
     result = LinkService._parse_summary(raw, "https://x.com")
     assert result.title == "https://x.com"
     assert result.summary == raw.strip()
+
+
+async def test_parse_summary_nested_braces_in_value() -> None:
+    """JSON with nested {} in string values must parse correctly (greedy regex)."""
+    raw = '```json\n{"title":"A {nested} title","summary":"See {example}.","takeaways":["ok"]}\n```'
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "A {nested} title"
+    assert result.summary == "See {example}."
+    assert result.takeaways == ["ok"]
