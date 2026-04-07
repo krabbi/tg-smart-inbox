@@ -103,3 +103,18 @@ async def test_parse_summary_empty_takeaways() -> None:
     raw = '{"title":"T","summary":"S","takeaways":[]}'
     result = LinkService._parse_summary(raw, "https://x.com")
     assert result.takeaways == []
+
+
+async def test_parse_summary_strips_markdown_code_fence() -> None:
+    raw = '```json\n{"title":"Hello","summary":"World.","takeaways":["a"]}\n```'
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "Hello"
+    assert result.summary == "World."
+    assert result.takeaways == ["a"]
+
+
+async def test_parse_summary_strips_plain_code_fence() -> None:
+    raw = '```\n{"title":"T","summary":"S","takeaways":[]}\n```'
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "T"
+    assert result.summary == "S"
