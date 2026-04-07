@@ -6,9 +6,11 @@ This file is the authoritative guide for all code written in this repository. Re
 
 ## Project overview
 
-`tg-smart-inbox` is a Telegram bot that classifies and processes forwarded messages: summarizes links, creates reminders for tasks, uploads media to Google Drive, and stores ideas.
+`tg-smart-inbox` is a Telegram bot that classifies and processes forwarded messages: summarizes links, creates reminders for tasks, uploads media to Google Drive, stores ideas, and transcribes voice messages.
 
-**Stack:** Python 3.11+, aiogram 3.x, SQLAlchemy async + Alembic, Claude API (Anthropic), Google Drive API, APScheduler.
+**Stack:** Python 3.11+, aiogram 3.x, SQLAlchemy async + Alembic, Claude API (Anthropic), Google Drive API, APScheduler, Groq Whisper API.
+
+For a full technical description see [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -21,7 +23,7 @@ Handler (aiogram)  →  Service (business logic)  →  Repository (DB access)
 ### Handlers (`bot/handlers/`)
 - Thin layer: validate input, call one or more services, send a Telegram response.
 - No business logic. No direct DB access. No external API calls.
-- One handler file per feature domain (e.g. `links.py`, `tasks.py`).
+- One handler file per feature domain (e.g. `links.py`, `reminders.py`).
 
 ```python
 # Good
@@ -44,7 +46,7 @@ async def handle_link(message: Message, session: AsyncSession) -> None:
 - All business logic lives here.
 - No direct SQLAlchemy session usage — call repositories instead.
 - No Telegram API calls (no `message.answer()` etc).
-- External APIs (Claude, Google Drive) are wrapped in dedicated service classes (`claude_service.py`, `drive_service.py`).
+- External APIs (Claude, Google Drive, Groq) are wrapped in dedicated service classes (`claude_client.py`, `drive_service.py`, `transcription_service.py`).
 - Services return result dataclasses defined alongside them (see Result objects below).
 
 ```python
@@ -52,7 +54,7 @@ async def handle_link(message: Message, session: AsyncSession) -> None:
 class LinkService:
     """Processes incoming links: saves to DB and prepares user response."""
 
-    def __init__(self, item_repo: ItemRepository, claude: ClaudeService) -> None:
+    def __init__(self, item_repo: ItemRepository, claude: ClaudeClient) -> None:
         self._repo = item_repo
         self._claude = claude
 
@@ -117,38 +119,41 @@ class LinkResult:
 
 ## Dependency injection
 
-Dependencies are wired at startup in `bot/__main__.py` and injected into handlers via a custom aiogram middleware.
+Dependencies are wired per-request in `bot/middleware.py` (`DependencyMiddleware`) and injected into handlers via aiogram's `data` dict.
 
-The middleware attaches services and the session factory to the `data` dict on each update:
+On every update the middleware:
+1. Opens an `AsyncSession`
+2. Instantiates all repositories and services
+3. Injects them into `data`
+4. For **optional** services (voice, media) injects `None` when the required credentials are absent
 
 ```python
-# bot/middleware.py
-class DependencyMiddleware(BaseMiddleware):
-    def __init__(self, session_factory, config: Config) -> None:
-        self._factory = session_factory
-        self._config = config
+# bot/middleware.py — simplified
+async def __call__(self, handler, event, data):
+    async with self._factory() as session:
+        claude = ClaudeClient(self._config)
+        item_repo = ItemRepository(session)
+        data["link_service"] = LinkService(session=session, item_repo=item_repo, ...)
+        data["reminder_service"] = ReminderService(session=session, repo=ReminderRepository(session))
 
-    async def __call__(self, handler, event, data: dict) -> Any:
-        async with self._factory() as session:
-            data["session"] = session
-            data["config"] = self._config
-            # build and inject services
-            item_repo = ItemRepository(session)
-            data["link_service"] = LinkService(item_repo, ClaudeService(self._config))
-            return await handler(event, data)
+        # Optional — injected as None when credentials are missing
+        if self._config.groq_api_key:
+            data["transcription_service"] = TranscriptionService(self._config)
+        else:
+            data["transcription_service"] = None
+
+        return await handler(event, data)
 ```
 
-```python
-# bot/__main__.py
-init_db(config.database_url)
-factory = get_session_factory()
-dp.update.middleware(DependencyMiddleware(factory, config))
-```
-
-Handlers declare injected services as keyword arguments — aiogram resolves them from `data`:
+Handlers declare injected services as keyword arguments — aiogram resolves them from `data`.
+Optional services must be declared with `| None` and checked before use:
 
 ```python
-async def handle_link(message: Message, link_service: LinkService) -> None: ...
+async def handle_voice(message: Message, transcription_service: TranscriptionService | None = None) -> None:
+    if transcription_service is None:
+        await message.answer("Голосовые сообщения не настроены.")
+        return
+    ...
 ```
 
 ---
@@ -156,7 +161,7 @@ async def handle_link(message: Message, link_service: LinkService) -> None: ...
 ## Error handling
 
 - Define all domain exceptions in `bot/exceptions.py`. Import from there in both services and handlers.
-- Services raise specific domain exceptions: `ClassificationError`, `DriveUploadError`, `ReminderParseError`, etc.
+- Services raise specific domain exceptions: `ClassificationError`, `DriveUploadError`, `ScrapingError`, `TimeParseError`, `TranscriptionError`, etc.
 - Handlers catch domain exceptions and send user-friendly Telegram messages.
 - Raw exceptions must never reach the user.
 - Log errors with context at the service level before re-raising.
@@ -168,6 +173,15 @@ class ClassificationError(Exception):
 
 class DriveUploadError(Exception):
     """Raised when Google Drive upload fails."""
+
+class ScrapingError(Exception):
+    """Raised when a URL cannot be fetched or parsed."""
+
+class TimeParseError(Exception):
+    """Raised when a natural language time expression cannot be parsed."""
+
+class TranscriptionError(Exception):
+    """Raised when Whisper API fails to transcribe audio."""
 ```
 
 ```python
@@ -206,6 +220,19 @@ bot/repositories/item.py     →  tests/unit/test_item_repository.py
 - Target: **≥ 80% coverage** on all new code. Run with `make coverage` (runs pytest with `--cov`).
 - `make test` runs pytest without coverage; use it for quick iteration. CI gate uses `make coverage`.
 - Never use real API keys, tokens, or production DB in tests.
+
+---
+
+## Documentation
+
+When you change behaviour that is described in the docs, update the docs too:
+
+| What changed | File to update |
+|---|---|
+| Architecture, services, DB schema, DI, config | `docs/architecture.md` |
+| User-visible commands, flows, bot responses | `docs/user_guide.md` |
+| Coding conventions, tooling, contribution process | `CLAUDE.md`, `CONTRIBUTING.md` |
+| Project overview, setup instructions | `README.md` |
 
 ---
 
@@ -278,14 +305,48 @@ bot/
   db.py                # async engine + session factory
   exceptions.py        # all domain exceptions
   middleware.py        # DependencyMiddleware — DI wiring
-  handlers/            # one file per feature domain
-  services/            # business logic + external API wrappers
-  repositories/        # SQLAlchemy CRUD (flush, no commit)
-  models/              # SQLAlchemy ORM models
-  utils/               # shared pure helpers (no I/O)
+  scheduler.py         # APScheduler jobs for due/auto-resend reminders
+  handlers/
+    messages.py        # main router: text, photo, document
+    links.py           # link action callbacks (summary, save, remind)
+    reminders.py       # reminder FSM + snooze/ack callbacks
+    commands.py        # /start /list /search /reminders /cancel
+    ideas.py           # /ideas command
+    voice.py           # voice message transcription + routing
+  services/
+    classifier.py      # message type classification (LINK/TASK/NOTE/IDEA/MEDIA)
+    claude_client.py   # Anthropic API wrapper
+    link_service.py    # link save + on-demand summarization
+    reminder_service.py
+    time_parser.py     # natural-language time parsing via Claude
+    idea_service.py    # idea save (tags + complexity) + suggestions
+    task_service.py
+    note_service.py
+    list_service.py    # paginated listing + full-text search
+    media_service.py   # photo/file processing (Vision + Drive)
+    drive_service.py   # Google Drive upload wrapper
+    scraper.py         # HTTP page fetcher
+    transcription_service.py  # Groq Whisper wrapper
+    vision_service.py  # Claude Vision wrapper
+  repositories/
+    item_repository.py
+    reminder_repository.py
+    idea_repository.py
+  models/
+    base.py            # UUIDMixin, TimestampMixin
+    item.py            # Item + ItemType enum
+    reminder.py        # Reminder
+    idea.py            # Idea + IdeaComplexity + IdeaEffort enums
+  middlewares/
+    auth.py            # AuthMiddleware — ALLOWED_USER_IDS whitelist
+  utils/
+    text.py            # extract_url() and other pure text helpers
 alembic/               # migrations
 tests/
   conftest.py          # shared fixtures: fake_config, db_session
   unit/                # fast, mocked tests
   integration/         # service+repository tests with in-memory SQLite
+docs/
+  architecture.md      # full technical architecture guide
+  user_guide.md        # user-facing feature documentation (Russian)
 ```
