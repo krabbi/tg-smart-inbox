@@ -111,12 +111,13 @@ If neither condition is true, skip product review — code review alone is suffi
 ### How to conduct the product acceptance review
 
 1. **Read the linked issue(s)** — find the acceptance criteria and expected behaviour defined during requirements gathering.
-2. **Read the updated `docs/user_guide.md`** — compare the new content against what was agreed.
-3. **Read the changed handler/service code** — verify the implementation matches the agreed happy path and edge cases.
-4. Ask yourself:
-   - Does the behaviour described in `user_guide.md` match what was agreed in the issue?
-   - Are the edge cases handled as discussed?
+2. **Read the diff of `docs/user_guide.md`** — compare what changed against what was agreed.
+3. Ask yourself:
+   - Does the updated `user_guide.md` describe the behaviour that was agreed in the issue?
+   - Are the edge cases documented as discussed?
    - Is anything missing or unexpectedly different from the agreed scope?
+
+Do **not** read handler or service code — that is the code reviewer's job. The product review is purely about whether `user_guide.md` reflects the agreed requirements.
 
 ### Output format
 
