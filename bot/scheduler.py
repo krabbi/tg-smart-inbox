@@ -73,17 +73,15 @@ async def _auto_resend_reminders(
             try:
                 if reminder.snooze_count >= _MAX_AUTO_RESENDS:
                     # Too many auto-resends — acknowledge silently to stop spam
-                    await repo.acknowledge(reminder.id)
-                    await session.commit()
+                    await svc.mark_acknowledged(reminder)
                     continue
 
                 item: Item = await session.get(Item, reminder.item_id)  # type: ignore[assignment]
                 if item is None:
-                    await repo.acknowledge(reminder.id)
-                    await session.commit()
+                    await svc.mark_acknowledged(reminder)
                     continue
 
-                new_reminder = await svc.create_auto_resend(original=reminder, remind_at=now)
+                new_reminder = await svc.prepare_auto_resend(original=reminder, remind_at=now)
                 await bot.send_message(
                     chat_id=item.user_id,
                     text=f"🔔 Напоминание:\n{item.content}",
