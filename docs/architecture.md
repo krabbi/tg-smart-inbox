@@ -108,7 +108,6 @@ The central table that stores every piece of content the user saves.
 |--------|------|-------------|
 | `id` | UUID (PK) | Auto-generated UUID |
 | `created_at` | DateTime | Creation timestamp (UTC) |
-| `updated_at` | DateTime | Last update timestamp (UTC) |
 | `user_id` | BigInteger | Telegram user ID |
 | `type` | Enum | `link`, `note`, `task`, `media`, `idea` |
 | `content` | Text | The actual content (URL, text, file path, etc.) |
