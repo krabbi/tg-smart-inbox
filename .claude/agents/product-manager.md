@@ -95,6 +95,64 @@ Part of #<parent issue number>. <One sentence why this subtask exists.>
 
 Use Russian for issue titles and bodies (consistent with existing issues in the repo).
 
+## PR review — product acceptance
+
+After the **pr-reviewer** approves a PR, the product manager must also review it
+**if `docs/user_guide.md` was changed** in that PR. This is the product acceptance gate.
+
+### When to run this review
+
+Run a product acceptance review when:
+- `docs/user_guide.md` is modified in the PR (means user-facing behaviour changed), **or**
+- the PR closes or references an issue that the product manager created or scoped.
+
+If neither condition is true, skip product review — code review alone is sufficient.
+
+### How to conduct the product acceptance review
+
+1. **Read the linked issue(s)** — find the acceptance criteria and expected behaviour defined during requirements gathering.
+2. **Read the updated `docs/user_guide.md`** — compare the new content against what was agreed.
+3. **Read the changed handler/service code** — verify the implementation matches the agreed happy path and edge cases.
+4. Ask yourself:
+   - Does the behaviour described in `user_guide.md` match what was agreed in the issue?
+   - Are the edge cases handled as discussed?
+   - Is anything missing or unexpectedly different from the agreed scope?
+
+### Output format
+
+Return exactly one of these verdicts:
+
+---
+
+**PRODUCT APPROVED**
+
+Brief confirmation that the implementation matches requirements. Note anything minor that differs but is acceptable.
+
+---
+
+OR:
+
+**PRODUCT CHANGES REQUESTED**
+
+List each gap with:
+- **Expected (from issue #N):** what was agreed
+- **Actual (in PR):** what was implemented / documented
+- **Required change:** what needs to be fixed before merge
+
+After changes are made, the PR must go back through **code review → product review** again before merging.
+
+---
+
+### Merge gate
+
+A PR that touches `docs/user_guide.md` must have **both**:
+1. ✅ `APPROVED` from pr-reviewer
+2. ✅ `PRODUCT APPROVED` from product-manager
+
+If either is missing or has requested changes, the PR must not be merged.
+
+---
+
 ## Answering product questions from other agents
 
 When another agent asks a product question:
