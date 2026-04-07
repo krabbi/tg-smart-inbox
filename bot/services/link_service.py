@@ -65,8 +65,9 @@ class LinkService:
     @staticmethod
     def _parse_summary(raw: str, url: str) -> LinkSummary:
         """Parse Claude's JSON response into a LinkSummary."""
-        # Strip markdown code fences that Claude sometimes wraps JSON in
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        # Extract JSON from inside code fences when Claude wraps the response
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw.strip(), flags=re.DOTALL)
+        text = fenced.group(1).strip() if fenced else raw.strip()
         try:
             data = json.loads(text)
             return LinkSummary(
