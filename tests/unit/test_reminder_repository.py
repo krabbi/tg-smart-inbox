@@ -137,3 +137,86 @@ async def test_get_by_id_for_user_returns_none_for_wrong_user(db_session: AsyncS
 
     found = await repo.get_by_id_for_user(reminder.id, user_id=999)
     assert found is None
+
+
+async def test_acknowledge_sets_flag_and_clears_auto_resend(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    r.auto_resend_at = datetime(2026, 6, 1, 10, 5, tzinfo=UTC)
+    await db_session.commit()
+
+    await repo.acknowledge(r.id)
+    await db_session.commit()
+    await db_session.refresh(r)
+
+    assert r.is_acknowledged is True
+    assert r.auto_resend_at is None
+
+
+async def test_get_due_auto_resend_returns_overdue(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.auto_resend_at = datetime(2026, 5, 1, 10, 5, tzinfo=UTC)
+    await db_session.commit()
+
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    due = await repo.get_due_auto_resend(now)
+    assert len(due) == 1
+    assert due[0].id == r.id
+
+
+async def test_get_due_auto_resend_excludes_acknowledged(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.is_acknowledged = True
+    r.auto_resend_at = datetime(2026, 5, 1, 10, 5, tzinfo=UTC)
+    await db_session.commit()
+
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    due = await repo.get_due_auto_resend(now)
+    assert len(due) == 0
+
+
+async def test_get_due_auto_resend_excludes_future(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.auto_resend_at = datetime(2026, 12, 1, tzinfo=UTC)
+    await db_session.commit()
+
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    due = await repo.get_due_auto_resend(now)
+    assert len(due) == 0
+
+
+async def test_set_auto_resend_at_persists(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    auto_at = datetime(2026, 6, 1, 10, 5, tzinfo=UTC)
+    await repo.set_auto_resend_at(r, auto_at)
+    await db_session.commit()
+    await db_session.refresh(r)
+
+    assert r.auto_resend_at is not None

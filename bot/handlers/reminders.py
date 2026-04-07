@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -123,3 +123,78 @@ async def receive_reminder_time(
     await state.clear()
     formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
     await message.answer(f"🔔 Напомню {formatted}!")
+
+
+@router.callback_query(F.data.startswith("remind_snooze:"))
+async def cb_remind_snooze(
+    callback: CallbackQuery,
+    reminder_service: ReminderService | None = None,
+) -> None:
+    """Snooze a reminder by 1 hour or 1 day."""
+    await callback.answer()
+    if callback.message is None or callback.from_user is None:
+        return
+
+    parts = (callback.data or "").split(":", 2)
+    if len(parts) != 3:
+        return
+    _, period, reminder_id_str = parts
+
+    if period == "1h":
+        delta = timedelta(hours=1)
+        label = "1 час"
+    else:
+        delta = timedelta(days=1)
+        label = "1 день"
+
+    if reminder_service is None:
+        await callback.message.answer("Сервис напоминаний временно недоступен.")
+        return
+
+    try:
+        reminder_id = uuid.UUID(reminder_id_str)
+        remind_at = datetime.now(UTC) + delta
+        ok = await reminder_service.snooze(
+            reminder_id=reminder_id,
+            user_id=callback.from_user.id,
+            remind_at=remind_at,
+        )
+    except Exception:
+        logger.exception("Failed to snooze reminder %s", reminder_id_str)
+        await callback.message.answer("Не удалось отложить напоминание.")
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    if ok:
+        formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
+        await callback.message.answer(f"⏰ Напомню через {label} ({formatted}).")
+    else:
+        await callback.message.answer("Напоминание не найдено или уже неактивно.")
+
+
+@router.callback_query(F.data.startswith("remind_ack:"))
+async def cb_remind_ack(
+    callback: CallbackQuery,
+    reminder_service: ReminderService | None = None,
+) -> None:
+    """Acknowledge a reminder — user has seen and processed it."""
+    await callback.answer()
+    if callback.message is None or callback.from_user is None:
+        return
+
+    reminder_id_str = (callback.data or "").removeprefix("remind_ack:")
+
+    if reminder_service is None:
+        await callback.message.answer("Сервис напоминаний временно недоступен.")
+        return
+
+    try:
+        reminder_id = uuid.UUID(reminder_id_str)
+        await reminder_service.acknowledge(
+            reminder_id=reminder_id,
+            user_id=callback.from_user.id,
+        )
+    except Exception:
+        logger.exception("Failed to acknowledge reminder %s", reminder_id_str)
+
+    await callback.message.edit_reply_markup(reply_markup=None)

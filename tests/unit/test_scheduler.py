@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.scheduler import _send_due_reminders, start_scheduler
+from bot.scheduler import _auto_resend_reminders, _send_due_reminders, start_scheduler
 
 
 def make_session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -36,9 +36,8 @@ async def test_send_due_reminders_sends_notifications() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent = AsyncMock()
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
-
         mock_repo_cls.return_value = MagicMock()
 
         bot = MagicMock()
@@ -47,8 +46,12 @@ async def test_send_due_reminders_sends_notifications() -> None:
 
         await _send_due_reminders(bot, factory)
 
-    bot.send_message.assert_awaited_once_with(chat_id=123, text="🔔 Напоминание:\nкупить молоко")
-    mock_svc.mark_sent.assert_awaited_once_with(reminder)
+    bot.send_message.assert_awaited_once()
+    call_kwargs = bot.send_message.call_args[1]
+    assert call_kwargs["chat_id"] == 123
+    assert "купить молоко" in call_kwargs["text"]
+    assert call_kwargs["reply_markup"] is not None
+    mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
 
 
 async def test_send_due_reminders_no_item_marks_sent() -> None:
@@ -100,7 +103,7 @@ async def test_send_due_reminders_handles_send_error() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent = AsyncMock()
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
 
         bot = MagicMock()
@@ -110,7 +113,87 @@ async def test_send_due_reminders_handles_send_error() -> None:
         # Should not raise — errors are logged and swallowed
         await _send_due_reminders(bot, factory)
 
-    mock_svc.mark_sent.assert_not_awaited()
+    mock_svc.mark_sent_with_auto_resend.assert_not_awaited()
+
+
+async def test_auto_resend_reminders_creates_followup() -> None:
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 42
+    item.content = "задача"
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.item_id = "item-id"
+    original.snooze_count = 0
+
+    new_reminder = MagicMock(spec=Reminder)
+    new_reminder.id = "new-id"
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.create_auto_resend = AsyncMock(return_value=new_reminder)
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_repo_cls.return_value = MagicMock()
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    mock_svc.create_auto_resend.assert_awaited_once()
+    assert mock_svc.create_auto_resend.call_args[1]["original"] is original
+    bot.send_message.assert_awaited_once()
+    call_kwargs = bot.send_message.call_args[1]
+    assert call_kwargs["chat_id"] == 42
+    assert "задача" in call_kwargs["text"]
+    mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
+
+
+async def test_auto_resend_stops_after_max_resends() -> None:
+    from bot.models.reminder import Reminder
+    from bot.scheduler import _MAX_AUTO_RESENDS
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.snooze_count = _MAX_AUTO_RESENDS  # already at limit
+
+    session = MagicMock(spec=AsyncSession)
+
+    with (
+        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+    ):
+        mock_repo = MagicMock()
+        mock_repo.acknowledge = AsyncMock()
+        mock_repo_cls.return_value = mock_repo
+
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.create_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+
+        session.commit = AsyncMock()
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    mock_repo.acknowledge.assert_awaited_once_with(original.id)
+    mock_svc.create_auto_resend.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
 
 
 def test_start_scheduler_returns_scheduler() -> None:
@@ -119,3 +202,11 @@ def test_start_scheduler_returns_scheduler() -> None:
     with patch.object(AsyncIOScheduler, "start"):
         scheduler = start_scheduler(bot, factory)
     assert isinstance(scheduler, AsyncIOScheduler)
+
+
+def test_start_scheduler_registers_two_jobs() -> None:
+    bot = MagicMock()
+    factory = MagicMock()
+    with patch.object(AsyncIOScheduler, "start"):
+        scheduler = start_scheduler(bot, factory)
+    assert len(scheduler.get_jobs()) == 2

@@ -9,7 +9,9 @@ from bot.exceptions import TimeParseError
 from bot.handlers.reminders import (
     ReminderStates,
     ask_reminder,
+    cb_remind_ack,
     cb_remind_no,
+    cb_remind_snooze,
     cb_remind_yes,
     receive_reminder_time,
 )
@@ -176,3 +178,101 @@ async def test_receive_reminder_time_save_error() -> None:
     msg.answer.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
     state.clear.assert_awaited_once()
+
+
+def make_callback_with_user(data: str, user_id: int = 1) -> CallbackQuery:
+    msg = MagicMock()
+    msg.answer = AsyncMock()
+    msg.edit_reply_markup = AsyncMock()
+    user = MagicMock()
+    user.id = user_id
+    cb = MagicMock(spec=CallbackQuery)
+    cb.data = data
+    cb.message = msg
+    cb.answer = AsyncMock()
+    cb.from_user = user
+    return cb
+
+
+async def test_cb_remind_snooze_1h_calls_snooze() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:1h:{reminder_id}", user_id=5)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await cb_remind_snooze(cb, reminder_service=svc)
+
+    svc.snooze.assert_awaited_once()
+    call_kwargs = svc.snooze.call_args[1]
+    assert call_kwargs["reminder_id"] == uuid.UUID(reminder_id)
+    assert call_kwargs["user_id"] == 5
+    cb.message.edit_reply_markup.assert_awaited_once()
+    cb.message.answer.assert_awaited_once()
+    assert "1 час" in cb.message.answer.call_args[0][0]
+
+
+async def test_cb_remind_snooze_1d_calls_snooze() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:1d:{reminder_id}", user_id=5)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await cb_remind_snooze(cb, reminder_service=svc)
+
+    call_kwargs = svc.snooze.call_args[1]
+    assert "1 день" in cb.message.answer.call_args[0][0]
+    # delta should be 1 day
+    from datetime import timedelta
+
+    now = datetime.now(UTC)
+    remind_at = call_kwargs["remind_at"]
+    diff = remind_at - now
+    assert timedelta(hours=23) < diff < timedelta(hours=25)
+
+
+async def test_cb_remind_snooze_not_owned_sends_message() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:1h:{reminder_id}")
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=False)
+
+    await cb_remind_snooze(cb, reminder_service=svc)
+
+    cb.message.answer.assert_awaited_once()
+    assert "не найдено" in cb.message.answer.call_args[0][0].lower()
+
+
+async def test_cb_remind_snooze_no_service_replies_unavailable() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:1h:{reminder_id}")
+
+    await cb_remind_snooze(cb, reminder_service=None)
+
+    cb.message.answer.assert_awaited_once()
+    assert "недоступен" in cb.message.answer.call_args[0][0].lower()
+
+
+async def test_cb_remind_ack_acknowledges_reminder() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_ack:{reminder_id}", user_id=7)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.acknowledge = AsyncMock(return_value=True)
+
+    await cb_remind_ack(cb, reminder_service=svc)
+
+    svc.acknowledge.assert_awaited_once_with(reminder_id=uuid.UUID(reminder_id), user_id=7)
+    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+
+
+async def test_cb_remind_ack_no_service_replies_unavailable() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_ack:{reminder_id}")
+
+    await cb_remind_ack(cb, reminder_service=None)
+
+    cb.message.answer.assert_awaited_once()
+    assert "недоступен" in cb.message.answer.call_args[0][0].lower()

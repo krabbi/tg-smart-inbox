@@ -66,3 +66,30 @@ class ReminderRepository:
         if reminder:
             reminder.is_cancelled = True
             await self._session.flush()
+
+    async def set_auto_resend_at(self, reminder: Reminder, auto_resend_at: datetime) -> None:
+        """Set auto_resend_at on a reminder and flush."""
+        reminder.auto_resend_at = auto_resend_at
+        await self._session.flush()
+
+    async def get_due_auto_resend(self, now: datetime) -> list[Reminder]:
+        """Return sent, unacknowledged reminders whose auto_resend_at has passed."""
+        result = await self._session.execute(
+            select(Reminder).where(
+                Reminder.is_sent.is_(True),
+                Reminder.is_acknowledged.is_(False),
+                Reminder.is_cancelled.is_(False),
+                Reminder.auto_resend_at.is_not(None),
+                Reminder.auto_resend_at <= now,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def acknowledge(self, reminder_id: uuid.UUID) -> None:
+        """Mark a reminder as acknowledged and clear auto_resend_at."""
+        result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
+        reminder = result.scalar_one_or_none()
+        if reminder:
+            reminder.is_acknowledged = True
+            reminder.auto_resend_at = None
+            await self._session.flush()
