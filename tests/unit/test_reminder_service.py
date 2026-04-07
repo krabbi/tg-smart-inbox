@@ -153,6 +153,18 @@ async def test_acknowledge_returns_false_when_not_owned() -> None:
     session.commit.assert_not_awaited()
 
 
+async def test_mark_acknowledged_calls_repo_and_commits() -> None:
+    svc, repo, session = make_service()
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = uuid.uuid4()
+    repo.acknowledge = AsyncMock()
+
+    await svc.mark_acknowledged(reminder)
+
+    repo.acknowledge.assert_awaited_once_with(reminder.id)
+    session.commit.assert_awaited_once()
+
+
 async def test_prepare_auto_resend_acknowledges_original_and_flushes() -> None:
     svc, repo, session = make_service()
     item_id = uuid.uuid4()
