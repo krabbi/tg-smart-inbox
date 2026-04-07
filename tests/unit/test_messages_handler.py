@@ -11,6 +11,7 @@ from bot.services.link_service import LinkService
 from bot.services.note_service import NoteService, SavedNote
 from bot.services.task_service import SavedTask, TaskService
 from bot.utils.text import extract_url as _extract_url
+from bot.utils.text import has_time_expression as _has_time_expression
 
 
 def make_message(text: str, user_id: int = 1, forwarded: bool = False) -> Message:
@@ -54,6 +55,36 @@ def test_extract_url_finds_first_url() -> None:
     assert result == "https://first.com"
 
 
+# ── has_time_expression helper ────────────────────────────────────────────────
+
+
+def test_has_time_expression_tomorrow() -> None:
+    assert _has_time_expression("завтра сдать отчёт")
+
+
+def test_has_time_expression_at_time() -> None:
+    assert _has_time_expression("встреча в 14:00")
+
+
+def test_has_time_expression_interval() -> None:
+    assert _has_time_expression("через 2 часа позвонить")
+
+
+def test_has_time_expression_weekday() -> None:
+    assert _has_time_expression("в пятницу презентация")
+
+
+def test_has_time_expression_english() -> None:
+    assert _has_time_expression("call Tom tomorrow")
+    assert _has_time_expression("meeting at 10")
+
+
+def test_has_time_expression_no_match() -> None:
+    assert not _has_time_expression("купить молоко")
+    assert not _has_time_expression("позвонить Маше")
+    assert not _has_time_expression("вчера забыл позвонить")  # past — no future intent
+
+
 # ── handle_text with no classifier ───────────────────────────────────────────
 
 
@@ -76,7 +107,8 @@ async def test_handle_text_link_calls_link_handler() -> None:
         mock_handle.assert_awaited_once()
 
 
-async def test_handle_text_task_saves_and_asks_reminder() -> None:
+async def test_handle_text_task_without_time_asks_reminder() -> None:
+    """Task without time expression shows yes/no confirmation."""
     msg = make_message("купить молоко")
     classifier = make_classifier(MessageType.TASK)
     state = make_state()
@@ -90,6 +122,48 @@ async def test_handle_text_task_saves_and_asks_reminder() -> None:
         await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
         mock_ask.assert_awaited_once()
         assert mock_ask.call_args[1]["item_id"] == "item-uuid"
+
+
+async def test_handle_text_task_with_time_skips_yes_no() -> None:
+    """Task with explicit time expression skips yes/no and goes straight to time input."""
+    msg = make_message("завтра сдать отчёт")
+    classifier = make_classifier(MessageType.TASK)
+    state = make_state()
+
+    mock_item = MagicMock()
+    mock_item.id = "item-uuid"
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+
+    with patch("bot.handlers.messages.ask_reminder", new=AsyncMock()) as mock_ask:
+        await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
+        mock_ask.assert_not_awaited()
+
+    from bot.handlers.reminders import ReminderStates
+
+    state.set_state.assert_awaited_once_with(ReminderStates.waiting_for_time)
+    msg.answer.assert_awaited_once()
+
+
+async def test_handle_text_task_with_time_stores_item_id() -> None:
+    """When skipping yes/no, the item ID is stored in FSM so the time handler can use it."""
+    msg = make_message("встреча в 14:00")
+    classifier = make_classifier(MessageType.TASK)
+    state = make_state()
+
+    mock_item = MagicMock()
+    mock_item.id = "test-item-id"
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+
+    with patch("bot.handlers.messages.ask_reminder", new=AsyncMock()):
+        await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
+
+    from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY
+
+    stored = state.update_data.call_args[0][0]
+    assert stored[_ITEM_ID_KEY] == "test-item-id"
+    assert stored[_ATTEMPTS_KEY] == 0
 
 
 async def test_handle_text_task_save_error_sends_error_reply() -> None:
