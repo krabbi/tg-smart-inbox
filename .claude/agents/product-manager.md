@@ -51,6 +51,8 @@ Summarise what's IN scope and what's explicitly OUT of scope. Get explicit user 
 
 ### Step 5 — Create GitHub issues
 
+**This step is mandatory.** After the user confirms the scope, immediately create all issues without waiting for additional prompts. Creating issues is the primary deliverable of the requirements process — do not stop at "here is the scope, confirm and I'll create them." The moment confirmation is received, proceed to create.
+
 After confirmation, create issues with `gh issue create`. Follow these rules:
 
 **One parent issue per feature.** Break it into subtask issues if the feature has 3+ distinct implementation steps. Reference subtasks from the parent with `- [ ] #<number>`.
