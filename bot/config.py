@@ -22,6 +22,8 @@ class Config(BaseSettings):
     def parse_user_ids(cls, v: object) -> object:
         if isinstance(v, str):
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
+        if isinstance(v, int):
+            return [v]
         return v
 
 

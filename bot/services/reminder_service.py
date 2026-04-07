@@ -59,14 +59,18 @@ class ReminderService:
         """Return reminders that need to be automatically re-sent."""
         return await self._repo.get_due_auto_resend(now)
 
-    async def create_auto_resend(self, original: Reminder, remind_at: datetime) -> Reminder:
-        """Acknowledge original reminder and create a follow-up with incremented snooze_count."""
+    async def prepare_auto_resend(self, original: Reminder, remind_at: datetime) -> Reminder:
+        """Acknowledge original and flush a new follow-up reminder; caller must commit."""
         await self._repo.acknowledge(original.id)
         new_reminder = await self._repo.create(item_id=original.item_id, remind_at=remind_at)
         new_reminder.snooze_count = original.snooze_count + 1
         await self._session.flush()
-        await self._session.commit()
         return new_reminder
+
+    async def mark_acknowledged(self, reminder: Reminder) -> None:
+        """Acknowledge a reminder without user ownership check (for scheduler use)."""
+        await self._repo.acknowledge(reminder.id)
+        await self._session.commit()
 
     async def snooze(self, reminder_id: uuid.UUID, user_id: int, remind_at: datetime) -> bool:
         """Acknowledge original and create a snoozed reminder. Returns False if not owned."""
