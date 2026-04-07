@@ -6,14 +6,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
-from bot.handlers.reminders import ask_reminder
+from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY, ReminderStates, ask_reminder
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.media_service import MediaService
 from bot.services.note_service import NoteService
 from bot.services.task_service import TaskService
-from bot.utils.text import extract_url
+from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
 
@@ -151,9 +151,19 @@ async def handle_text(
             await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
             return
         try:
-            await ask_reminder(
-                message=message, task_text=text, item_id=str(saved.item.id), state=state
-            )
+            if has_time_expression(text):
+                # User already stated when — skip yes/no and go straight to time input.
+                await state.update_data({_ITEM_ID_KEY: str(saved.item.id), _ATTEMPTS_KEY: 0})
+                await state.set_state(ReminderStates.waiting_for_time)
+                await message.answer(
+                    "📝 Задача сохранена! Уточни время напоминания "
+                    "(или отправь то же выражение ещё раз):\n"
+                    "Для отмены — /cancel"
+                )
+            else:
+                await ask_reminder(
+                    message=message, task_text=text, item_id=str(saved.item.id), state=state
+                )
         except Exception:
             logger.exception("Failed to start reminder dialog for user %s", user_id)
             await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
