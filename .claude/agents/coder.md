@@ -66,12 +66,16 @@ After implementation, check the documentation update table from `CONTRIBUTING.md
 - Run `make format && make lint && make coverage` — all must pass before pushing
 
 ### 7. Drive the PR to merge
+
+**NEVER merge without explicit pr-reviewer APPROVED verdict. This is a hard rule — no exceptions.**
+
 After creating the PR:
-1. Ask the **pr-reviewer** agent to review it.
-2. If `CHANGES_REQUESTED` — fix every blocking issue, push, and ask for re-review.
-3. If the PR changes `docs/user_guide.md` — after code review passes, ask the **product-manager** agent to do a product acceptance review.
-4. If `PRODUCT CHANGES REQUESTED` — fix the gaps in `user_guide.md`, push, and go back to step 1.
-5. Once both approvals are in — merge with `gh pr merge --squash --delete-branch`.
+1. Invoke the **pr-reviewer** agent: read `.claude/agents/pr-reviewer.md` and execute every step in it (ruff check, ruff format --check, pytest --cov, full checklist). Output the verdict explicitly: APPROVED or CHANGES_REQUESTED.
+2. If `CHANGES_REQUESTED` — fix every blocking issue, push, and re-run the pr-reviewer.
+3. If `APPROVED` and the PR changes `docs/user_guide.md` — also invoke the **product-manager** agent for product acceptance review.
+4. If `PRODUCT CHANGES REQUESTED` — fix, push, and go back to step 1.
+5. Only after receiving explicit **APPROVED** (and **PRODUCT APPROVED** if needed) — merge: `gh pr merge --squash --delete-branch`.
+6. After merging — close the related GitHub issue: `gh issue close <N> --comment "Исправлено в PR #<pr>."` if not closed automatically.
 
 ## Consulting the product-manager agent
 
