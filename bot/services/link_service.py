@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,9 +65,6 @@ class LinkService:
     @staticmethod
     def _parse_summary(raw: str, url: str) -> LinkSummary:
         """Parse Claude's JSON response into a LinkSummary."""
-        import json
-        import re
-
         # Strip markdown code fences that Claude sometimes wraps JSON in
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE).strip()
         try:
