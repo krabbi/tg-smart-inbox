@@ -295,6 +295,56 @@ All three must pass. CI will reject PRs that fail any of these.
 
 ---
 
+## Agent workflow
+
+The project uses three specialized subagents. Use them in this order for any non-trivial work.
+
+### Agents
+
+| Agent | Role | When to invoke |
+|---|---|---|
+| `product-manager` | Requirements, edge cases, GitHub issue creation, product acceptance review | Before implementing any non-trivial feature; when product questions arise during implementation |
+| `coder` | End-to-end implementation: code + tests + docs, drives PR to merge | After requirements are clear and issues are created |
+| `pr-reviewer` | Code review: architecture, tests, security, linting, docs coverage | After every PR is created, before merge |
+
+### Standard feature flow
+
+```
+1. product-manager
+   └── Interviews user → clarifies requirements → explores edge cases
+   └── Creates GitHub issues (parent + subtasks)
+
+2. coder
+   └── Reads issue → studies code → implements (code + tests + docs)
+   └── Runs: make format && make lint && make coverage
+   └── Creates PR → requests pr-reviewer
+
+3. pr-reviewer
+   └── APPROVED → continue
+   └── CHANGES_REQUESTED → coder fixes → pr-reviewer again
+
+4. (only if docs/user_guide.md changed)
+   product-manager product acceptance review
+   └── PRODUCT APPROVED → merge
+   └── PRODUCT CHANGES REQUESTED → coder fixes → pr-reviewer → product-manager again
+
+5. gh pr merge --squash --delete-branch
+```
+
+### Product questions during implementation
+
+If **coder** hits a product question (edge case behaviour, error message copy, scope boundary):
+- **Significant** (affects UX, data model, or scope) → consult `product-manager` agent
+- **Minor** (variable naming, log level, internal detail) → decide and document in a comment
+
+### Rules
+
+- Never merge without `pr-reviewer` approval.
+- Never merge a PR that changes `docs/user_guide.md` without `product-manager` approval.
+- `product-manager` creates all GitHub issues — don't create issues ad-hoc without going through requirements gathering first for non-trivial features.
+
+---
+
 ## File layout reference
 
 ```
