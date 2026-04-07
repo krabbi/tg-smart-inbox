@@ -10,6 +10,7 @@ Thank you for your interest in contributing! This document outlines the process 
 - [Commit Convention](#commit-convention)
 - [Pull Request Process](#pull-request-process)
 - [Code Style](#code-style)
+- [Updating Documentation](#updating-documentation)
 - [Reporting Bugs](#reporting-bugs)
 - [Suggesting Features](#suggesting-features)
 
@@ -31,9 +32,13 @@ Be respectful and constructive. We are all here to build something useful togeth
    pip install -e ".[dev]"
    ```
 3. Copy `.env.example` to `.env` and fill in your credentials
-4. Run tests to confirm everything works:
+4. Apply database migrations:
    ```bash
-   pytest
+   alembic upgrade head
+   ```
+5. Run tests to confirm everything works:
+   ```bash
+   make coverage
    ```
 
 ---
@@ -48,7 +53,13 @@ Be respectful and constructive. We are all here to build something useful togeth
    git checkout -b fix/bug-description
    ```
 3. Make your changes with logical, focused commits
-4. Push your branch and open a Pull Request
+4. Run all checks before pushing:
+   ```bash
+   make format    # ruff format .
+   make lint      # ruff check .
+   make coverage  # pytest --cov; fails if coverage < 80%
+   ```
+5. Push your branch and open a Pull Request
 
 ---
 
@@ -76,8 +87,10 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 feat(classifier): add idea detection to message classifier
 fix(reminders): handle timezone edge case in scheduler
-docs(readme): update installation instructions
+docs(architecture): update DB schema after migration
 ```
+
+Always reference the relevant issue number: `feat: add snooze for reminders (#39)`.
 
 ---
 
@@ -85,12 +98,13 @@ docs(readme): update installation instructions
 
 1. Make sure your PR addresses a single concern (one issue = one PR)
 2. Write a clear PR description: **what** you changed and **why**
-3. Ensure all tests pass (`pytest`)
-4. Ensure code is formatted (`ruff format .`) and linted (`ruff check .`)
+3. Ensure all checks pass:
+   ```bash
+   make format && make lint && make coverage
+   ```
+4. Update documentation if your change affects user-visible behaviour or architecture (see [Updating Documentation](#updating-documentation))
 5. Request a review — at least one approval is required before merging
-6. Squash commits if the history is noisy
-
-**PR title** must also follow the commit convention above.
+6. PRs are merged with **squash merge**; make sure your PR title follows the commit convention
 
 ---
 
@@ -99,19 +113,27 @@ docs(readme): update installation instructions
 - **Formatter:** [Ruff](https://docs.astral.sh/ruff/) (`ruff format .`)
 - **Linter:** Ruff (`ruff check .`)
 - **Type hints:** Required for all function signatures
-- **Docstrings:** Required for public functions and classes (Google style)
+- **Docstrings:** Required for all public functions and classes (one-line, imperative mood, Google style)
 - **Line length:** 100 characters
+- **Python version:** 3.11+ syntax (`X | Y` unions, `match`, etc.)
 
-Run all checks at once:
-```bash
-ruff format . && ruff check .
-```
+The architecture follows a strict **3-layer pattern** (Handler → Service → Repository). Read [`CLAUDE.md`](CLAUDE.md) for the full coding guidelines before writing any code.
 
-We recommend setting up pre-commit hooks:
-```bash
-pip install pre-commit
-pre-commit install
-```
+---
+
+## Updating Documentation
+
+**If your change affects anything described in the docs, update the docs in the same PR.**
+
+| What changed | File(s) to update |
+|---|---|
+| New or changed bot command, button, or user flow | [`docs/user_guide.md`](docs/user_guide.md) |
+| New service, repository, DB schema, or config variable | [`docs/architecture.md`](docs/architecture.md) |
+| New service, handler, or major structural change | Both `docs/architecture.md` and the file layout in [`CLAUDE.md`](CLAUDE.md) |
+| New coding convention or tooling change | [`CLAUDE.md`](CLAUDE.md) and/or [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Project overview or setup instructions | [`README.md`](README.md) |
+
+When in doubt, err on the side of updating — outdated documentation is worse than no documentation.
 
 ---
 

@@ -14,31 +14,39 @@ You forward links, photos, and notes to Telegram "Saved Messages" with the inten
 
 **tg-smart-inbox** is a personal Telegram bot that acts as a smart second brain. Send it anything — a link, a photo, a task, an idea — and it will:
 
-- **Summarize articles** automatically and let you act on them
-- **Remind you** about tasks and notes at the right time
+- **Summarize articles** on demand with key takeaways
+- **Remind you** about tasks and notes at the right time, with snooze and auto-resend
 - **Save files and photos** directly to your Google Drive
-- **Capture ideas** and help you rediscover them when you need inspiration
+- **Capture ideas** with AI-extracted tags and complexity estimates, and suggest what to work on
+- **Transcribe voice messages** and process them through the same pipeline
 - **Search everything** you've ever sent it
 
 ## Features
 
 | What you send | What the bot does |
 |---|---|
-| 🔗 Link / article | Fetches content, generates a concise summary, offers `[Read summary]` / `[Remind me later]` |
-| 📝 Task or note | Detects intent, asks if you want a reminder, schedules it |
-| 🖼️ Photo / file | Uploads to Google Drive, sends back a shareable link |
-| 💡 Idea | Classifies as an idea, stores it — ask the bot "what should I work on?" anytime |
-| 🎤 Voice message | Transcribes with Whisper, then processes the text through the same pipeline |
-| 💬 Any text | Classifies intelligently and stores with full-text search |
+| 🔗 Link / article | Saves the URL; buttons: **📋 Саммари** (AI summary with key points), **🔖 Сохранить**, **⏰ Напомнить** |
+| ✅ Task | Detects intent, offers to set a reminder with natural-language time input |
+| 📝 Note | Classifies and saves; searchable via `/search` |
+| 💡 Idea | Extracts tags, estimates complexity and effort; ask the bot "что поделать?" anytime |
+| 🖼️ Photo / file | Analyses with Vision AI, uploads to Google Drive |
+| 🎤 Voice message | Transcribes with Groq Whisper, then routes through the same pipeline |
 
 ## Bot Commands
 
 ```
-/list       — Browse your saved items by category
+/start      — Welcome message and overview
+/list       — Browse your last 10 saved items (paginated)
 /search     — Full-text search across everything you've saved
-/reminders  — View and manage upcoming reminders
-/ideas      — View your saved ideas and get AI-powered suggestions
+/reminders  — View and cancel upcoming reminders
+/ideas      — View your saved ideas with tags and complexity
+/cancel     — Cancel any active dialog (e.g. reminder time input)
 ```
+
+## Documentation
+
+- **[Architecture Guide](docs/architecture.md)** — 3-layer design, DB schema, DI, reminder lifecycle, config reference
+- **[User Guide](docs/user_guide.md)** — all features, commands, and FAQ (in Russian)
 
 ## Architecture
 
@@ -48,9 +56,11 @@ User (Telegram)
      ▼
 aiogram bot (Python)
      │
-     ├── Claude API (classification + summarization + ideas)
-     ├── SQLite / PostgreSQL (notes, reminders, ideas)
-     └── Google Drive API (file storage)
+     ├── Claude API     — classification, summarization, time parsing, idea tags
+     ├── SQLite / PostgreSQL  — items, reminders, ideas
+     ├── APScheduler    — due-reminder dispatch + auto-resend every 60s
+     ├── Groq Whisper   — voice transcription (optional)
+     └── Google Drive   — photo/file storage (optional)
 ```
 
 ## Getting Started
@@ -60,8 +70,8 @@ aiogram bot (Python)
 - Python 3.11+
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Anthropic API key
-- Google Drive API credentials *(optional — for photo/file upload)*
 - Groq API key *(optional — for voice transcription, free at [console.groq.com](https://console.groq.com))*
+- Google Drive API credentials *(optional — for photo/file upload)*
 
 ### Installation
 
@@ -75,6 +85,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 cp .env.example .env
 # Fill in your credentials in .env
+
+alembic upgrade head
+python -m bot
 ```
 
 ### Running with Docker (recommended)
@@ -90,12 +103,6 @@ docker compose --profile dev up
 docker compose --profile prod up -d
 ```
 
-### Running locally (without Docker)
-
-```bash
-python -m bot
-```
-
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in:
@@ -103,6 +110,9 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 TELEGRAM_BOT_TOKEN=your_token_here
 ANTHROPIC_API_KEY=your_key_here
+
+# Comma-separated Telegram user IDs allowed to use the bot (leave empty for open access)
+ALLOWED_USER_IDS=123456789,987654321
 
 # PostgreSQL password used by docker-compose
 POSTGRES_PASSWORD=change_me
@@ -125,7 +135,10 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 ## Roadmap
 
 - [x] MVP: classify, summarize, remind, store
-- [x] Voice message transcription (Groq Whisper Large v3)
+- [x] Voice message transcription (Groq Whisper)
+- [x] Ideas with AI tags, complexity, and effort estimates
+- [x] Reminder snooze (+1h / +1d) and acknowledgement
+- [x] Auto-resend if reminder is not acknowledged within 5 minutes
 - [ ] Morning digest with curated content
 - [ ] Web dashboard for browsing saved items
 - [ ] Multi-user support
