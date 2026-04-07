@@ -196,5 +196,7 @@ async def cb_remind_ack(
         )
     except Exception:
         logger.exception("Failed to acknowledge reminder %s", reminder_id_str)
+        await callback.message.answer("Не удалось подтвердить напоминание.")
+        return
 
     await callback.message.edit_reply_markup(reply_markup=None)

@@ -141,7 +141,7 @@ async def test_auto_resend_reminders_creates_followup() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.create_auto_resend = AsyncMock(return_value=new_reminder)
+        mock_svc.prepare_auto_resend = AsyncMock(return_value=new_reminder)
         mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_repo_cls.return_value = MagicMock()
@@ -152,8 +152,8 @@ async def test_auto_resend_reminders_creates_followup() -> None:
 
         await _auto_resend_reminders(bot, factory)
 
-    mock_svc.create_auto_resend.assert_awaited_once()
-    assert mock_svc.create_auto_resend.call_args[1]["original"] is original
+    mock_svc.prepare_auto_resend.assert_awaited_once()
+    assert mock_svc.prepare_auto_resend.call_args[1]["original"] is original
     bot.send_message.assert_awaited_once()
     call_kwargs = bot.send_message.call_args[1]
     assert call_kwargs["chat_id"] == 42
@@ -175,24 +175,22 @@ async def test_auto_resend_stops_after_max_resends() -> None:
         patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
     ):
-        mock_repo = MagicMock()
-        mock_repo.acknowledge = AsyncMock()
-        mock_repo_cls.return_value = mock_repo
+        mock_repo_cls.return_value = MagicMock()
 
         mock_svc = MagicMock()
         mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.create_auto_resend = AsyncMock()
+        mock_svc.mark_acknowledged = AsyncMock()
+        mock_svc.prepare_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
 
-        session.commit = AsyncMock()
         bot = MagicMock()
         bot.send_message = AsyncMock()
         factory = make_session_factory(session)
 
         await _auto_resend_reminders(bot, factory)
 
-    mock_repo.acknowledge.assert_awaited_once_with(original.id)
-    mock_svc.create_auto_resend.assert_not_awaited()
+    mock_svc.mark_acknowledged.assert_awaited_once_with(original)
+    mock_svc.prepare_auto_resend.assert_not_awaited()
     bot.send_message.assert_not_awaited()
 
 

@@ -153,7 +153,19 @@ async def test_acknowledge_returns_false_when_not_owned() -> None:
     session.commit.assert_not_awaited()
 
 
-async def test_create_auto_resend_acknowledges_original_and_commits() -> None:
+async def test_mark_acknowledged_calls_repo_and_commits() -> None:
+    svc, repo, session = make_service()
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = uuid.uuid4()
+    repo.acknowledge = AsyncMock()
+
+    await svc.mark_acknowledged(reminder)
+
+    repo.acknowledge.assert_awaited_once_with(reminder.id)
+    session.commit.assert_awaited_once()
+
+
+async def test_prepare_auto_resend_acknowledges_original_and_flushes() -> None:
     svc, repo, session = make_service()
     item_id = uuid.uuid4()
     remind_at = datetime(2026, 6, 1, tzinfo=UTC)
@@ -170,10 +182,10 @@ async def test_create_auto_resend_acknowledges_original_and_commits() -> None:
     repo.create = AsyncMock(return_value=new_reminder)
     session.flush = AsyncMock()
 
-    result = await svc.create_auto_resend(original=original, remind_at=remind_at)
+    result = await svc.prepare_auto_resend(original=original, remind_at=remind_at)
 
     repo.acknowledge.assert_awaited_once_with(original.id)
     repo.create.assert_awaited_once_with(item_id=item_id, remind_at=remind_at)
     assert new_reminder.snooze_count == 3
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_awaited()
     assert result is new_reminder
