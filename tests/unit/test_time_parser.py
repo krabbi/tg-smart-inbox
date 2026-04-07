@@ -84,3 +84,39 @@ async def test_parse_in_english() -> None:
     parser = make_parser('{"datetime": "2026-06-01T10:00:00"}')
     result = await parser.parse("in 2 hours", now=NOW)
     assert result == datetime(2026, 6, 1, 10, 0)
+
+
+async def test_parse_in_1_minute() -> None:
+    """Short interval «через 1 минуту» must parse correctly."""
+    parser = make_parser('{"datetime": "2026-06-01T08:01:00"}')
+    result = await parser.parse("через 1 минуту", now=NOW)
+    assert result == datetime(2026, 6, 1, 8, 1)
+
+
+async def test_parse_in_3_minutes() -> None:
+    """Short interval «через 3 минуты» (genitive singular) must parse correctly."""
+    parser = make_parser('{"datetime": "2026-06-01T08:03:00"}')
+    result = await parser.parse("через 3 минуты", now=NOW)
+    assert result == datetime(2026, 6, 1, 8, 3)
+
+
+async def test_parse_in_30_seconds() -> None:
+    """Very short interval «через 30 секунд» must parse correctly."""
+    parser = make_parser('{"datetime": "2026-06-01T08:00:30"}')
+    result = await parser.parse("через 30 секунд", now=NOW)
+    assert result == datetime(2026, 6, 1, 8, 0, 30)
+
+
+async def test_parse_time_in_past_raises_time_parse_error() -> None:
+    """A datetime that is at or before now must raise TimeParseError."""
+    parser = make_parser('{"datetime": "2026-06-01T07:59:00"}')
+    with pytest.raises(TimeParseError, match="not in the future"):
+        await parser.parse("вчера", now=NOW)
+
+
+async def test_parse_strips_timezone_from_claude_response() -> None:
+    """Claude sometimes returns timezone-aware ISO strings; result must be naive UTC."""
+    parser = make_parser('{"datetime": "2026-06-01T08:03:00+00:00"}')
+    result = await parser.parse("через 3 минуты", now=NOW)
+    assert result == datetime(2026, 6, 1, 8, 3)
+    assert result.tzinfo is None
