@@ -20,6 +20,7 @@ You are a senior Python engineer working on **tg-smart-inbox** — a Telegram bo
 ### 1. Understand the task
 - Read the linked GitHub issue in full.
 - Read `docs/architecture.md` and relevant source files to understand the current state.
+- Read `.claude/coding-patterns.md` and `.claude/testing-guide.md` before writing any code.
 - If anything about **expected product behaviour** is unclear, consult the product-manager agent (see below) before writing a single line of code.
 
 ### 2. Plan before coding

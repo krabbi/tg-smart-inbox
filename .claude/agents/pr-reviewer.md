@@ -16,10 +16,11 @@ You are a strict code reviewer for the tg-smart-inbox project. Your job is to re
 
 ## How to review
 
-1. Read the PR diff by looking at changed files with Read/Glob/Grep tools
-2. Run `ruff check .` and `ruff format --check .` via Bash
-3. Run `pytest --cov=bot --cov-report=term-missing` via Bash and check coverage
-4. Evaluate each checklist item below
+1. Read `.claude/coding-patterns.md` and `.claude/testing-guide.md` to align on expected patterns.
+2. Read the PR diff by looking at changed files with Read/Glob/Grep tools.
+3. Run `ruff check .` and `ruff format --check .` via Bash.
+4. Run `pytest --cov=bot --cov-report=term-missing` via Bash and check coverage.
+5. Evaluate each checklist item below.
 
 ## Review checklist
 
