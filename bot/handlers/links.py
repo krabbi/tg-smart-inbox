@@ -66,6 +66,9 @@ async def cb_link_summary(callback: CallbackQuery, link_service: LinkService) ->
     except ScrapingError as exc:
         logger.warning("Scraping failed for item %s: %s", item_id, exc)
         await callback.message.edit_text("❌ Не удалось загрузить страницу.")  # type: ignore[union-attr]
+    except Exception:
+        logger.exception("Unexpected error summarising item %s", item_id)
+        await callback.message.edit_text("❌ Не удалось получить саммари. Попробуй ещё раз.")  # type: ignore[union-attr]
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:save:"))
