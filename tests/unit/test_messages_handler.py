@@ -82,6 +82,7 @@ def test_has_time_expression_english() -> None:
 def test_has_time_expression_no_match() -> None:
     assert not _has_time_expression("купить молоко")
     assert not _has_time_expression("позвонить Маше")
+    assert not _has_time_expression("вчера забыл позвонить")  # past — no future intent
 
 
 # ── handle_text with no classifier ───────────────────────────────────────────
@@ -123,11 +124,6 @@ async def test_handle_text_task_without_time_asks_reminder() -> None:
         assert mock_ask.call_args[1]["item_id"] == "item-uuid"
 
 
-async def test_handle_text_task_saves_and_asks_reminder() -> None:
-    """Alias kept for backward compat; delegates to the new test above."""
-    await test_handle_text_task_without_time_asks_reminder()
-
-
 async def test_handle_text_task_with_time_skips_yes_no() -> None:
     """Task with explicit time expression skips yes/no and goes straight to time input."""
     msg = make_message("завтра сдать отчёт")
@@ -163,9 +159,11 @@ async def test_handle_text_task_with_time_stores_item_id() -> None:
     with patch("bot.handlers.messages.ask_reminder", new=AsyncMock()):
         await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
 
+    from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY
+
     stored = state.update_data.call_args[0][0]
-    assert stored["reminder_item_id"] == "test-item-id"
-    assert stored["reminder_attempts"] == 0
+    assert stored[_ITEM_ID_KEY] == "test-item-id"
+    assert stored[_ATTEMPTS_KEY] == 0
 
 
 async def test_handle_text_task_save_error_sends_error_reply() -> None:

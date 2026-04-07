@@ -8,7 +8,7 @@ _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 # Used to detect when a task message already carries a time intent.
 _TIME_RE = re.compile(
     r"\b("
-    r"завтра|послезавтра|сегодня|вчера"  # relative days
+    r"завтра|послезавтра|сегодня"  # relative days (вчера excluded — past, no future intent)
     r"|через\s+\d+\s*(минут[а-я]*|час[а-я]*|дн[а-яё]*|недел[а-я]*|секунд[а-я]*)"  # "через N ..."
     r"|в\s+\d{1,2}[:.]\d{2}"  # "в 14:00" or "в 14.00"
     r"|\d{1,2}[:.]\d{2}\s*(утра|вечера|дня|ночи)?"  # bare "14:00" or "9:00 утра"
