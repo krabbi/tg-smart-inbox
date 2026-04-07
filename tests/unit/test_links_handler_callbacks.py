@@ -70,6 +70,18 @@ async def test_cb_link_summary_scraping_error_edits_error_message() -> None:
     assert "❌" in cb.message.edit_text.call_args[0][0]
 
 
+async def test_cb_link_summary_unexpected_error_shows_user_message() -> None:
+    """Non-ScrapingError exceptions (e.g. network, Claude API) must not leak."""
+    cb = make_callback("link:summary:uuid")
+    svc = MagicMock(spec=LinkService)
+    svc.summarize = AsyncMock(side_effect=Exception("Claude API exploded"))
+
+    await cb_link_summary(cb, link_service=svc)
+
+    cb.message.edit_text.assert_awaited_once()
+    assert "❌" in cb.message.edit_text.call_args[0][0]
+
+
 # ── cb_link_save ──────────────────────────────────────────────────────────────
 
 
