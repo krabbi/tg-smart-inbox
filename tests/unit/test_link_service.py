@@ -118,3 +118,20 @@ async def test_parse_summary_strips_plain_code_fence() -> None:
     result = LinkService._parse_summary(raw, "https://x.com")
     assert result.title == "T"
     assert result.summary == "S"
+
+
+async def test_parse_summary_with_preamble_and_code_fence() -> None:
+    """Claude sometimes adds a preamble before the JSON block — must still parse correctly."""
+    raw = 'Here is the summary:\n```json\n{"title":"T","summary":"S","takeaways":["x"]}\n```'
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "T"
+    assert result.summary == "S"
+    assert result.takeaways == ["x"]
+
+
+async def test_parse_summary_with_preamble_no_fence_uses_fallback() -> None:
+    """Preamble without code fence falls back to raw text in summary."""
+    raw = "Not valid JSON preamble\nstill not JSON"
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "https://x.com"
+    assert result.summary == raw.strip()

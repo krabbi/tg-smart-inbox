@@ -97,6 +97,20 @@ async def test_cb_link_summary_edits_message() -> None:
     assert "Test summary." in edited
 
 
+async def test_cb_link_summary_uses_html_parse_mode() -> None:
+    """Formatted summary must be sent with parse_mode=HTML, never as raw JSON."""
+    item_id = str(uuid.uuid4())
+    cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
+    svc = make_link_service()
+    await cb_link_summary(cb, svc)
+    _, kwargs = cb.message.edit_text.call_args
+    assert kwargs.get("parse_mode") == "HTML"
+    text = cb.message.edit_text.call_args[0][0]
+    # Must not contain raw JSON curly braces at top level
+    assert not text.startswith("{")
+    assert "<b>" in text
+
+
 async def test_cb_link_summary_with_no_takeaways() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
