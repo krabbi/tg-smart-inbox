@@ -11,11 +11,15 @@ from bot.services.claude_client import ClaudeClient
 from bot.services.link_service import LinkService, LinkSummary
 from bot.services.scraper import Scraper
 
+_PLAIN_RESPONSE = (
+    "How to bake bread\n\nBread baking is simple. Use strong flour.\n• Tip one\n• Tip two"
+)
+
 
 def make_link_service(
     *,
     scraper_text: str = "page text",
-    claude_response: str = '{"title":"Test","summary":"A summary.","takeaways":["point"]}',
+    claude_response: str = _PLAIN_RESPONSE,
     session: AsyncSession | None = None,
 ) -> tuple[LinkService, ItemRepository]:
     mock_session = session or MagicMock(spec=AsyncSession)
@@ -71,9 +75,8 @@ async def test_summarize_calls_scraper_and_claude() -> None:
     svc, _ = make_link_service()
     result = await svc.summarize("https://example.com")
     assert isinstance(result, LinkSummary)
-    assert result.title == "Test"
-    assert result.summary == "A summary."
-    assert result.takeaways == ["point"]
+    assert result.title == "How to bake bread"
+    assert "simple" in result.body
     assert result.url == "https://example.com"
 
 
@@ -84,63 +87,40 @@ async def test_summarize_raises_scraping_error() -> None:
         await svc.summarize("https://example.com")
 
 
-async def test_summarize_with_malformed_json_uses_raw_text() -> None:
-    svc, _ = make_link_service(claude_response="Not JSON")
-    result = await svc.summarize("https://example.com")
-    assert result.summary == "Not JSON"
-    assert result.title == "https://example.com"
+# ── _parse_summary ────────────────────────────────────────────────────────────
 
 
-async def test_parse_summary_full_json() -> None:
-    raw = '{"title":"Hello","summary":"World.","takeaways":["a","b"]}'
+async def test_parse_summary_splits_title_and_body() -> None:
+    raw = "My Title\n\nThis is the body text."
     result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.title == "Hello"
-    assert result.summary == "World."
-    assert result.takeaways == ["a", "b"]
+    assert result.title == "My Title"
+    assert result.body == "This is the body text."
 
 
-async def test_parse_summary_empty_takeaways() -> None:
-    raw = '{"title":"T","summary":"S","takeaways":[]}'
+async def test_parse_summary_single_line_uses_as_body_and_url_as_title() -> None:
+    """Single-line response with no newline — first line is title, body is same text."""
+    raw = "Just one line"
     result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.takeaways == []
+    assert result.title == "Just one line"
+    assert result.body == "Just one line"
 
 
-async def test_parse_summary_strips_markdown_code_fence() -> None:
-    raw = '```json\n{"title":"Hello","summary":"World.","takeaways":["a"]}\n```'
-    result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.title == "Hello"
-    assert result.summary == "World."
-    assert result.takeaways == ["a"]
-
-
-async def test_parse_summary_strips_plain_code_fence() -> None:
-    raw = '```\n{"title":"T","summary":"S","takeaways":[]}\n```'
-    result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.title == "T"
-    assert result.summary == "S"
-
-
-async def test_parse_summary_with_preamble_and_code_fence() -> None:
-    """Claude sometimes adds a preamble before the JSON block — must still parse correctly."""
-    raw = 'Here is the summary:\n```json\n{"title":"T","summary":"S","takeaways":["x"]}\n```'
-    result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.title == "T"
-    assert result.summary == "S"
-    assert result.takeaways == ["x"]
-
-
-async def test_parse_summary_with_preamble_no_fence_uses_fallback() -> None:
-    """Preamble without code fence falls back to raw text in summary."""
-    raw = "Not valid JSON preamble\nstill not JSON"
+async def test_parse_summary_empty_response_falls_back_to_url() -> None:
+    raw = ""
     result = LinkService._parse_summary(raw, "https://x.com")
     assert result.title == "https://x.com"
-    assert result.summary == raw.strip()
 
 
-async def test_parse_summary_nested_braces_in_value() -> None:
-    """JSON with nested {} in string values must parse correctly (greedy regex)."""
-    raw = '```json\n{"title":"A {nested} title","summary":"See {example}.","takeaways":["ok"]}\n```'
+async def test_parse_summary_with_bullet_points_in_body() -> None:
+    raw = "Article Title\n\nGreat summary here.\n• Point one\n• Point two"
     result = LinkService._parse_summary(raw, "https://x.com")
-    assert result.title == "A {nested} title"
-    assert result.summary == "See {example}."
-    assert result.takeaways == ["ok"]
+    assert result.title == "Article Title"
+    assert "• Point one" in result.body
+    assert "• Point two" in result.body
+
+
+async def test_parse_summary_strips_whitespace() -> None:
+    raw = "  Title with spaces  \n\n  Body text.  "
+    result = LinkService._parse_summary(raw, "https://x.com")
+    assert result.title == "Title with spaces"
+    assert result.body == "Body text."

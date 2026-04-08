@@ -238,7 +238,7 @@ the model from `Config`. Returns the text content of the first response block.
 | Service | Prompt purpose | Output format |
 |---------|---------------|---------------|
 | `ClassifierService` | Classify text into task/idea/note | `{"type": "..."}` |
-| `LinkService` | Summarize a web page | `{"title": ..., "summary": ..., "takeaways": [...]}` |
+| `LinkService` | Summarize a web page | Plain text — line 1 = title, lines 3+ = prose body |
 | `IdeaService._extract_tags` | Extract 1-5 keyword tags | `["tag1", "tag2"]` |
 | `IdeaService._classify_complexity` | Estimate complexity and effort | `{"complexity": ..., "effort": ...}` |
 | `IdeaService.suggest` | Suggest ideas from backlog | Free text (language matches query) |
