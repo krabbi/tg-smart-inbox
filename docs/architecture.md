@@ -58,7 +58,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `messages.py` | Entry point for all incoming text, photo, and document messages |
 | `links.py` | Callback buttons for saved links (summary, save, remind) |
 | `reminders.py` | Reminder dialog (time input FSM), snooze/acknowledge callbacks |
-| `commands.py` | Bot commands: `/start`, `/list`, `/search`, `/reminders`, `/ideas`, `/cancel` |
+| `commands.py` | Bot commands: `/start`, `/list`, `/search`, `/reminders`, `/ideas`, `/help`, `/cancel` |
 | `ideas.py` | `/ideas` command — display saved ideas |
 | `voice.py` | Voice message transcription and routing |
 
