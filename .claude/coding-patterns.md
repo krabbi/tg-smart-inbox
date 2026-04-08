@@ -64,7 +64,7 @@ When using `parse_mode="HTML"`, always escape Claude-sourced or user-sourced con
 ```python
 import html
 
-text = f"📋 <b>{html.escape(summary.title)}</b>\n\n{html.escape(summary.summary)}"
+text = f"📋 <b>{html.escape(summary.title)}</b>\n\n{html.escape(summary.body)}"
 await message.edit_text(text, parse_mode="HTML")
 ```
 
