@@ -300,3 +300,47 @@ async def test_cb_remind_ack_no_service_replies_unavailable() -> None:
 
     cb.message.answer.assert_awaited_once()
     assert "недоступен" in cb.message.answer.call_args[0][0].lower()
+
+
+async def test_cb_remind_ack_no_message_returns_early() -> None:
+    """When callback.message is None, only answer() is called."""
+    cb = make_callback_with_user(f"remind_ack:{uuid.uuid4()}")
+    cb.message = None
+
+    svc = MagicMock(spec=ReminderService)
+    svc.acknowledge = AsyncMock()
+
+    await cb_remind_ack(cb, reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.acknowledge.assert_not_awaited()
+
+
+async def test_cb_remind_ack_no_from_user_returns_early() -> None:
+    """When callback.from_user is None, only answer() is called."""
+    cb = make_callback_with_user(f"remind_ack:{uuid.uuid4()}")
+    cb.from_user = None
+
+    svc = MagicMock(spec=ReminderService)
+    svc.acknowledge = AsyncMock()
+
+    await cb_remind_ack(cb, reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.acknowledge.assert_not_awaited()
+
+
+async def test_cb_remind_ack_service_error_replies_error() -> None:
+    """When acknowledge raises, reply with error and do not call edit_text."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_ack:{reminder_id}", user_id=7)
+    cb.message.edit_text = AsyncMock()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.acknowledge = AsyncMock(side_effect=Exception("db error"))
+
+    await cb_remind_ack(cb, reminder_service=svc)
+
+    cb.message.answer.assert_awaited_once()
+    assert "Не удалось" in cb.message.answer.call_args[0][0]
+    cb.message.edit_text.assert_not_awaited()
