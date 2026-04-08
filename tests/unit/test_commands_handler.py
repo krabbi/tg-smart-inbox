@@ -9,7 +9,9 @@ from aiogram.types import CallbackQuery, Message, User
 
 from bot.handlers.commands import (
     _list_keyboard,
+    _parse_type_suffix,
     cb_cancel_reminder,
+    cb_list_filter,
     cb_list_page,
     cmd_cancel,
     cmd_list,
@@ -100,7 +102,7 @@ async def test_cmd_list_shows_items() -> None:
     assert "✅" in reply
 
 
-async def test_cmd_list_no_pagination_for_single_page() -> None:
+async def test_cmd_list_no_nav_buttons_for_single_page() -> None:
     msg = make_message()
     svc = MagicMock(spec=ListService)
     svc.list_recent = AsyncMock(
@@ -109,7 +111,13 @@ async def test_cmd_list_no_pagination_for_single_page() -> None:
 
     await cmd_list(msg, list_service=svc)
     _, kwargs = msg.answer.call_args
-    assert kwargs.get("reply_markup") is None
+    kb = kwargs.get("reply_markup")
+    assert kb is not None
+    # Should have filter row but no nav row
+    assert len(kb.inline_keyboard) == 1
+    # Filter buttons should be present
+    texts = [b.text for b in kb.inline_keyboard[0]]
+    assert any("Все" in t for t in texts)
 
 
 async def test_cmd_list_shows_next_button_when_more() -> None:
@@ -131,7 +139,7 @@ async def test_cmd_list_shows_next_button_when_more() -> None:
 
 
 async def test_cb_list_page_edits_message() -> None:
-    cb = make_callback("list_page:1")
+    cb = make_callback("list_page:1:all")
     svc = MagicMock(spec=ListService)
     svc.list_recent = AsyncMock(
         return_value=make_list_page([make_item("item a")], page=1, total=15)
@@ -139,7 +147,34 @@ async def test_cb_list_page_edits_message() -> None:
 
     await cb_list_page(cb, list_service=svc)
     cb.message.edit_text.assert_awaited_once()
-    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=1)
+    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=1, item_type=None)
+
+
+async def test_cb_list_page_with_type_filter() -> None:
+    cb = make_callback("list_page:0:link")
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=ListPage(
+            items=[make_item("http://ex.com", ItemType.link)],
+            page=0,
+            total=1,
+            item_type=ItemType.link,
+        )
+    )
+
+    await cb_list_page(cb, list_service=svc)
+    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=ItemType.link)
+
+
+async def test_cb_list_page_without_type_suffix() -> None:
+    cb = make_callback("list_page:1")
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=make_list_page([make_item("item a")], page=1, total=15)
+    )
+
+    await cb_list_page(cb, list_service=svc)
+    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=1, item_type=None)
 
 
 async def test_cb_list_page_invalid_data_is_ignored() -> None:
@@ -151,7 +186,7 @@ async def test_cb_list_page_invalid_data_is_ignored() -> None:
 
 
 async def test_cb_list_page_edit_failure_is_silenced() -> None:
-    cb = make_callback("list_page:0")
+    cb = make_callback("list_page:0:all")
     svc = MagicMock(spec=ListService)
     svc.list_recent = AsyncMock(return_value=make_list_page([make_item("x")], page=0, total=5))
     cb.message.edit_text = AsyncMock(side_effect=Exception("Message not modified"))
@@ -320,16 +355,32 @@ async def test_cmd_cancel_with_no_active_state_notifies_user() -> None:
 # ── _list_keyboard helper ─────────────────────────────────────────────────────
 
 
-def test_list_keyboard_no_buttons_single_page() -> None:
+def test_list_keyboard_filter_buttons_always_present() -> None:
     page = make_list_page([MagicMock()] * 5, page=0, total=5)
-    assert _list_keyboard(page) is None
+    kb = _list_keyboard(page)
+    assert kb is not None
+    filter_texts = [b.text for b in kb.inline_keyboard[0]]
+    assert any("Все" in t for t in filter_texts)
+    assert any("Ссылки" in t for t in filter_texts)
+    assert any("Задачи" in t for t in filter_texts)
+    assert any("Идеи" in t for t in filter_texts)
+    assert any("Заметки" in t for t in filter_texts)
+
+
+def test_list_keyboard_no_nav_single_page() -> None:
+    page = make_list_page([MagicMock()] * 5, page=0, total=5)
+    kb = _list_keyboard(page)
+    assert kb is not None
+    # Only filter row, no nav row
+    assert len(kb.inline_keyboard) == 1
 
 
 def test_list_keyboard_next_only_first_page() -> None:
     page = make_list_page([MagicMock()] * 10, page=0, total=15)
     kb = _list_keyboard(page)
     assert kb is not None
-    texts = [b.text for row in kb.inline_keyboard for b in row]
+    nav_row = kb.inline_keyboard[1]
+    texts = [b.text for b in nav_row]
     assert any("Вперёд" in t for t in texts)
     assert not any("Назад" in t for t in texts)
 
@@ -338,7 +389,8 @@ def test_list_keyboard_prev_only_last_page() -> None:
     page = make_list_page([MagicMock()] * 5, page=1, total=15)
     kb = _list_keyboard(page)
     assert kb is not None
-    texts = [b.text for row in kb.inline_keyboard for b in row]
+    nav_row = kb.inline_keyboard[1]
+    texts = [b.text for b in nav_row]
     assert any("Назад" in t for t in texts)
     assert not any("Вперёд" in t for t in texts)
 
@@ -347,6 +399,88 @@ def test_list_keyboard_both_buttons_middle_page() -> None:
     page = make_list_page([MagicMock()] * 10, page=1, total=30)
     kb = _list_keyboard(page)
     assert kb is not None
-    texts = [b.text for row in kb.inline_keyboard for b in row]
+    nav_row = kb.inline_keyboard[1]
+    texts = [b.text for b in nav_row]
     assert any("Назад" in t for t in texts)
     assert any("Вперёд" in t for t in texts)
+
+
+def test_list_keyboard_active_filter_is_highlighted() -> None:
+    page = ListPage(items=[], page=0, total=5, item_type=ItemType.link)
+    kb = _list_keyboard(page)
+    assert kb is not None
+    filter_texts = [b.text for b in kb.inline_keyboard[0]]
+    assert any("[" in t and "Ссылки" in t for t in filter_texts)
+
+
+def test_list_keyboard_nav_buttons_include_type_suffix() -> None:
+    page = ListPage(items=[MagicMock()] * 10, page=0, total=15, item_type=ItemType.task)
+    kb = _list_keyboard(page)
+    assert kb is not None
+    nav_row = kb.inline_keyboard[1]
+    assert any("task" in b.callback_data for b in nav_row)
+
+
+# ── _parse_type_suffix ───────────────────────────────────────────────────────
+
+
+def test_parse_type_suffix_all() -> None:
+    assert _parse_type_suffix("all") is None
+
+
+def test_parse_type_suffix_valid_type() -> None:
+    assert _parse_type_suffix("link") == ItemType.link
+    assert _parse_type_suffix("task") == ItemType.task
+    assert _parse_type_suffix("idea") == ItemType.idea
+    assert _parse_type_suffix("note") == ItemType.note
+
+
+def test_parse_type_suffix_invalid() -> None:
+    assert _parse_type_suffix("invalid") is None
+
+
+# ── cb_list_filter ───────────────────────────────────────────────────────────
+
+
+async def test_cb_list_filter_resets_to_page_zero() -> None:
+    cb = make_callback("list_filter:link")
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=ListPage(
+            items=[make_item("http://example.com", ItemType.link)],
+            page=0,
+            total=1,
+            item_type=ItemType.link,
+        )
+    )
+
+    await cb_list_filter(cb, list_service=svc)
+    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=ItemType.link)
+    cb.message.edit_text.assert_awaited_once()
+
+
+async def test_cb_list_filter_all_passes_none() -> None:
+    cb = make_callback("list_filter:all")
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(return_value=make_list_page([make_item("x")], total=1))
+
+    await cb_list_filter(cb, list_service=svc)
+    svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=None)
+
+
+async def test_cb_list_filter_no_service_is_safe() -> None:
+    cb = make_callback("list_filter:link")
+    await cb_list_filter(cb, list_service=None)
+    cb.message.edit_text.assert_not_awaited()
+
+
+async def test_cb_list_filter_edit_failure_is_silenced() -> None:
+    cb = make_callback("list_filter:note")
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=make_list_page([make_item("x", ItemType.note)], total=1)
+    )
+    cb.message.edit_text = AsyncMock(side_effect=Exception("Message not modified"))
+
+    # Should not raise
+    await cb_list_filter(cb, list_service=svc)

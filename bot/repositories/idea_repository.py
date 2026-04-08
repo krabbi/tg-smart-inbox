@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.idea import Idea, IdeaComplexity, IdeaEffort
@@ -36,3 +36,27 @@ class IdeaRepository:
             .order_by(Item.created_at.desc())
         )
         return list(result.all())
+
+    async def get_page(
+        self, user_id: int, *, limit: int = 10, offset: int = 0
+    ) -> list[tuple[Item, Idea]]:
+        """Return a page of ideas for a user as (Item, Idea) pairs, newest first."""
+        result = await self._session.execute(
+            select(Item, Idea)
+            .join(Idea, Idea.item_id == Item.id)
+            .where(Item.user_id == user_id, Item.type == ItemType.idea)
+            .order_by(Item.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.all())
+
+    async def count_by_user(self, user_id: int) -> int:
+        """Return total number of ideas for a user."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Idea)
+            .join(Item, Idea.item_id == Item.id)
+            .where(Item.user_id == user_id, Item.type == ItemType.idea)
+        )
+        return result.scalar_one()

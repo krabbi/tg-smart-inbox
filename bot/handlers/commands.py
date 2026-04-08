@@ -103,25 +103,81 @@ def _build_help_text(config: Config) -> str:
     return "\n\n".join(sections)
 
 
-def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup | None:
-    """Build prev/next pagination keyboard; return None if only one page."""
-    if not list_page.has_prev and not list_page.has_next:
-        return None
-    buttons = []
+_TYPE_FILTER_LABEL = {
+    None: "Все",
+    ItemType.link: "🔗 Ссылки",
+    ItemType.task: "✅ Задачи",
+    ItemType.idea: "💡 Идеи",
+    ItemType.note: "📝 Заметки",
+}
+
+_TYPE_FILTER_ORDER: list[ItemType | None] = [
+    None,
+    ItemType.link,
+    ItemType.task,
+    ItemType.idea,
+    ItemType.note,
+]
+
+
+def _type_suffix(item_type: ItemType | None) -> str:
+    """Return callback data suffix for the current type filter."""
+    return item_type.value if item_type else "all"
+
+
+def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup:
+    """Build filter + prev/next pagination keyboard."""
+    # Filter row
+    filter_buttons = []
+    for ft in _TYPE_FILTER_ORDER:
+        label = _TYPE_FILTER_LABEL[ft]
+        if ft == list_page.item_type:
+            label = f"[{label}]"
+        cb_data = f"list_filter:{_type_suffix(ft)}"
+        filter_buttons.append(InlineKeyboardButton(text=label, callback_data=cb_data))
+
+    rows: list[list[InlineKeyboardButton]] = [filter_buttons]
+
+    # Pagination row
+    nav_buttons = []
     if list_page.has_prev:
-        buttons.append(
-            InlineKeyboardButton(text="← Назад", callback_data=f"list_page:{list_page.page - 1}")
+        suffix = _type_suffix(list_page.item_type)
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="← Назад", callback_data=f"list_page:{list_page.page - 1}:{suffix}"
+            )
         )
     if list_page.has_next:
-        buttons.append(
-            InlineKeyboardButton(text="Вперёд →", callback_data=f"list_page:{list_page.page + 1}")
+        suffix = _type_suffix(list_page.item_type)
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="Вперёд →", callback_data=f"list_page:{list_page.page + 1}:{suffix}"
+            )
         )
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+    if nav_buttons:
+        rows.append(nav_buttons)
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _parse_type_suffix(suffix: str) -> ItemType | None:
+    """Parse type filter suffix back to ItemType or None."""
+    if suffix == "all":
+        return None
+    try:
+        return ItemType(suffix)
+    except ValueError:
+        return None
 
 
 def _format_list_page(list_page: ListPage) -> str:
     """Format a page of items as a text message."""
-    lines = [f"📋 <b>Последние записи</b> (стр. {list_page.page + 1}):\n"]
+    if list_page.item_type is not None:
+        type_label = _TYPE_FILTER_LABEL.get(list_page.item_type, "")
+        header = f"📋 <b>{type_label}</b> (стр. {list_page.page + 1}):\n"
+    else:
+        header = f"📋 <b>Последние записи</b> (стр. {list_page.page + 1}):\n"
+    lines = [header]
     for item in list_page.items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
         snippet = item.content[:60] + ("…" if len(item.content) > 60 else "")
@@ -174,7 +230,7 @@ async def cmd_list(
     message: Message,
     list_service: ListService | None = None,
 ) -> None:
-    """Show the last 10 items for the user with pagination."""
+    """Show the last 10 items for the user with pagination and type filter."""
     if list_service is None:
         logger.warning("list_service not injected — DI misconfiguration")
         await message.answer("Команда /list скоро будет доступна.")
@@ -204,14 +260,40 @@ async def cb_list_page(
     if list_service is None or callback.message is None:
         return
 
+    parts = callback.data.split(":")  # type: ignore[union-attr]
     try:
-        page = int(callback.data.split(":")[1])  # type: ignore[union-attr]
+        page = int(parts[1])
     except (ValueError, IndexError):
         logger.warning("Invalid list_page callback data: %s", callback.data)
         return
 
+    item_type = _parse_type_suffix(parts[2]) if len(parts) > 2 else None
+
     user_id = callback.from_user.id
-    list_page = await list_service.list_recent(user_id, page=page)
+    list_page = await list_service.list_recent(user_id, page=page, item_type=item_type)
+    reply = _format_list_page(list_page)
+    kb = _list_keyboard(list_page)
+    try:
+        await callback.message.edit_text(reply, reply_markup=kb)
+    except Exception:
+        logger.warning("Could not edit list message (already deleted or unchanged)")
+
+
+@router.callback_query(F.data.startswith("list_filter:"))
+async def cb_list_filter(
+    callback: CallbackQuery,
+    list_service: ListService | None = None,
+) -> None:
+    """Handle type filter selection for /list."""
+    await callback.answer()
+    if list_service is None or callback.message is None:
+        return
+
+    suffix = callback.data.split(":")[1]  # type: ignore[union-attr]
+    item_type = _parse_type_suffix(suffix)
+
+    user_id = callback.from_user.id
+    list_page = await list_service.list_recent(user_id, page=0, item_type=item_type)
     reply = _format_list_page(list_page)
     kb = _list_keyboard(list_page)
     try:

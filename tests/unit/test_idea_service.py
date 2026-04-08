@@ -8,7 +8,7 @@ from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
-from bot.services.idea_service import IdeaService, SavedIdea
+from bot.services.idea_service import IdeaService, IdeasPage, SavedIdea
 
 _DEFAULT_COMPLEXITY = '{"complexity": "simple", "effort": "quick"}'
 
@@ -181,3 +181,47 @@ async def test_extract_tags_lowercases() -> None:
 
     tags = await svc._extract_tags("test")
     assert tags == ["mobile", "app"]
+
+
+async def test_get_page_returns_ideas_page() -> None:
+    svc, _, idea_repo, _ = make_service()
+    idea_repo.count_by_user = AsyncMock(return_value=25)
+    idea_repo.get_page = AsyncMock(return_value=[("row1", "idea1"), ("row2", "idea2")])
+
+    result = await svc.get_page(user_id=1, page=1)
+
+    assert isinstance(result, IdeasPage)
+    assert result.page == 1
+    assert result.total == 25
+    assert len(result.rows) == 2
+    idea_repo.count_by_user.assert_awaited_once_with(1)
+    idea_repo.get_page.assert_awaited_once_with(1, limit=10, offset=10)
+
+
+async def test_get_page_first_page_defaults() -> None:
+    svc, _, idea_repo, _ = make_service()
+    idea_repo.count_by_user = AsyncMock(return_value=5)
+    idea_repo.get_page = AsyncMock(return_value=[])
+
+    result = await svc.get_page(user_id=1)
+
+    assert result.page == 0
+    idea_repo.get_page.assert_awaited_once_with(1, limit=10, offset=0)
+
+
+async def test_ideas_page_has_prev_and_has_next() -> None:
+    page = IdeasPage(rows=[], page=0, total=5)
+    assert not page.has_prev
+    assert not page.has_next
+
+    page = IdeasPage(rows=[], page=0, total=15)
+    assert not page.has_prev
+    assert page.has_next
+
+    page = IdeasPage(rows=[], page=1, total=15)
+    assert page.has_prev
+    assert not page.has_next
+
+    page = IdeasPage(rows=[], page=1, total=30)
+    assert page.has_prev
+    assert page.has_next

@@ -46,6 +46,28 @@ class ItemRepository:
         )
         return result.scalar_one()
 
+    async def get_recent_by_type(
+        self, user_id: int, item_type: ItemType, *, limit: int = 10, offset: int = 0
+    ) -> list[Item]:
+        """Return recent Items of a specific type with pagination, newest first."""
+        result = await self._session.execute(
+            select(Item)
+            .where(Item.user_id == user_id, Item.type == item_type)
+            .order_by(Item.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_user_and_type(self, user_id: int, item_type: ItemType) -> int:
+        """Return total number of Items of a specific type for a user."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Item)
+            .where(Item.user_id == user_id, Item.type == item_type)
+        )
+        return result.scalar_one()
+
     async def search(self, user_id: int, query: str, *, limit: int = 10) -> list[Item]:
         """Search Items by content or description, case-insensitive."""
         pattern = f"%{query.lower()}%"
