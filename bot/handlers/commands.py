@@ -11,6 +11,7 @@ from aiogram.types import (
     Message,
 )
 
+from bot.config import Config
 from bot.models.item import ItemType
 from bot.services.list_service import _SEARCH_LIMIT, ListPage, ListService
 from bot.services.reminder_service import ReminderService
@@ -29,13 +30,77 @@ _TYPE_EMOJI = {
 
 WELCOME_TEXT = (
     "Привет! Я твой умный инбокс.\n\n"
-    "Пересылай мне что угодно:\n"
-    "• Ссылки — сохраню и сделаю саммари по запросу\n"
-    "• Задачи — напомню в нужное время\n"
-    "• Фото и файлы — сохраню в Google Drive\n"
-    "• Идеи — накоплю и помогу выбрать что делать\n\n"
-    "Просто пришли мне сообщение!"
+    "Просто пришли мне сообщение — я автоматически определю тип и сохраню:\n"
+    "• <b>Ссылку</b> — сохраню и предложу саммари\n"
+    "• <b>Задачу</b> — сохраню и предложу напоминание\n"
+    "• <b>Идею</b> — сохраню с тегами и оценкой сложности\n"
+    "• <b>Заметку</b> — просто сохраню на память\n\n"
+    "<b>Команды:</b>\n"
+    "/list — последние записи\n"
+    "/search — поиск по сохранённому\n"
+    "/reminders — предстоящие напоминания\n"
+    "/ideas — банк идей\n"
+    "/help — подробная справка\n"
+    "/cancel — отмена текущего действия"
 )
+
+_HELP_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="Подробнее", callback_data="help")]]
+)
+
+
+def _build_help_text(config: Config) -> str:
+    """Build the detailed help message, hiding unconfigured optional features."""
+    sections = [
+        "<b>Подробная справка</b>\n",
+        (
+            "<b>Типы контента</b>\n"
+            "Отправь любое сообщение — бот определит тип автоматически:\n\n"
+            "🔗 <b>Ссылка</b> — отправь URL, например:\n"
+            "<code>https://example.com/interesting-article</code>\n"
+            "Бот сохранит и предложит кнопки: Саммари, Сохранить, Напомнить.\n\n"
+            "✅ <b>Задача</b> — напиши что нужно сделать, например:\n"
+            "<code>купить молоко завтра</code>\n"
+            "Бот предложит создать напоминание на нужное время.\n\n"
+            "💡 <b>Идея</b> — напиши идею или концепцию, например:\n"
+            "<code>а что если сделать бота для учёта расходов</code>\n"
+            "Бот сохранит с тегами и оценкой сложности.\n"
+            "Напиши <code>что поделать?</code> — бот предложит идею из банка.\n\n"
+            "📝 <b>Заметка</b> — любой другой текст сохранится как заметка."
+        ),
+    ]
+
+    if config.groq_api_key:
+        sections.append(
+            "🎤 <b>Голосовые сообщения</b>\n"
+            "Отправь голосовое — бот расшифрует и обработает как текст."
+        )
+
+    if config.google_drive_folder_id:
+        sections.append(
+            "🖼️ <b>Фото и файлы</b>\nОтправь фото или документ — бот загрузит в Google Drive."
+        )
+
+    sections.append(
+        "<b>Напоминания</b>\n"
+        "Когда напоминание сработает, появятся кнопки:\n"
+        "⏰ +1ч — отложить на час\n"
+        "🌙 +1д — отложить на день\n"
+        "✅ Принято — отметить выполненным\n"
+        "Если не нажать кнопку — бот напомнит повторно через 5 минут."
+    )
+
+    sections.append(
+        "<b>Команды</b>\n"
+        "/list — последние 10 записей с пагинацией\n"
+        "/search <code>&lt;запрос&gt;</code> — поиск по сохранённому\n"
+        "/reminders — список предстоящих напоминаний\n"
+        "/ideas — банк идей с тегами и сложностью\n"
+        "/help — эта справка\n"
+        "/cancel — отмена текущего действия"
+    )
+
+    return "\n\n".join(sections)
 
 
 def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup | None:
@@ -68,8 +133,29 @@ def _format_list_page(list_page: ListPage) -> str:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    """Handle /start command with a welcome message."""
-    await message.answer(WELCOME_TEXT)
+    """Handle /start command with a welcome message and help button."""
+    await message.answer(WELCOME_TEXT, reply_markup=_HELP_KEYBOARD)
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message, config: Config | None = None) -> None:
+    """Show detailed help message with all features and examples."""
+    if config is None:
+        await message.answer(WELCOME_TEXT, reply_markup=_HELP_KEYBOARD)
+        return
+    await message.answer(_build_help_text(config))
+
+
+@router.callback_query(F.data == "help")
+async def cb_help(callback: CallbackQuery, config: Config | None = None) -> None:
+    """Show detailed help when the inline button is pressed."""
+    await callback.answer()
+    if callback.message is None:
+        return
+    if config is None:
+        await callback.message.answer(WELCOME_TEXT)
+        return
+    await callback.message.answer(_build_help_text(config))
 
 
 @router.message(Command("cancel"))
