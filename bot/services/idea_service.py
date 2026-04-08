@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +62,28 @@ If the list is empty, say so politely.
 """
 
 
+_IDEAS_PAGE_SIZE = 10
+
+
+@dataclass(frozen=True)
+class IdeasPage:
+    """A page of ideas with pagination metadata."""
+
+    rows: list[tuple[Item, Idea]] = field(default_factory=list)
+    page: int = 0
+    total: int = 0
+
+    @property
+    def has_prev(self) -> bool:
+        """True if there is a previous page."""
+        return self.page > 0
+
+    @property
+    def has_next(self) -> bool:
+        """True if there are more pages after this one."""
+        return (self.page + 1) * _IDEAS_PAGE_SIZE < self.total
+
+
 @dataclass(frozen=True)
 class SavedIdea:
     """Result of saving an idea."""
@@ -115,6 +137,14 @@ class IdeaService:
     async def get_all(self, user_id: int) -> list[tuple[Item, Idea]]:
         """Return all (Item, Idea) pairs for user, newest first."""
         return await self._idea_repo.get_all(user_id)
+
+    async def get_page(self, user_id: int, page: int = 0) -> IdeasPage:
+        """Return a page of ideas with total count for pagination."""
+        total = await self._idea_repo.count_by_user(user_id)
+        rows = await self._idea_repo.get_page(
+            user_id, limit=_IDEAS_PAGE_SIZE, offset=page * _IDEAS_PAGE_SIZE
+        )
+        return IdeasPage(rows=rows, page=page, total=total)
 
     async def _analyse(
         self, text: str
