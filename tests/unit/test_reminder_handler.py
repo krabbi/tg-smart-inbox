@@ -258,6 +258,8 @@ async def test_cb_remind_snooze_no_service_replies_unavailable() -> None:
 async def test_cb_remind_ack_acknowledges_reminder() -> None:
     reminder_id = str(uuid.uuid4())
     cb = make_callback_with_user(f"remind_ack:{reminder_id}", user_id=7)
+    cb.message.html_text = "🔔 Напоминание:\nкупить молоко"
+    cb.message.edit_text = AsyncMock()
 
     svc = MagicMock(spec=ReminderService)
     svc.acknowledge = AsyncMock(return_value=True)
@@ -265,7 +267,29 @@ async def test_cb_remind_ack_acknowledges_reminder() -> None:
     await cb_remind_ack(cb, reminder_service=svc)
 
     svc.acknowledge.assert_awaited_once_with(reminder_id=uuid.UUID(reminder_id), user_id=7)
-    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    cb.message.edit_text.assert_awaited_once()
+    call_args = cb.message.edit_text.call_args
+    assert "Выполнено" in call_args[0][0]
+    assert "🔔 Напоминание:\nкупить молоко" in call_args[0][0]
+    assert call_args[1]["reply_markup"] is None
+    assert call_args[1]["parse_mode"] == "HTML"
+
+
+async def test_cb_remind_ack_falls_back_to_text_when_no_html_text() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_ack:{reminder_id}", user_id=7)
+    cb.message.html_text = None
+    cb.message.text = "🔔 Напоминание:\nкупить молоко"
+    cb.message.edit_text = AsyncMock()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.acknowledge = AsyncMock(return_value=True)
+
+    await cb_remind_ack(cb, reminder_service=svc)
+
+    call_args = cb.message.edit_text.call_args
+    assert "купить молоко" in call_args[0][0]
+    assert "Выполнено" in call_args[0][0]
 
 
 async def test_cb_remind_ack_no_service_replies_unavailable() -> None:

@@ -231,12 +231,29 @@ async def test_extract_url_from_status_message_no_prefix() -> None:
 # ── cb_link_save ──────────────────────────────────────────────────────────────
 
 
-async def test_cb_link_save_answers_and_removes_keyboard() -> None:
+async def test_cb_link_save_appends_confirmation_and_removes_keyboard() -> None:
     cb = make_callback("link:save:uuid")
+    cb.message.html_text = "🔗 Ссылка сохранена:\nhttps://example.com"
 
     await cb_link_save(cb)
+
     cb.answer.assert_awaited_once()
-    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    cb.message.edit_text.assert_awaited_once()
+    call_args = cb.message.edit_text.call_args
+    text = call_args[0][0]
+    assert "Сохранено" in text
+    assert "https://example.com" in text
+    assert call_args[1]["reply_markup"] is None
+    assert call_args[1]["parse_mode"] == "HTML"
+
+
+async def test_cb_link_save_no_message_returns_early() -> None:
+    cb = make_callback("link:save:uuid")
+    cb.message = None
+
+    await cb_link_save(cb)
+
+    cb.answer.assert_awaited_once()
 
 
 # ── cb_link_remind ────────────────────────────────────────────────────────────

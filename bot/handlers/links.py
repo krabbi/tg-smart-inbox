@@ -151,9 +151,16 @@ def _extract_url_from_status_message(text: str) -> str:
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:save:"))
 async def cb_link_save(callback: CallbackQuery) -> None:
-    """Handle [Сохранить] button — confirm save."""
-    await callback.answer("✅ Сохранено!")
-    await callback.message.edit_reply_markup(reply_markup=None)  # type: ignore[union-attr]
+    """Handle [Сохранить] button — confirm save with persistent text."""
+    await callback.answer()
+    if callback.message is None:
+        return
+    existing_text = callback.message.html_text or callback.message.text or ""
+    await callback.message.edit_text(
+        existing_text + "\n\n🔖 <i>Сохранено</i>",
+        parse_mode="HTML",
+        reply_markup=None,
+    )
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:remind:"))
