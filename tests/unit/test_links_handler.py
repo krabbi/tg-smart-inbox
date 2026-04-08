@@ -132,11 +132,15 @@ async def test_cb_link_summary_scraping_error_shows_error_message() -> None:
     assert "❌" in cb.message.edit_text.call_args_list[1][0][0]
 
 
-async def test_cb_link_save_removes_keyboard() -> None:
+async def test_cb_link_save_appends_confirmation_text() -> None:
     cb = make_callback("link:save:abc")
+    cb.message.html_text = "🔗 Ссылка сохранена:\nhttps://example.com"
     await cb_link_save(cb)
     cb.answer.assert_awaited_once()
-    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    cb.message.edit_text.assert_awaited_once()
+    text = cb.message.edit_text.call_args[0][0]
+    assert "Сохранено" in text
+    assert "https://example.com" in text
 
 
 async def test_cb_link_remind_answers() -> None:

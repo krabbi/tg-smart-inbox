@@ -199,4 +199,9 @@ async def cb_remind_ack(
         await callback.message.answer("Не удалось подтвердить напоминание.")
         return
 
-    await callback.message.edit_reply_markup(reply_markup=None)
+    existing_text = callback.message.html_text or callback.message.text or ""
+    await callback.message.edit_text(
+        existing_text + "\n\n✅ <i>Выполнено</i>",
+        parse_mode="HTML",
+        reply_markup=None,
+    )
