@@ -16,6 +16,7 @@ router = Router(name="links")
 _CB_SUMMARY = "link:summary:{item_id}"
 _CB_SAVE = "link:save:{item_id}"
 _CB_REMIND = "link:remind:{item_id}"
+_CB_RETRY = "link:retry:{item_id}"
 
 
 def _link_keyboard(item_id: str) -> InlineKeyboardMarkup:
@@ -40,6 +41,39 @@ def _link_keyboard(item_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def _save_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """Build keyboard with save button shown after summary is ready."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔖 Сохранить",
+                    callback_data=_CB_SAVE.format(item_id=item_id),
+                ),
+            ]
+        ]
+    )
+
+
+def _retry_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """Build keyboard with retry button shown on summarization error."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Попробовать снова",
+                    callback_data=_CB_RETRY.format(item_id=item_id),
+                ),
+            ]
+        ]
+    )
+
+
+def _extract_url(message_text: str) -> str:
+    """Extract URL from the saved-link message text."""
+    return message_text.split("\n")[-1].strip()
+
+
 async def handle_link_message(message: Message, url: str, link_service: LinkService) -> None:
     """Save a link and show action buttons. Called from the messages handler."""
     user_id = message.from_user.id if message.from_user else 0
@@ -48,23 +82,71 @@ async def handle_link_message(message: Message, url: str, link_service: LinkServ
     await message.answer(f"🔗 Ссылка сохранена:\n{url}", reply_markup=keyboard)
 
 
+async def _do_summarize(
+    callback: CallbackQuery, item_id: str, url: str, link_service: LinkService
+) -> None:
+    """Run the summarize flow: show loading, fetch summary, update message."""
+    # Show loading state immediately, preserving URL
+    await callback.message.edit_text(  # type: ignore[union-attr]
+        f"🔗 {url}\n\n⏳ Загружаю саммари...",
+        reply_markup=None,
+    )
+
+    try:
+        summary = await link_service.summarize(url)
+        text = (
+            f"🔗 {html.escape(url)}\n\n"
+            f"📋 <b>{html.escape(summary.title)}</b>\n\n"
+            f"{html.escape(summary.body)}"
+        )
+        keyboard = _save_keyboard(item_id)
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            text, parse_mode="HTML", reply_markup=keyboard
+        )
+    except ScrapingError as exc:
+        logger.warning("Scraping failed for item %s: %s", item_id, exc)
+        keyboard = _retry_keyboard(item_id)
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"🔗 {url}\n\n❌ Не удалось загрузить страницу.",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        logger.exception("Unexpected error summarising item %s", item_id)
+        keyboard = _retry_keyboard(item_id)
+        await callback.message.edit_text(  # type: ignore[union-attr]
+            f"🔗 {url}\n\n❌ Не удалось получить саммари.",
+            reply_markup=keyboard,
+        )
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("link:summary:"))
 async def cb_link_summary(callback: CallbackQuery, link_service: LinkService) -> None:
     """Handle [Саммари] button — fetch page and show Claude summary."""
     item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
-    url = callback.message.text.split("\n")[-1] if callback.message else ""  # type: ignore[union-attr]
+    url = _extract_url(callback.message.text) if callback.message else ""  # type: ignore[union-attr]
 
-    await callback.answer("Загружаю страницу...")
-    try:
-        summary = await link_service.summarize(url)
-        text = f"📋 <b>{html.escape(summary.title)}</b>\n\n{html.escape(summary.body)}"
-        await callback.message.edit_text(text, parse_mode="HTML")  # type: ignore[union-attr]
-    except ScrapingError as exc:
-        logger.warning("Scraping failed for item %s: %s", item_id, exc)
-        await callback.message.edit_text("❌ Не удалось загрузить страницу.")  # type: ignore[union-attr]
-    except Exception:
-        logger.exception("Unexpected error summarising item %s", item_id)
-        await callback.message.edit_text("❌ Не удалось получить саммари. Попробуй ещё раз.")  # type: ignore[union-attr]
+    await callback.answer()
+    await _do_summarize(callback, item_id, url, link_service)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("link:retry:"))
+async def cb_link_retry(callback: CallbackQuery, link_service: LinkService) -> None:
+    """Handle [Попробовать снова] button — retry summarization."""
+    item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
+    # URL is on the first line after the emoji prefix
+    url = _extract_url_from_status_message(callback.message.text) if callback.message else ""  # type: ignore[union-attr]
+
+    await callback.answer()
+    await _do_summarize(callback, item_id, url, link_service)
+
+
+def _extract_url_from_status_message(text: str) -> str:
+    """Extract URL from a status message (loading/error) where first line is '🔗 <url>'."""
+    first_line = text.split("\n")[0].strip()
+    # Remove the link emoji prefix
+    if first_line.startswith("🔗 "):
+        return first_line[len("🔗 ") :]
+    return first_line
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:save:"))

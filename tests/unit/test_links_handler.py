@@ -90,8 +90,9 @@ async def test_cb_link_summary_edits_message() -> None:
     svc = make_link_service()
     await cb_link_summary(cb, svc)
     cb.answer.assert_awaited_once()
-    cb.message.edit_text.assert_awaited_once()
-    edited = cb.message.edit_text.call_args[0][0]
+    # Two edit_text calls: loading state + final summary
+    assert cb.message.edit_text.await_count == 2
+    edited = cb.message.edit_text.call_args_list[1][0][0]
     assert "Test Title" in edited
     assert "Test summary." in edited
 
@@ -102,9 +103,10 @@ async def test_cb_link_summary_uses_html_parse_mode() -> None:
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
     svc = make_link_service()
     await cb_link_summary(cb, svc)
-    _, kwargs = cb.message.edit_text.call_args
+    # Final summary is the second edit_text call
+    _, kwargs = cb.message.edit_text.call_args_list[1]
     assert kwargs.get("parse_mode") == "HTML"
-    text = cb.message.edit_text.call_args[0][0]
+    text = cb.message.edit_text.call_args_list[1][0][0]
     # Must not contain raw JSON curly braces at top level
     assert not text.startswith("{")
     assert "<b>" in text
@@ -116,7 +118,8 @@ async def test_cb_link_summary_with_body_only() -> None:
     summary = LinkSummary(title="T", body="Short body.", url="https://x.com")
     svc = make_link_service(summary=summary)
     await cb_link_summary(cb, svc)
-    cb.message.edit_text.assert_awaited_once()
+    # Two edit_text calls: loading state + final summary
+    assert cb.message.edit_text.await_count == 2
 
 
 async def test_cb_link_summary_scraping_error_shows_error_message() -> None:
@@ -124,8 +127,9 @@ async def test_cb_link_summary_scraping_error_shows_error_message() -> None:
     cb = make_callback(f"link:summary:{item_id}")
     svc = make_link_service(scraping_error=True)
     await cb_link_summary(cb, svc)
-    cb.message.edit_text.assert_awaited_once()
-    assert "❌" in cb.message.edit_text.call_args[0][0]
+    # Two edit_text calls: loading state + error message
+    assert cb.message.edit_text.await_count == 2
+    assert "❌" in cb.message.edit_text.call_args_list[1][0][0]
 
 
 async def test_cb_link_save_removes_keyboard() -> None:
