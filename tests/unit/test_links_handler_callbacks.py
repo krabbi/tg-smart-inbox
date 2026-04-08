@@ -49,9 +49,7 @@ async def test_cb_link_summary_edits_message_with_summary() -> None:
 async def test_cb_link_summary_answers_callback() -> None:
     cb = make_callback("link:summary:uuid")
     svc = MagicMock(spec=LinkService)
-    svc.summarize = AsyncMock(
-        return_value=LinkSummary(title="T", body="S", url="")
-    )
+    svc.summarize = AsyncMock(return_value=LinkSummary(title="T", body="S", url=""))
 
     await cb_link_summary(cb, link_service=svc)
     cb.answer.assert_awaited()

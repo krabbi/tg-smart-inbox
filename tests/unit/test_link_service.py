@@ -11,7 +11,9 @@ from bot.services.claude_client import ClaudeClient
 from bot.services.link_service import LinkService, LinkSummary
 from bot.services.scraper import Scraper
 
-_PLAIN_RESPONSE = "How to bake bread\n\nBread baking is simple. Use strong flour.\n• Tip one\n• Tip two"
+_PLAIN_RESPONSE = (
+    "How to bake bread\n\nBread baking is simple. Use strong flour.\n• Tip one\n• Tip two"
+)
 
 
 def make_link_service(
