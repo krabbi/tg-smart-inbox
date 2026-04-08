@@ -1,5 +1,3 @@
-import json
-import re
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,15 +8,20 @@ from bot.services.claude_client import ClaudeClient
 from bot.services.scraper import Scraper
 
 _SUMMARIZE_PROMPT = """\
-You are a concise content summarizer. Given the text of a web page, return a JSON object with:
-- "title": the page title or best guess (string)
-- "summary": 3-5 sentence summary in the same language as the content (string)
-- "takeaways": list of 2-3 key points (list of strings)
+You are a helpful assistant that summarizes web pages in the same language as the content.
 
-Respond with JSON only. No explanation outside the JSON.
+Given the text of a web page, respond with:
+- Line 1: the page title (exact title or your best guess)
+- Line 2: blank
+- Lines 3+: 3-5 sentences explaining what this page is about, written in a natural, \
+friendly tone — as if you're telling a friend what they'll find here. \
+No bullet points, no headers, no lists. Just flowing prose. \
+Complete every sentence — never cut off mid-sentence.
 
 Page text:
 """
+
+_SUMMARIZE_MAX_TOKENS = 512
 
 
 @dataclass(frozen=True)
@@ -26,9 +29,8 @@ class LinkSummary:
     """Result of summarizing a link."""
 
     title: str
-    summary: str
+    body: str
     url: str
-    takeaways: list[str]
 
 
 class LinkService:
@@ -58,24 +60,17 @@ class LinkService:
         Raises ScrapingError if the page is unreachable.
         Raises ClassificationError if Claude fails.
         """
-        text = await self._scraper.fetch_text(url)
-        raw = await self._claude.complete(_SUMMARIZE_PROMPT + text)
+        page_text = await self._scraper.fetch_text(url)
+        raw = await self._claude.complete(
+            _SUMMARIZE_PROMPT + page_text, max_tokens=_SUMMARIZE_MAX_TOKENS
+        )
         return self._parse_summary(raw, url)
 
     @staticmethod
     def _parse_summary(raw: str, url: str) -> LinkSummary:
-        """Parse Claude's JSON response into a LinkSummary."""
-        # Extract JSON from inside code fences when Claude wraps the response.
-        # Use greedy \{[\s\S]*\} so nested {} in string values are not truncated.
-        fenced = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", raw.strip())
-        text = fenced.group(1).strip() if fenced else raw.strip()
-        try:
-            data = json.loads(text)
-            return LinkSummary(
-                title=str(data.get("title", url)),
-                summary=str(data.get("summary", "")),
-                url=url,
-                takeaways=[str(t) for t in data.get("takeaways", [])],
-            )
-        except (json.JSONDecodeError, TypeError):
-            return LinkSummary(title=url, summary=raw.strip(), url=url, takeaways=[])
+        """Split Claude's plain-text response into title and body."""
+        text = raw.strip()
+        parts = text.split("\n", 1)
+        title = parts[0].strip() if parts else url
+        body = parts[1].strip() if len(parts) > 1 else text
+        return LinkSummary(title=title or url, body=body, url=url)

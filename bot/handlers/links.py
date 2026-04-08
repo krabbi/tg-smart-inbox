@@ -57,11 +57,7 @@ async def cb_link_summary(callback: CallbackQuery, link_service: LinkService) ->
     await callback.answer("Загружаю страницу...")
     try:
         summary = await link_service.summarize(url)
-        text = f"📋 <b>{html.escape(summary.title)}</b>\n\n{html.escape(summary.summary)}"
-        if summary.takeaways:
-            text += "\n\n<b>Ключевые моменты:</b>\n" + "\n".join(
-                f"• {html.escape(t)}" for t in summary.takeaways
-            )
+        text = f"📋 <b>{html.escape(summary.title)}</b>\n\n{html.escape(summary.body)}"
         await callback.message.edit_text(text, parse_mode="HTML")  # type: ignore[union-attr]
     except ScrapingError as exc:
         logger.warning("Scraping failed for item %s: %s", item_id, exc)

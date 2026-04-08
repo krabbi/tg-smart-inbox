@@ -57,9 +57,8 @@ def make_link_service(
             return_value=summary
             or LinkSummary(
                 title="Test Title",
-                summary="Test summary.",
+                body="Test summary.\n• point 1\n• point 2",
                 url="https://example.com",
-                takeaways=["point 1", "point 2"],
             )
         )
     return svc
@@ -81,8 +80,8 @@ async def test_handle_link_message_saves_and_replies() -> None:
     await handle_link_message(message, "https://example.com", svc)
     svc.save.assert_awaited_once_with("https://example.com", 1)
     message.answer.assert_awaited_once()
-    _, kwargs = message.answer.call_args
-    assert "reply_markup" in kwargs
+    call_kwargs = message.answer.call_args[1]
+    assert "reply_markup" in call_kwargs
 
 
 async def test_cb_link_summary_edits_message() -> None:
@@ -111,10 +110,10 @@ async def test_cb_link_summary_uses_html_parse_mode() -> None:
     assert "<b>" in text
 
 
-async def test_cb_link_summary_with_no_takeaways() -> None:
+async def test_cb_link_summary_with_body_only() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
-    summary = LinkSummary(title="T", summary="S", url="https://x.com", takeaways=[])
+    summary = LinkSummary(title="T", body="Short body.", url="https://x.com")
     svc = make_link_service(summary=summary)
     await cb_link_summary(cb, svc)
     cb.message.edit_text.assert_awaited_once()
