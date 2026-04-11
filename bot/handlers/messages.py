@@ -1,5 +1,7 @@
 import logging
 import re
+import uuid
+from datetime import UTC, datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -116,8 +118,6 @@ async def _handle_task_with_time(
         )
         return
 
-    from datetime import UTC, datetime
-
     try:
         remind_at = await time_parser.parse(text, now=datetime.now(UTC))
     except TimeParseError:
@@ -130,8 +130,6 @@ async def _handle_task_with_time(
             "Для отмены — /cancel"
         )
         return
-
-    import uuid
 
     try:
         await reminder_service.create(item_id=uuid.UUID(item_id), remind_at=remind_at)

@@ -1,6 +1,8 @@
 """Unit tests for voice message handler."""
 
 import io
+import uuid as uuid_mod
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.fsm.context import FSMContext
@@ -13,7 +15,9 @@ from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService, SavedIdea
 from bot.services.link_service import LinkService
 from bot.services.note_service import NoteService, SavedNote
+from bot.services.reminder_service import ReminderService
 from bot.services.task_service import SavedTask, TaskService
+from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
 
 
@@ -197,6 +201,50 @@ async def test_handle_voice_routes_task_without_time_shows_remind_button() -> No
     kb = last_call[1]["reply_markup"]
     assert kb is not None
     assert "task_remind:task-uuid" in kb.inline_keyboard[0][0].callback_data
+
+
+async def test_handle_voice_routes_task_with_time_auto_creates_reminder() -> None:
+    """Voice task with time expression auto-parses time and creates reminder."""
+    msg = make_message()
+    svc = MagicMock(spec=TranscriptionService)
+    svc.transcribe = AsyncMock(return_value="завтра сдать отчёт")
+
+    classifier = MagicMock(spec=ClassifierService)
+    classifier.classify = AsyncMock(return_value=MessageType.TASK)
+
+    item_id = uuid_mod.uuid4()
+    mock_item = MagicMock()
+    mock_item.id = item_id
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+
+    remind_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    reminder_svc = MagicMock(spec=ReminderService)
+    reminder_svc.create = AsyncMock()
+
+    state = make_state()
+
+    with patch("bot.handlers.voice.has_time_expression", return_value=True):
+        await handle_voice(
+            msg,
+            state=state,
+            transcription_service=svc,
+            classifier=classifier,
+            task_service=task_svc,
+            time_parser=time_parser,
+            reminder_service=reminder_svc,
+        )
+
+    task_svc.save.assert_awaited_once_with("завтра сдать отчёт", 1)
+    reminder_svc.create.assert_awaited_once_with(item_id=item_id, remind_at=remind_at)
+    # FSM should NOT be entered
+    state.set_state.assert_not_awaited()
+    # Confirmation should contain bell emoji
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("\U0001f514" in r for r in replies)
 
 
 async def test_handle_voice_routes_note_and_confirms() -> None:
