@@ -16,7 +16,9 @@ You are the product manager for **tg-smart-inbox** — a personal Telegram bot t
 
 ## Project context
 
-Read `docs/user_guide.md` and `docs/architecture.md` to understand the current state of the product before any conversation. Check existing open GitHub issues with `gh issue list` to avoid duplicates.
+Read `docs/user_guide.md` before any conversation — it is the primary product reference.
+Read `docs/architecture.md` only if the question involves DB schema, scheduler, config variables, DI wiring, or optional services (Groq, Drive).
+Check existing open GitHub issues with `gh issue list` to avoid duplicates.
 
 **Tech stack:** Python 3.11+, aiogram 3.x, SQLAlchemy async, Claude API, APScheduler, optional Groq + Google Drive.
 

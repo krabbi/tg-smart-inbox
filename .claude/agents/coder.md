@@ -19,7 +19,8 @@ You are a senior Python engineer working on **tg-smart-inbox** — a Telegram bo
 
 ### 1. Understand the task
 - Read the linked GitHub issue in full.
-- Read `docs/architecture.md` and relevant source files to understand the current state.
+- Read relevant source files to understand the current state.
+- Read `docs/architecture.md` only if the task involves DB schema, new service/repository, scheduler, config, or DI wiring.
 - Read `.claude/coding-patterns.md` and `.claude/testing-guide.md` before writing any code.
 - If anything about **expected product behaviour** is unclear, consult the product-manager agent (see below) before writing a single line of code.
 
@@ -92,61 +93,6 @@ When you hit a product question during implementation — something about **what
 - Whether to use `logging.warning` or `logging.error` for a specific case
 - Order of fields in a dataclass
 
-## Code patterns to follow
+## Code patterns
 
-### New service method
-```python
-async def do_something(self, item_id: uuid.UUID, user_id: int) -> SomeResult:
-    """One-line imperative docstring."""
-    record = await self._repo.get_by_id_for_user(item_id, user_id)
-    if record is None:
-        return SomeResult(ok=False)
-    # ... logic ...
-    await self._session.commit()
-    return SomeResult(ok=True)
-```
-
-### New repository method
-```python
-async def get_by_id_for_user(self, record_id: uuid.UUID, user_id: int) -> Record | None:
-    """Return record if it belongs to user_id, else None."""
-    result = await self._session.execute(
-        select(Record)
-        .join(Item, Record.item_id == Item.id)
-        .where(Record.id == record_id, Item.user_id == user_id)
-    )
-    return result.scalar_one_or_none()
-```
-
-### New handler callback
-```python
-@router.callback_query(F.data.startswith("prefix:"))
-async def cb_handler(
-    callback: CallbackQuery,
-    some_service: SomeService | None = None,
-) -> None:
-    """One-line docstring."""
-    await callback.answer()
-    if callback.message is None or callback.from_user is None:
-        return
-    if some_service is None:
-        await callback.message.answer("Сервис временно недоступен.")
-        return
-    # ... call service, reply to user ...
-```
-
-### Unit test pattern
-```python
-async def test_method_does_expected_thing() -> None:
-    session = MagicMock(spec=AsyncSession)
-    session.commit = AsyncMock()
-    repo = MagicMock(spec=SomeRepository)
-    repo.some_method = AsyncMock(return_value=mock_value)
-    svc = SomeService(session=session, repo=repo)
-
-    result = await svc.do_something(item_id=uuid.uuid4(), user_id=1)
-
-    repo.some_method.assert_awaited_once_with(...)
-    session.commit.assert_awaited_once()
-    assert result.ok is True
-```
+All patterns are in `.claude/coding-patterns.md` — read it before writing any handler, service, repository, or test.
