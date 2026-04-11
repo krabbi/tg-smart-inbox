@@ -9,14 +9,17 @@ from aiogram.types import Message
 from bot.exceptions import TranscriptionError
 from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
 from bot.handlers.links import handle_link_message
-from bot.handlers.reminders import ask_reminder
+from bot.handlers.messages import _handle_task_with_time
+from bot.handlers.reminders import task_remind_keyboard
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.note_service import NoteService
+from bot.services.reminder_service import ReminderService
 from bot.services.task_service import TaskService
+from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
-from bot.utils.text import extract_url
+from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,8 @@ async def handle_voice(
     idea_service: IdeaService | None = None,
     task_service: TaskService | None = None,
     note_service: NoteService | None = None,
+    time_parser: TimeParser | None = None,
+    reminder_service: ReminderService | None = None,
 ) -> None:
     """Download voice message, transcribe it, then route through the classifier pipeline."""
     if transcription_service is None:
@@ -97,11 +102,22 @@ async def handle_voice(
             await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
             return
         try:
-            await ask_reminder(
-                message=message, task_text=transcript, item_id=str(saved.item.id), state=state
-            )
+            if has_time_expression(transcript):
+                await _handle_task_with_time(
+                    message=message,
+                    text=transcript,
+                    item_id=str(saved.item.id),
+                    state=state,
+                    time_parser=time_parser,
+                    reminder_service=reminder_service,
+                )
+            else:
+                await message.answer(
+                    "✅ Задача сохранена!",
+                    reply_markup=task_remind_keyboard(str(saved.item.id)),
+                )
         except Exception:
-            logger.exception("Failed to start reminder dialog for user %s", user_id)
+            logger.exception("Failed to handle task reminder for user %s", user_id)
             await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
     elif msg_type == MessageType.NOTE and note_service is not None:
         try:

@@ -5,14 +5,22 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from bot.exceptions import TimeParseError
 from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
-from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY, ReminderStates, ask_reminder
+from bot.handlers.reminders import (
+    _ATTEMPTS_KEY,
+    _ITEM_ID_KEY,
+    ReminderStates,
+    task_remind_keyboard,
+)
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.media_service import MediaService
 from bot.services.note_service import NoteService
+from bot.services.reminder_service import ReminderService
 from bot.services.task_service import TaskService
+from bot.services.time_parser import TimeParser
 from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
@@ -91,6 +99,54 @@ async def handle_document(
         await message.answer("Не удалось обработать файл. Попробуй ещё раз.")
 
 
+async def _handle_task_with_time(
+    message: Message,
+    text: str,
+    item_id: str,
+    state: FSMContext,
+    time_parser: TimeParser | None,
+    reminder_service: ReminderService | None,
+) -> None:
+    """Try to auto-parse time from task text and create reminder; fall back to FSM on failure."""
+    if time_parser is None or reminder_service is None:
+        # Cannot auto-parse — show remind button as fallback
+        await message.answer(
+            "\u2705 Задача сохранена!",
+            reply_markup=task_remind_keyboard(item_id),
+        )
+        return
+
+    from datetime import UTC, datetime
+
+    try:
+        remind_at = await time_parser.parse(text, now=datetime.now(UTC))
+    except TimeParseError:
+        # Could not auto-parse — enter FSM for manual time input
+        await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
+        await state.set_state(ReminderStates.waiting_for_time)
+        await message.answer(
+            "\u2705 Задача сохранена! Уточни время напоминания "
+            "(или отправь то же выражение ещё раз):\n"
+            "Для отмены — /cancel"
+        )
+        return
+
+    import uuid
+
+    try:
+        await reminder_service.create(item_id=uuid.UUID(item_id), remind_at=remind_at)
+    except Exception:
+        logger.exception("Failed to auto-create reminder for item %s", item_id)
+        await message.answer(
+            "\u2705 Задача сохранена, но не удалось создать напоминание.",
+            reply_markup=task_remind_keyboard(item_id),
+        )
+        return
+
+    formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
+    await message.answer(f"\u2705 Задача сохранена!\n\U0001f514 Напомню {formatted}!")
+
+
 @router.message(F.text)
 async def handle_text(
     message: Message,
@@ -100,6 +156,8 @@ async def handle_text(
     idea_service: IdeaService | None = None,
     task_service: TaskService | None = None,
     note_service: NoteService | None = None,
+    time_parser: TimeParser | None = None,
+    reminder_service: ReminderService | None = None,
 ) -> None:
     """Route incoming text to the correct pipeline based on AI classification."""
     text = message.text or ""
@@ -131,7 +189,7 @@ async def handle_text(
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
             return
-        reply = "💡 Идея сохранена!"
+        reply = "\U0001f4a1 Идея сохранена!"
         meta = []
         if saved.idea.complexity:
             meta.append(_COMPLEXITY_LABEL[saved.idea.complexity])
@@ -152,20 +210,22 @@ async def handle_text(
             return
         try:
             if has_time_expression(text):
-                # User already stated when — skip yes/no and go straight to time input.
-                await state.update_data({_ITEM_ID_KEY: str(saved.item.id), _ATTEMPTS_KEY: 0})
-                await state.set_state(ReminderStates.waiting_for_time)
-                await message.answer(
-                    "📝 Задача сохранена! Уточни время напоминания "
-                    "(или отправь то же выражение ещё раз):\n"
-                    "Для отмены — /cancel"
+                await _handle_task_with_time(
+                    message=message,
+                    text=text,
+                    item_id=str(saved.item.id),
+                    state=state,
+                    time_parser=time_parser,
+                    reminder_service=reminder_service,
                 )
             else:
-                await ask_reminder(
-                    message=message, task_text=text, item_id=str(saved.item.id), state=state
+                # No time expression — save without dialog, offer remind button
+                await message.answer(
+                    "\u2705 Задача сохранена!",
+                    reply_markup=task_remind_keyboard(str(saved.item.id)),
                 )
         except Exception:
-            logger.exception("Failed to start reminder dialog for user %s", user_id)
+            logger.exception("Failed to handle task reminder for user %s", user_id)
             await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
     elif msg_type == MessageType.NOTE and note_service is not None:
         try:
@@ -174,7 +234,7 @@ async def handle_text(
             logger.exception("Note save failed for user %s", user_id)
             await message.answer("Не удалось сохранить заметку. Попробуй ещё раз.")
             return
-        await message.answer("📝 Заметка сохранена!")
+        await message.answer("\U0001f4dd Заметка сохранена!")
     else:
         await message.answer(
             f"Тип: <b>{msg_type.value}</b>. Полная обработка будет добавлена позже."

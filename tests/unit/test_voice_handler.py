@@ -168,7 +168,8 @@ async def test_handle_voice_routes_idea_shows_complexity_labels() -> None:
     assert any("долгосрочно" in r for r in replies)
 
 
-async def test_handle_voice_routes_task_and_asks_reminder() -> None:
+async def test_handle_voice_routes_task_without_time_shows_remind_button() -> None:
+    """Voice task without time expression shows inline Remind button."""
     msg = make_message()
     svc = MagicMock(spec=TranscriptionService)
     svc.transcribe = AsyncMock(return_value="купить молоко")
@@ -181,18 +182,21 @@ async def test_handle_voice_routes_task_and_asks_reminder() -> None:
     task_svc = MagicMock(spec=TaskService)
     task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
 
-    with patch("bot.handlers.voice.ask_reminder", new=AsyncMock()) as mock_ask:
-        await handle_voice(
-            msg,
-            state=make_state(),
-            transcription_service=svc,
-            classifier=classifier,
-            task_service=task_svc,
-        )
+    await handle_voice(
+        msg,
+        state=make_state(),
+        transcription_service=svc,
+        classifier=classifier,
+        task_service=task_svc,
+    )
 
     task_svc.save.assert_awaited_once_with("купить молоко", 1)
-    mock_ask.assert_awaited_once()
-    assert mock_ask.call_args[1]["item_id"] == "task-uuid"
+    # The last answer call should have "Задача сохранена" with a remind button
+    last_call = msg.answer.call_args_list[-1]
+    assert "Задача сохранена" in last_call[0][0]
+    kb = last_call[1]["reply_markup"]
+    assert kb is not None
+    assert "task_remind:task-uuid" in kb.inline_keyboard[0][0].callback_data
 
 
 async def test_handle_voice_routes_note_and_confirms() -> None:
