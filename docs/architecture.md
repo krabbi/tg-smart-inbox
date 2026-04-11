@@ -198,7 +198,11 @@ classifier.classify(text)  [Claude API call]
    └────┬────┘
         ├── LINK  ──► link_service.save() → show action keyboard
         ├── IDEA  ──► idea_service.save_idea() → show tags/complexity
-        ├── TASK  ──► task_service.save() → ask_reminder() dialog
+        ├── TASK  ──► task_service.save()
+        │              ├── no time expression → "Задача сохранена!" + кнопка «⏰ Напомнить»
+        │              └── has time expression → time_parser.parse()
+        │                     ├── success → reminder_service.create() → "🔔 Напомню <time>!"
+        │                     └── parse fail → FSM waiting_for_time (manual input)
         └── NOTE  ──► note_service.save() → "Заметка сохранена!"
 ```
 
@@ -258,16 +262,21 @@ User sends task
 task_service.save() → Item(type=task) created
       │
       ▼
-ask_reminder() → user presses ✅ Да
-      │
-      ▼
-User enters time ("завтра в 10")
-      │
-      ▼
-time_parser.parse() [Claude] → datetime
-      │
-      ▼
-reminder_service.create() → Reminder(remind_at=...) created
+has_time_expression(text)?
+      ├── no  → "Задача сохранена!" + кнопка «⏰ Напомнить»
+      │              │
+      │         User presses «⏰ Напомнить»
+      │              │
+      │              ▼
+      │         FSM waiting_for_time → user enters time
+      │              │
+      │              ▼
+      └── yes → time_parser.parse() [Claude]
+                    ├── success → reminder_service.create() → "🔔 Напомню <time>!"
+                    └── parse fail → FSM waiting_for_time → user enters time manually
+                                          │
+                                          ▼
+                                    time_parser.parse() → reminder_service.create()
       │
       ▼
 [APScheduler, every 60s]

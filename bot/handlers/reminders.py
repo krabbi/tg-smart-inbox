@@ -30,50 +30,38 @@ _TASK_TEXT_KEY = "reminder_task_text"
 _ATTEMPTS_KEY = "reminder_attempts"
 _MAX_ATTEMPTS = 3
 
-_ASK_REMIND_KB = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да", callback_data="remind:yes"),
-            InlineKeyboardButton(text="❌ Нет", callback_data="remind:no"),
+
+def task_remind_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """Build inline keyboard with a single 'Remind' button carrying item_id."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="\u23f0 Напомнить",
+                    callback_data=f"task_remind:{item_id}",
+                ),
+            ]
         ]
-    ]
-)
-
-
-async def ask_reminder(
-    message: Message,
-    task_text: str,
-    item_id: str,
-    state: FSMContext,
-) -> None:
-    """Ask the user whether to set a reminder. Called from the messages handler."""
-    await state.update_data({_ITEM_ID_KEY: item_id, _TASK_TEXT_KEY: task_text})
-    await message.answer(
-        f"📝 Задача: <b>{task_text}</b>\n\nНапомнить об этом?",
-        reply_markup=_ASK_REMIND_KB,
     )
 
 
-@router.callback_query(F.data == "remind:yes")
-async def cb_remind_yes(callback: CallbackQuery, state: FSMContext) -> None:
-    """User confirmed reminder — ask for the time."""
+@router.callback_query(F.data.startswith("task_remind:"))
+async def cb_task_remind(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle 'Remind' button on a saved task — enter time input FSM."""
     await callback.answer()
-    await callback.message.edit_reply_markup(reply_markup=None)  # type: ignore[union-attr]
+    if callback.message is None:
+        return
+
+    item_id = (callback.data or "").removeprefix("task_remind:")
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
     await state.set_state(ReminderStates.waiting_for_time)
-    await state.update_data({_ATTEMPTS_KEY: 0})
-    await callback.message.answer(  # type: ignore[union-attr]
-        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу»)\n"
+    await callback.message.answer(
+        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу в 15:00»)\n"
         "Для отмены — /cancel"
     )
-
-
-@router.callback_query(F.data == "remind:no")
-async def cb_remind_no(callback: CallbackQuery, state: FSMContext) -> None:
-    """User declined reminder — clear state."""
-    await callback.answer()
-    await callback.message.edit_reply_markup(reply_markup=None)  # type: ignore[union-attr]
-    await state.clear()
-    await callback.message.answer("Хорошо, сохранено без напоминания.")  # type: ignore[union-attr]
 
 
 @router.message(ReminderStates.waiting_for_time)
@@ -122,7 +110,7 @@ async def receive_reminder_time(
 
     await state.clear()
     formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
-    await message.answer(f"🔔 Напомню {formatted}!")
+    await message.answer(f"\U0001f514 Напомню {formatted}!")
 
 
 @router.callback_query(F.data.startswith("remind_snooze:"))
@@ -138,6 +126,7 @@ async def cb_remind_snooze(
     parts = (callback.data or "").split(":", 2)
     if len(parts) != 3:
         return
+
     _, period, reminder_id_str = parts
 
     if period == "1h":
@@ -167,7 +156,7 @@ async def cb_remind_snooze(
     await callback.message.edit_reply_markup(reply_markup=None)
     if ok:
         formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
-        await callback.message.answer(f"⏰ Напомню через {label} ({formatted}).")
+        await callback.message.answer(f"\u23f0 Напомню через {label} ({formatted}).")
     else:
         await callback.message.answer("Напоминание не найдено или уже неактивно.")
 
@@ -201,7 +190,7 @@ async def cb_remind_ack(
 
     existing_text = callback.message.html_text or callback.message.text or ""
     await callback.message.edit_text(
-        existing_text + "\n\n✅ <i>Выполнено</i>",
+        existing_text + "\n\n\u2705 <i>Выполнено</i>",
         parse_mode="HTML",
         reply_markup=None,
     )

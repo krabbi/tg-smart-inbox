@@ -8,12 +8,11 @@ from aiogram.types import CallbackQuery, Message, User
 from bot.exceptions import TimeParseError
 from bot.handlers.reminders import (
     ReminderStates,
-    ask_reminder,
     cb_remind_ack,
-    cb_remind_no,
     cb_remind_snooze,
-    cb_remind_yes,
+    cb_task_remind,
     receive_reminder_time,
+    task_remind_keyboard,
 )
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
@@ -49,30 +48,54 @@ def make_state(data: dict | None = None) -> FSMContext:
     return state
 
 
-async def test_ask_reminder_sends_keyboard() -> None:
-    msg = make_message()
-    state = make_state()
+# ── task_remind_keyboard ────────────────────────────────────────────────────
+
+
+def test_task_remind_keyboard_has_item_id() -> None:
+    """Keyboard button stores item_id in callback_data."""
     item_id = str(uuid.uuid4())
-    await ask_reminder(msg, "купить молоко", item_id, state)
-    msg.answer.assert_awaited_once()
-    call_kwargs = msg.answer.call_args[1]
-    assert "reply_markup" in call_kwargs
+    kb = task_remind_keyboard(item_id)
+    assert len(kb.inline_keyboard) == 1
+    btn = kb.inline_keyboard[0][0]
+    assert btn.callback_data == f"task_remind:{item_id}"
+    assert "Напомнить" in btn.text
 
 
-async def test_cb_remind_yes_sets_state() -> None:
-    cb = make_callback("remind:yes")
+# ── cb_task_remind ──────────────────────────────────────────────────────────
+
+
+async def test_cb_task_remind_enters_fsm() -> None:
+    """Pressing 'Remind' button on task enters FSM waiting_for_time."""
+    item_id = str(uuid.uuid4())
+    cb = make_callback(f"task_remind:{item_id}")
     state = make_state()
-    await cb_remind_yes(cb, state)
+
+    await cb_task_remind(cb, state)
+
+    cb.answer.assert_awaited_once()
+    cb.message.edit_reply_markup.assert_awaited_once()
     state.set_state.assert_awaited_once_with(ReminderStates.waiting_for_time)
+    state.update_data.assert_awaited_once()
+    stored = state.update_data.call_args[0][0]
+    assert stored["reminder_item_id"] == item_id
+    assert stored["reminder_attempts"] == 0
     cb.message.answer.assert_awaited_once()
 
 
-async def test_cb_remind_no_clears_state() -> None:
-    cb = make_callback("remind:no")
+async def test_cb_task_remind_no_message_returns_early() -> None:
+    """When callback.message is None, only answer() is called."""
+    item_id = str(uuid.uuid4())
+    cb = make_callback(f"task_remind:{item_id}")
+    cb.message = None
     state = make_state()
-    await cb_remind_no(cb, state)
-    state.clear.assert_awaited_once()
-    cb.message.answer.assert_awaited_once()
+
+    await cb_task_remind(cb, state)
+
+    cb.answer.assert_awaited_once()
+    state.set_state.assert_not_awaited()
+
+
+# ── receive_reminder_time ───────────────────────────────────────────────────
 
 
 async def test_receive_reminder_time_no_services() -> None:
@@ -154,14 +177,6 @@ async def test_receive_reminder_time_aborts_after_max_attempts() -> None:
     assert "Не удалось" in msg.answer.call_args[0][0]
 
 
-async def test_cb_remind_yes_resets_attempt_counter() -> None:
-    """Confirming a reminder resets the attempt counter to 0."""
-    cb = make_callback("remind:yes")
-    state = make_state()
-    await cb_remind_yes(cb, state)
-    state.update_data.assert_awaited_once_with({"reminder_attempts": 0})
-
-
 async def test_receive_reminder_time_save_error() -> None:
     msg = make_message("завтра в 10")
     item_id = str(uuid.uuid4())
@@ -178,6 +193,9 @@ async def test_receive_reminder_time_save_error() -> None:
     msg.answer.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
     state.clear.assert_awaited_once()
+
+
+# ── snooze / ack callbacks ──────────────────────────────────────────────────
 
 
 def make_callback_with_user(data: str, user_id: int = 1) -> CallbackQuery:
@@ -221,13 +239,11 @@ async def test_cb_remind_snooze_1d_calls_snooze() -> None:
 
     await cb_remind_snooze(cb, reminder_service=svc)
 
-    call_kwargs = svc.snooze.call_args[1]
     assert "1 день" in cb.message.answer.call_args[0][0]
-    # delta should be 1 day
     from datetime import timedelta
 
     now = datetime.now(UTC)
-    remind_at = call_kwargs["remind_at"]
+    remind_at = svc.snooze.call_args[1]["remind_at"]
     diff = remind_at - now
     assert timedelta(hours=23) < diff < timedelta(hours=25)
 
