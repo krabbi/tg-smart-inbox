@@ -83,6 +83,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `scraper.py` | HTTP page fetcher for link summarization |
 | `transcription_service.py` | Groq Whisper API wrapper for voice messages |
 | `vision_service.py` | Claude Vision API for image description |
+| `user_settings_service.py` | Read/write per-user preferences (timezone) with IANA validation |
 
 ### Repositories (`bot/repositories/`)
 
@@ -95,6 +96,7 @@ the transaction boundary.
 | `item_repository.py` | CRUD for `Item` records |
 | `reminder_repository.py` | CRUD for `Reminder` records, due/auto-resend queries |
 | `idea_repository.py` | CRUD for `Idea` records |
+| `user_settings.py` | CRUD for `UserSettings` records (per-user preferences) |
 
 ---
 
@@ -139,6 +141,17 @@ Additional metadata for items with `type = idea`.
 | `tags` | JSON (list of str) | AI-extracted tags (max 5, max 30 chars each) |
 | `complexity` | Enum (nullable) | `simple`, `medium`, `complex` |
 | `effort` | Enum (nullable) | `quick` (<1h), `halfday` (1-4h), `day` (4-8h), `longterm` |
+
+### `user_settings` table
+
+Per-user preferences. One row per Telegram user; created lazily on first write.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `user_id` | BigInteger (PK) | Telegram user ID |
+| `timezone` | String(64) | IANA tz name (e.g. `Europe/Moscow`); NOT NULL, default `UTC` |
+| `created_at` | DateTime (TZ) | Row creation timestamp |
+| `updated_at` | DateTime (TZ) | Last update timestamp (auto-bumped on UPDATE) |
 
 ---
 
@@ -409,6 +422,7 @@ All domain exceptions are defined in `bot/exceptions.py`:
 | `DriveUploadError` | Google Drive upload fails |
 | `TimeParseError` | Claude cannot parse a natural-language time expression |
 | `TranscriptionError` | Groq Whisper transcription fails |
+| `InvalidTimezoneError` | User-supplied timezone is not a valid IANA name |
 
 Services raise these exceptions; handlers catch them and send user-friendly messages.
 Raw exceptions never reach the user.
@@ -448,16 +462,19 @@ tg-smart-inbox/
 │   │   ├── drive_service.py  # Google Drive upload
 │   │   ├── scraper.py        # HTTP page fetcher
 │   │   ├── transcription_service.py  # Groq Whisper
-│   │   └── vision_service.py # Claude Vision
+│   │   ├── vision_service.py # Claude Vision
+│   │   └── user_settings_service.py  # Per-user preferences (timezone)
 │   ├── repositories/
 │   │   ├── item_repository.py
 │   │   ├── reminder_repository.py
-│   │   └── idea_repository.py
+│   │   ├── idea_repository.py
+│   │   └── user_settings.py
 │   ├── models/
 │   │   ├── base.py           # UUIDMixin, TimestampMixin
 │   │   ├── item.py           # Item + ItemType
 │   │   ├── reminder.py       # Reminder
-│   │   └── idea.py           # Idea + IdeaComplexity + IdeaEffort
+│   │   ├── idea.py           # Idea + IdeaComplexity + IdeaEffort
+│   │   └── user_settings.py  # UserSettings (per-user prefs)
 │   ├── middlewares/
 │   │   └── auth.py           # AuthMiddleware — user ID whitelist
 │   └── utils/

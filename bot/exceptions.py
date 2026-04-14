@@ -20,3 +20,7 @@ class TimeParseError(Exception):
 
 class TranscriptionError(Exception):
     """Raised when Whisper API fails to transcribe audio."""
+
+
+class InvalidTimezoneError(Exception):
+    """Raised when an invalid IANA timezone name is provided."""

@@ -1,0 +1,32 @@
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.exceptions import InvalidTimezoneError
+from bot.repositories.user_settings import UserSettingsRepository
+
+DEFAULT_TIMEZONE = "UTC"
+
+
+class UserSettingsService:
+    """Business logic for reading and updating per-user settings."""
+
+    def __init__(self, session: AsyncSession, repo: UserSettingsRepository) -> None:
+        self._session = session
+        self._repo = repo
+
+    async def get_timezone(self, user_id: int) -> str:
+        """Return the user's IANA timezone string, or 'UTC' if not configured."""
+        settings = await self._repo.get(user_id)
+        if settings is None:
+            return DEFAULT_TIMEZONE
+        return settings.timezone
+
+    async def set_timezone(self, user_id: int, tz_name: str) -> None:
+        """Validate and persist the user's timezone; raises InvalidTimezoneError on bad name."""
+        try:
+            ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise InvalidTimezoneError(f"Invalid IANA timezone: {tz_name!r}") from exc
+        await self._repo.set_timezone(user_id, tz_name)
+        await self._session.commit()

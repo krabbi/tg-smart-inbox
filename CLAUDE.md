@@ -164,15 +164,18 @@ bot/
     scraper.py          # HTTP page fetcher
     transcription_service.py
     vision_service.py
+    user_settings_service.py
   repositories/
     item_repository.py
     reminder_repository.py
     idea_repository.py
+    user_settings.py
   models/
     base.py             # UUIDMixin, TimestampMixin
     item.py             # Item + ItemType
     reminder.py         # Reminder
     idea.py             # Idea + enums
+    user_settings.py    # UserSettings (per-user prefs)
   middlewares/
     auth.py             # ALLOWED_USER_IDS whitelist
   utils/
