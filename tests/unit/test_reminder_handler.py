@@ -14,6 +14,7 @@ from bot.handlers.reminders import (
     receive_reminder_time,
     task_remind_keyboard,
 )
+from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
 
@@ -175,6 +176,91 @@ async def test_receive_reminder_time_aborts_after_max_attempts() -> None:
 
     state.clear.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
+
+
+async def test_receive_reminder_time_with_url_clears_state_and_delegates_to_link_flow() -> None:
+    """A URL sent during the time-input FSM exits the dialog and goes to link flow."""
+    url = "https://example.com/article"
+    msg = make_message(url)
+    state = make_state({"reminder_item_id": str(uuid.uuid4()), "reminder_attempts": 1})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock()  # should not be called
+    reminder_svc = MagicMock(spec=ReminderService)
+    reminder_svc.create = AsyncMock()  # should not be called
+
+    saved_item = MagicMock()
+    saved_item.id = uuid.uuid4()
+    link_svc = MagicMock(spec=LinkService)
+    link_svc.save = AsyncMock(return_value=saved_item)
+
+    await receive_reminder_time(
+        msg,
+        state,
+        time_parser=time_parser,
+        reminder_service=reminder_svc,
+        link_service=link_svc,
+    )
+
+    state.clear.assert_awaited_once()
+    time_parser.parse.assert_not_awaited()
+    reminder_svc.create.assert_not_awaited()
+    link_svc.save.assert_awaited_once_with(url, 1)
+    # Link flow replies with the "saved" message + keyboard
+    msg.answer.assert_awaited_once()
+    assert "reply_markup" in msg.answer.call_args[1]
+
+
+async def test_receive_reminder_time_with_url_and_no_link_service_replies_unavailable() -> None:
+    """If link_service is missing, the FSM still exits and the user sees a polite message."""
+    msg = make_message("смотри https://example.com/x")
+    state = make_state({"reminder_item_id": str(uuid.uuid4())})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock()
+    reminder_svc = MagicMock(spec=ReminderService)
+
+    await receive_reminder_time(
+        msg,
+        state,
+        time_parser=time_parser,
+        reminder_service=reminder_svc,
+        link_service=None,
+    )
+
+    state.clear.assert_awaited_once()
+    time_parser.parse.assert_not_awaited()
+    msg.answer.assert_awaited_once()
+    assert "недоступен" in msg.answer.call_args[0][0].lower()
+
+
+async def test_receive_reminder_time_with_url_embedded_in_sentence() -> None:
+    """A URL embedded in arbitrary text is still detected and routed to the link flow."""
+    msg = make_message("посмотри вот это https://example.com/a, пожалуйста")
+    state = make_state({"reminder_item_id": str(uuid.uuid4())})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock()
+    reminder_svc = MagicMock(spec=ReminderService)
+
+    saved_item = MagicMock()
+    saved_item.id = uuid.uuid4()
+    link_svc = MagicMock(spec=LinkService)
+    link_svc.save = AsyncMock(return_value=saved_item)
+
+    await receive_reminder_time(
+        msg,
+        state,
+        time_parser=time_parser,
+        reminder_service=reminder_svc,
+        link_service=link_svc,
+    )
+
+    state.clear.assert_awaited_once()
+    time_parser.parse.assert_not_awaited()
+    # URL passed to link_service is the extracted one (trailing comma stripped by regex? actually \S+ greedy)
+    saved_url = link_svc.save.call_args[0][0]
+    assert saved_url.startswith("https://example.com/a")
 
 
 async def test_receive_reminder_time_save_error() -> None:
