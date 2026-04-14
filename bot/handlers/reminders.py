@@ -13,8 +13,10 @@ from aiogram.types import (
 )
 
 from bot.exceptions import TimeParseError
+from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
+from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +72,24 @@ async def receive_reminder_time(
     state: FSMContext,
     time_parser: TimeParser | None = None,
     reminder_service: ReminderService | None = None,
+    link_service: LinkService | None = None,
 ) -> None:
     """Parse the user's time expression and create the reminder."""
+    # Local import avoids the reminders ↔ links circular import at module level.
+    from bot.handlers.links import handle_link_message
+
+    # A URL while waiting for time means the user switched tasks mid-dialog —
+    # exit the FSM and route the link through the normal link flow instead of
+    # feeding it to the time parser (which would always fail).
+    url = extract_url(message.text or "")
+    if url is not None:
+        await state.clear()
+        if link_service is None:
+            await message.answer("Сервис ссылок временно недоступен.")
+            return
+        await handle_link_message(message, url, link_service)
+        return
+
     if time_parser is None or reminder_service is None:
         await message.answer("Сервис напоминаний временно недоступен.")
         await state.clear()
