@@ -17,6 +17,7 @@ _CB_SUMMARY = "link:summary:{item_id}"
 _CB_SAVE = "link:save:{item_id}"
 _CB_REMIND = "link:remind:{item_id}"
 _CB_RETRY = "link:retry:{item_id}"
+_CB_CLOSE = "link:close:{item_id}"
 
 
 def _link_keyboard(item_id: str) -> InlineKeyboardMarkup:
@@ -42,13 +43,21 @@ def _link_keyboard(item_id: str) -> InlineKeyboardMarkup:
 
 
 def _save_keyboard(item_id: str) -> InlineKeyboardMarkup:
-    """Build keyboard with save button shown after summary is ready."""
+    """Build keyboard with Save / Remind / Close buttons shown after summary is ready."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="🔖 Сохранить",
                     callback_data=_CB_SAVE.format(item_id=item_id),
+                ),
+                InlineKeyboardButton(
+                    text="⏰ Напомнить",
+                    callback_data=_CB_REMIND.format(item_id=item_id),
+                ),
+                InlineKeyboardButton(
+                    text="✖️ Закрыть",
+                    callback_data=_CB_CLOSE.format(item_id=item_id),
                 ),
             ]
         ]
@@ -156,11 +165,37 @@ async def cb_link_save(callback: CallbackQuery) -> None:
     if callback.message is None:
         return
     existing_text = callback.message.html_text or callback.message.text or ""
-    await callback.message.edit_text(
-        existing_text + "\n\n🔖 <i>Сохранено</i>",
-        parse_mode="HTML",
-        reply_markup=None,
-    )
+    # Guard against double delivery: if the confirmation is already appended,
+    # just strip the keyboard instead of appending it again.
+    if "🔖 <i>Сохранено</i>" in existing_text or "🔖 Сохранено" in existing_text:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("edit_reply_markup failed on repeated link:save")
+        return
+    try:
+        await callback.message.edit_text(
+            existing_text + "\n\n🔖 <i>Сохранено</i>",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        logger.debug("edit_text failed on link:save (likely already confirmed)")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("link:close:"))
+async def cb_link_close(callback: CallbackQuery) -> None:
+    """Handle [Закрыть] button — remove the keyboard without changing the message text."""
+    await callback.answer()
+    if callback.message is None:
+        return
+    # edit_reply_markup is idempotent: calling it again with the same (empty) markup
+    # is either a no-op or returns a harmless "message is not modified" error, which
+    # aiogram surfaces as an exception. Swallow it so a double click never crashes.
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        logger.debug("edit_reply_markup failed on link:close (likely already removed)")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:remind:"))
@@ -172,7 +207,10 @@ async def cb_link_remind(callback: CallbackQuery, state: FSMContext) -> None:
 
     item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
 
-    await callback.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        logger.debug("edit_reply_markup failed on link:remind (likely already removed)")
 
     await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
     await state.set_state(ReminderStates.waiting_for_time)

@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.exceptions import ScrapingError
 from bot.handlers.links import (
     _extract_url_from_status_message,
+    cb_link_close,
     cb_link_remind,
     cb_link_retry,
     cb_link_save,
@@ -104,6 +105,29 @@ async def test_cb_link_summary_shows_save_button_after_summary() -> None:
     assert keyboard is not None
     button_text = keyboard.inline_keyboard[0][0].text
     assert "Сохранить" in button_text
+
+
+async def test_cb_link_summary_shows_all_three_action_buttons() -> None:
+    """After summary, user should see Save / Remind / Close buttons with correct callback data."""
+    cb = make_callback("link:summary:item-xyz")
+    svc = MagicMock(spec=LinkService)
+    svc.summarize = AsyncMock(
+        return_value=LinkSummary(title="T", body="B", url="https://example.com")
+    )
+
+    await cb_link_summary(cb, link_service=svc)
+
+    final_call = cb.message.edit_text.call_args_list[1]
+    keyboard = final_call[1].get("reply_markup")
+    assert keyboard is not None
+    row = keyboard.inline_keyboard[0]
+    assert len(row) == 3
+    assert "Сохранить" in row[0].text
+    assert "Напомнить" in row[1].text
+    assert "Закрыть" in row[2].text
+    assert row[0].callback_data == "link:save:item-xyz"
+    assert row[1].callback_data == "link:remind:item-xyz"
+    assert row[2].callback_data == "link:close:item-xyz"
 
 
 async def test_cb_link_summary_answers_callback() -> None:
@@ -256,6 +280,63 @@ async def test_cb_link_save_no_message_returns_early() -> None:
     cb.answer.assert_awaited_once()
 
 
+async def test_cb_link_save_double_click_does_not_duplicate_confirmation() -> None:
+    """If Save fires again on a message already marked Сохранено, do not append twice."""
+    cb = make_callback("link:save:uuid")
+    cb.message.html_text = "🔗 https://example.com\n\n🔖 <i>Сохранено</i>"
+
+    await cb_link_save(cb)
+
+    # Should not call edit_text again (which would append another "Сохранено")
+    cb.message.edit_text.assert_not_awaited()
+    # Keyboard should be cleaned up even on repeated click
+    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+
+
+async def test_cb_link_save_swallows_edit_text_error() -> None:
+    """A Telegram 'message is not modified' error on double click must not crash."""
+    cb = make_callback("link:save:uuid")
+    cb.message.html_text = "🔗 https://example.com"
+    cb.message.edit_text = AsyncMock(side_effect=Exception("message is not modified"))
+
+    # Should not raise
+    await cb_link_save(cb)
+    cb.answer.assert_awaited_once()
+
+
+# ── cb_link_close ─────────────────────────────────────────────────────────────
+
+
+async def test_cb_link_close_removes_keyboard() -> None:
+    cb = make_callback("link:close:uuid")
+
+    await cb_link_close(cb)
+
+    cb.answer.assert_awaited_once()
+    cb.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    # Text must not change
+    cb.message.edit_text.assert_not_awaited()
+
+
+async def test_cb_link_close_no_message_returns_early() -> None:
+    cb = make_callback("link:close:uuid")
+    cb.message = None
+
+    await cb_link_close(cb)
+
+    cb.answer.assert_awaited_once()
+
+
+async def test_cb_link_close_swallows_edit_error_on_double_click() -> None:
+    """A double click where the keyboard is already gone must not raise."""
+    cb = make_callback("link:close:uuid")
+    cb.message.edit_reply_markup = AsyncMock(side_effect=Exception("message is not modified"))
+
+    # Should not raise
+    await cb_link_close(cb)
+    cb.answer.assert_awaited_once()
+
+
 # ── cb_link_remind ────────────────────────────────────────────────────────────
 
 
@@ -320,3 +401,18 @@ async def test_cb_link_remind_no_message_returns_early() -> None:
     await cb_link_remind(cb, state=state)
 
     state.set_state.assert_not_awaited()
+
+
+async def test_cb_link_remind_swallows_edit_error_on_double_click() -> None:
+    """If the keyboard was already removed, edit_reply_markup raises — must not crash."""
+    cb = make_callback("link:remind:uuid")
+    cb.message.edit_reply_markup = AsyncMock(side_effect=Exception("message is not modified"))
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+
+    # Should not raise
+    await cb_link_remind(cb, state=state)
+    # FSM must still be entered even when the keyboard strip failed
+    state.set_state.assert_awaited_once()
+    cb.message.answer.assert_awaited_once()
