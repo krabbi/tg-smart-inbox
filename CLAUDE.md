@@ -148,6 +148,7 @@ bot/
     reminders.py        # reminder FSM + snooze/ack callbacks
     commands.py         # /start /list /search /reminders /cancel
     ideas.py            # /ideas command
+    timezone_setup.py   # three-step FSM: continent → country → city
     voice.py            # voice transcription + routing
   services/
     classifier.py       # LINK/TASK/NOTE/IDEA/MEDIA classification

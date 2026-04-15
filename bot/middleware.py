@@ -9,6 +9,7 @@ from bot.config import Config
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.repositories.reminder_repository import ReminderRepository
+from bot.repositories.user_settings import UserSettingsRepository
 from bot.services.classifier import ClassifierService
 from bot.services.claude_client import ClaudeClient
 from bot.services.drive_service import DriveService
@@ -22,6 +23,7 @@ from bot.services.scraper import Scraper
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
+from bot.services.user_settings_service import UserSettingsService
 from bot.services.vision_service import VisionService
 
 
@@ -58,6 +60,9 @@ class DependencyMiddleware(BaseMiddleware):
             data["task_service"] = TaskService(session, item_repo)
             data["note_service"] = NoteService(session, item_repo)
             data["list_service"] = ListService(item_repo=item_repo)
+            data["user_settings_service"] = UserSettingsService(
+                session=session, repo=UserSettingsRepository(session)
+            )
 
             # Whisper transcription — only available when Groq key is configured
             if self._config.groq_api_key:

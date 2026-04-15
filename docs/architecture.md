@@ -61,6 +61,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `commands.py` | Bot commands: `/start`, `/list`, `/search`, `/reminders`, `/ideas`, `/help`, `/cancel` |
 | `ideas.py` | `/ideas` command — display saved ideas |
 | `voice.py` | Voice message transcription and routing |
+| `timezone_setup.py` | Three-step inline FSM for picking a timezone (continent → country → city) |
 
 ### Services (`bot/services/`)
 
@@ -171,7 +172,8 @@ DependencyMiddleware.__call__()
   ├── opens session
   ├── creates: ClaudeClient, ItemRepository, ReminderRepository, IdeaRepository
   ├── injects: classifier, link_service, reminder_service, time_parser,
-  │            idea_service, task_service, note_service, list_service
+  │            idea_service, task_service, note_service, list_service,
+  │            user_settings_service
   ├── if GROQ_API_KEY: injects transcription_service (else None)
   ├── if GOOGLE_DRIVE_FOLDER_ID: injects media_service (else None)
   └── calls handler
@@ -316,6 +318,31 @@ Bot sends: "🔔 Напоминание: <content>"
 
 ---
 
+## Timezone Setup
+
+`bot/handlers/timezone_setup.py` implements a reusable three-step inline FSM for
+capturing the user's timezone. It is launched from `/start` when no row exists in
+`user_settings`, and is also the entry point used by `/config timezone` (issue #65).
+
+Steps:
+
+1. **Continent** — Europe / Asia / America / Other.
+2. **Country** — curated list per continent, filtered at runtime against
+   `zoneinfo.available_timezones()` so only zones shipped with the current tzdata are
+   offered.
+3. **Zone/City** — offered only if the selected country maps to more than one IANA zone;
+   countries with a single zone (e.g. Germany → `Europe/Berlin`) skip this step.
+
+On confirmation the handler calls `UserSettingsService.set_timezone()` which validates
+the IANA name with `zoneinfo.ZoneInfo` before persisting. The confirmation message shows
+the canonical IANA name and the current UTC offset (e.g. `Europe/Moscow (UTC+03:00)`).
+
+`/start` differentiates "user hasn't set a timezone" from "user explicitly picked UTC"
+using `UserSettingsService.has_timezone()`, which returns `True` only when a row exists
+in `user_settings`.
+
+---
+
 ## Access Control
 
 `AuthMiddleware` (`bot/middlewares/auth.py`) runs on every update before any handler.
@@ -447,6 +474,7 @@ tg-smart-inbox/
 │   │   ├── reminders.py      # Reminder FSM and snooze/ack callbacks
 │   │   ├── commands.py       # /start /list /search /reminders /ideas /cancel
 │   │   ├── ideas.py          # /ideas command
+│   │   ├── timezone_setup.py # Three-step FSM for picking a timezone
 │   │   └── voice.py          # Voice message handling
 │   ├── services/
 │   │   ├── classifier.py     # Message type classification

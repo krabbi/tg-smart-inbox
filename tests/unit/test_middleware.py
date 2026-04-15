@@ -57,3 +57,20 @@ async def test_middleware_opens_session_per_call(fake_config: Config) -> None:
     await middleware(handler, MagicMock(), {})
 
     assert factory.call_count == 2
+
+
+async def test_middleware_injects_user_settings_service(fake_config: Config) -> None:
+    from bot.services.user_settings_service import UserSettingsService
+
+    session = MagicMock(spec=AsyncSession)
+    factory = make_session_factory(session)
+    middleware = DependencyMiddleware(factory, fake_config)
+
+    captured: dict = {}
+
+    async def handler(event: object, data: dict) -> None:
+        captured.update(data)
+
+    await middleware(handler, MagicMock(), {})
+
+    assert isinstance(captured["user_settings_service"], UserSettingsService)

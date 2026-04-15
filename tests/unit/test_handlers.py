@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
 
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
 from bot.config import Config
@@ -12,6 +13,7 @@ from bot.handlers.commands import (
     cmd_start,
 )
 from bot.handlers.messages import handle_document, handle_photo, handle_text
+from bot.services.user_settings_service import UserSettingsService
 
 
 def _make_config(
@@ -54,27 +56,70 @@ def _make_callback() -> CallbackQuery:
     return cb
 
 
-async def test_cmd_start_sends_welcome() -> None:
+def _make_fsm_state() -> MagicMock:
+    """Build a mock FSMContext with async methods stubbed."""
+    state = MagicMock(spec=FSMContext)
+    state.set_state = AsyncMock()
+    state.update_data = AsyncMock()
+    state.clear = AsyncMock()
+    state.get_data = AsyncMock(return_value={})
+    return state
+
+
+def _make_tz_service(has_tz: bool = True) -> MagicMock:
+    """Build a mock UserSettingsService with `has_timezone` wired."""
+    svc = MagicMock(spec=UserSettingsService)
+    svc.has_timezone = AsyncMock(return_value=has_tz)
+    svc.set_timezone = AsyncMock()
+    return svc
+
+
+async def test_cmd_start_sends_welcome_when_tz_set() -> None:
     message = make_message()
-    await cmd_start(message)
+    state = _make_fsm_state()
+    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
     message.answer.assert_awaited_once()
     call_text = message.answer.call_args[0][0]
     assert "привет" in call_text.lower()
 
 
-async def test_cmd_start_includes_commands() -> None:
+async def test_cmd_start_includes_commands_when_tz_set() -> None:
     message = make_message()
-    await cmd_start(message)
+    state = _make_fsm_state()
+    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
     call_text = message.answer.call_args[0][0]
     for cmd in ["/list", "/search", "/reminders", "/ideas", "/help", "/cancel"]:
         assert cmd in call_text, f"{cmd} not found in /start message"
 
 
-async def test_cmd_start_has_help_button() -> None:
+async def test_cmd_start_has_help_button_when_tz_set() -> None:
     message = make_message()
-    await cmd_start(message)
+    state = _make_fsm_state()
+    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
     _, kwargs = message.answer.call_args
     assert kwargs.get("reply_markup") is _HELP_KEYBOARD
+
+
+async def test_cmd_start_triggers_tz_setup_when_not_set() -> None:
+    message = make_message()
+    state = _make_fsm_state()
+    svc = _make_tz_service(has_tz=False)
+    await cmd_start(message, state=state, user_settings_service=svc)
+    svc.has_timezone.assert_awaited_once_with(message.from_user.id)
+    # FSM entered and continent picker sent
+    state.set_state.assert_awaited()
+    message.answer.assert_awaited_once()
+    call_text = message.answer.call_args[0][0]
+    assert "часовой пояс" in call_text.lower()
+
+
+async def test_cmd_start_fallback_when_service_missing() -> None:
+    message = make_message()
+    state = _make_fsm_state()
+    await cmd_start(message, state=state, user_settings_service=None)
+    # Should still send the welcome message so the bot is not silent.
+    message.answer.assert_awaited_once()
+    assert message.answer.call_args[0][0] == WELCOME_TEXT
 
 
 async def test_cmd_help_shows_detailed_guide() -> None:

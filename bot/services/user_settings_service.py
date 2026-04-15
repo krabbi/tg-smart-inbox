@@ -22,6 +22,11 @@ class UserSettingsService:
             return DEFAULT_TIMEZONE
         return settings.timezone
 
+    async def has_timezone(self, user_id: int) -> bool:
+        """Return True if the user has explicitly set a timezone (row exists in DB)."""
+        settings = await self._repo.get(user_id)
+        return settings is not None
+
     async def set_timezone(self, user_id: int, tz_name: str) -> None:
         """Validate and persist the user's timezone; raises InvalidTimezoneError on bad name."""
         try:
