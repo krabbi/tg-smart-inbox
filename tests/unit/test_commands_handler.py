@@ -1,6 +1,7 @@
 """Tests for /list, /search, /reminders command handlers."""
 
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.filters import CommandObject
@@ -22,6 +23,7 @@ from bot.models.item import Item, ItemType
 from bot.models.reminder import Reminder
 from bot.services.list_service import ListPage, ListService
 from bot.services.reminder_service import ReminderService
+from bot.services.user_settings_service import UserSettingsService
 
 
 def make_message(user_id: int = 1) -> MagicMock:
@@ -53,13 +55,16 @@ def make_item(content: str, item_type: ItemType = ItemType.note) -> MagicMock:
     return item
 
 
-def make_reminder(content: str, reminder_id: uuid.UUID | None = None) -> MagicMock:
+def make_reminder(
+    content: str,
+    reminder_id: uuid.UUID | None = None,
+    remind_at: datetime | None = None,
+) -> MagicMock:
     r = MagicMock(spec=Reminder)
     r.id = reminder_id or uuid.uuid4()
     r.item = MagicMock()
     r.item.content = content
-    r.remind_at = MagicMock()
-    r.remind_at.strftime = MagicMock(return_value="05.04.2026 10:00")
+    r.remind_at = remind_at or datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
     return r
 
 
@@ -279,6 +284,40 @@ async def test_cmd_reminders_shows_list() -> None:
     calls = [c[0][0] for c in msg.answer.call_args_list]
     assert any("buy milk" in c for c in calls)
     assert any("call dentist" in c for c in calls)
+    # Default formatting (no user_settings_service) shows UTC label.
+    assert all("UTC" in c for c in calls)
+
+
+async def test_cmd_reminders_uses_user_timezone() -> None:
+    """Reminder times are converted to the user's timezone before display."""
+    msg = make_message(user_id=42)
+    svc = MagicMock(spec=ReminderService)
+    svc.get_upcoming = AsyncMock(
+        return_value=[make_reminder("buy milk", remind_at=datetime(2026, 4, 7, 10, 0, tzinfo=UTC))]
+    )
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await cmd_reminders(msg, reminder_service=svc, user_settings_service=settings_svc)
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    text = msg.answer.call_args[0][0]
+    # 10:00 UTC → 13:00 MSK
+    assert "07.04.2026 13:00 MSK" in text
+
+
+async def test_cmd_reminders_falls_back_to_utc_without_settings_service() -> None:
+    """When user_settings_service is None, formatting falls back to UTC."""
+    msg = make_message()
+    svc = MagicMock(spec=ReminderService)
+    svc.get_upcoming = AsyncMock(
+        return_value=[make_reminder("buy milk", remind_at=datetime(2026, 4, 7, 10, 0, tzinfo=UTC))]
+    )
+
+    await cmd_reminders(msg, reminder_service=svc, user_settings_service=None)
+
+    text = msg.answer.call_args[0][0]
+    assert "07.04.2026 10:00 UTC" in text
 
 
 # ── cb_cancel_reminder ────────────────────────────────────────────────────────

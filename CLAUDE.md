@@ -181,6 +181,7 @@ bot/
   middlewares/
     auth.py             # ALLOWED_USER_IDS whitelist
   utils/
+    datetime_utils.py   # format_remind_at() — UTC → user tz formatting
     text.py             # extract_url() and helpers
 alembic/                # migrations
 tests/

@@ -292,6 +292,11 @@ async def test_receive_reminder_time_uses_user_timezone() -> None:
     time_parser.parse.assert_awaited_once()
     assert time_parser.parse.call_args.kwargs["user_tz"] == "Europe/Moscow"
     reminder_svc.create.assert_awaited_once()
+    # Confirmation message is formatted in the user's timezone
+    # (07:00 UTC on 2026-06-02 → 10:00 MSK).
+    answer_text = msg.answer.call_args[0][0]
+    assert "02.06.2026 10:00 MSK" in answer_text
+    assert "UTC" not in answer_text
 
 
 async def test_receive_reminder_time_save_error() -> None:
@@ -345,6 +350,26 @@ async def test_cb_remind_snooze_1h_calls_snooze() -> None:
     cb.message.edit_reply_markup.assert_awaited_once()
     cb.message.answer.assert_awaited_once()
     assert "1 час" in cb.message.answer.call_args[0][0]
+
+
+async def test_cb_remind_snooze_uses_user_timezone() -> None:
+    """Snooze confirmation message uses the user's configured timezone."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:1h:{reminder_id}", user_id=42)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await cb_remind_snooze(cb, reminder_service=svc, user_settings_service=settings_svc)
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    answer_text = cb.message.answer.call_args[0][0]
+    # Confirmation contains the MSK label (or numeric IANA fallback) — the abbreviation
+    # is preferred when zoneinfo exposes one.
+    assert "MSK" in answer_text
 
 
 async def test_cb_remind_snooze_1d_calls_snooze() -> None:

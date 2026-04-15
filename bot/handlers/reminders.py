@@ -17,6 +17,7 @@ from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
 from bot.services.user_settings_service import UserSettingsService
+from bot.utils.datetime_utils import format_remind_at
 from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,7 @@ async def receive_reminder_time(
         return
 
     await state.clear()
-    formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
+    formatted = format_remind_at(remind_at, user_tz)
     await message.answer(f"\U0001f514 Напомню {formatted}!")
 
 
@@ -144,6 +145,7 @@ async def receive_reminder_time(
 async def cb_remind_snooze(
     callback: CallbackQuery,
     reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
 ) -> None:
     """Snooze a reminder by 1 hour or 1 day."""
     await callback.answer()
@@ -182,7 +184,10 @@ async def cb_remind_snooze(
 
     await callback.message.edit_reply_markup(reply_markup=None)
     if ok:
-        formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
+        user_tz = "UTC"
+        if user_settings_service is not None:
+            user_tz = await user_settings_service.get_timezone(callback.from_user.id)
+        formatted = format_remind_at(remind_at, user_tz)
         await callback.message.answer(f"\u23f0 Напомню через {label} ({formatted}).")
     else:
         await callback.message.answer("Напоминание не найдено или уже неактивно.")

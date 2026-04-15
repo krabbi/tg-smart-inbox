@@ -24,6 +24,7 @@ from bot.services.reminder_service import ReminderService
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.user_settings_service import UserSettingsService
+from bot.utils.datetime_utils import format_remind_at
 from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ async def _handle_task_with_time(
         )
         return
 
-    formatted = remind_at.strftime("%d.%m.%Y %H:%M UTC")
+    formatted = format_remind_at(remind_at, user_tz)
     await message.answer(f"\u2705 Задача сохранена!\n\U0001f514 Напомню {formatted}!")
 
 
