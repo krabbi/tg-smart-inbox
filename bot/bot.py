@@ -4,7 +4,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import Config
-from bot.handlers import commands, ideas, links, messages, reminders, voice
+from bot.handlers import commands, ideas, links, messages, reminders, timezone_setup, voice
 from bot.middlewares.auth import AuthMiddleware
 
 
@@ -21,6 +21,7 @@ def create_dispatcher(config: Config) -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(AuthMiddleware(config))
     dp.include_router(commands.router)
+    dp.include_router(timezone_setup.router)
     dp.include_router(links.router)
     dp.include_router(reminders.router)
     dp.include_router(ideas.router)

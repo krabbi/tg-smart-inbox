@@ -12,9 +12,11 @@ from aiogram.types import (
 )
 
 from bot.config import Config
+from bot.handlers.timezone_setup import start_timezone_setup
 from bot.models.item import ItemType
 from bot.services.list_service import _SEARCH_LIMIT, ListPage, ListService
 from bot.services.reminder_service import ReminderService
+from bot.services.user_settings_service import UserSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -188,8 +190,25 @@ def _format_list_page(list_page: ListPage) -> str:
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """Handle /start command with a welcome message and help button."""
+async def cmd_start(
+    message: Message,
+    state: FSMContext,
+    user_settings_service: UserSettingsService | None = None,
+) -> None:
+    """Handle /start — run timezone setup on first run, else show the welcome message."""
+    user_id = message.from_user.id if message.from_user else 0
+
+    # First-run path: no stored settings row → no user-confirmed timezone yet.
+    # `get_timezone()` returns the default ("UTC") both when the row is missing and when
+    # the user explicitly picked UTC, so we query the repo directly via the service's
+    # underlying repository only if the service is actually wired — otherwise fall back
+    # to the welcome message so the bot still replies when DI is misconfigured.
+    if user_settings_service is not None and user_id:
+        has_tz = await user_settings_service.has_timezone(user_id)
+        if not has_tz:
+            await start_timezone_setup(message, state)
+            return
+
     await message.answer(WELCOME_TEXT, reply_markup=_HELP_KEYBOARD)
 
 

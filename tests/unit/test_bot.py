@@ -39,8 +39,9 @@ def test_create_dispatcher_returns_dispatcher(dispatcher: Dispatcher) -> None:
 
 
 def test_create_dispatcher_includes_routers(dispatcher: Dispatcher) -> None:
-    from bot.handlers import commands, messages
+    from bot.handlers import commands, messages, timezone_setup
 
     router_names = [r.name for r in dispatcher.sub_routers]
     assert commands.router.name in router_names
     assert messages.router.name in router_names
+    assert timezone_setup.router.name in router_names

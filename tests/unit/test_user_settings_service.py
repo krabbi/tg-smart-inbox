@@ -41,6 +41,22 @@ async def test_get_timezone_returns_default_when_missing() -> None:
     assert result == "UTC"
 
 
+async def test_has_timezone_true_when_row_exists() -> None:
+    svc, repo, _ = make_service()
+    settings = MagicMock(spec=UserSettings)
+    settings.timezone = "Europe/Moscow"
+    repo.get = AsyncMock(return_value=settings)
+
+    assert await svc.has_timezone(user_id=42) is True
+
+
+async def test_has_timezone_false_when_row_missing() -> None:
+    svc, repo, _ = make_service()
+    repo.get = AsyncMock(return_value=None)
+
+    assert await svc.has_timezone(user_id=42) is False
+
+
 async def test_set_timezone_persists_valid_iana_name() -> None:
     svc, repo, session = make_service()
     repo.set_timezone = AsyncMock(return_value=MagicMock(spec=UserSettings))
