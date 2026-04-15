@@ -59,6 +59,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `links.py` | Callback buttons for saved links (summary, save, remind) |
 | `reminders.py` | Reminder dialog (time input FSM), snooze/acknowledge callbacks |
 | `commands.py` | Bot commands: `/start`, `/list`, `/search`, `/reminders`, `/ideas`, `/help`, `/cancel` |
+| `config.py` | `/config` command — extensible settings menu; currently dispatches to the timezone FSM |
 | `ideas.py` | `/ideas` command — display saved ideas |
 | `voice.py` | Voice message transcription and routing |
 | `timezone_setup.py` | Three-step inline FSM for picking a timezone (continent → country → city) |
@@ -322,7 +323,15 @@ Bot sends: "🔔 Напоминание: <content>"
 
 `bot/handlers/timezone_setup.py` implements a reusable three-step inline FSM for
 capturing the user's timezone. It is launched from `/start` when no row exists in
-`user_settings`, and is also the entry point used by `/config timezone` (issue #65).
+`user_settings`, and is also the entry point used by `/config timezone`
+(`bot/handlers/config.py`) — which always shows the picker, regardless of whether a
+timezone is already stored, so the user can change it at any time.
+
+The `/config` handler keeps settings declarative: each setting is an entry in a
+module-level `_SETTINGS` tuple with a `key`, `label`, and `launch` callable.
+Both the sub-command dispatcher (`/config <key>`) and the inline menu callback
+read from the same registry, so adding a new setting (e.g. `/config language`)
+means appending one entry — no branching logic to update.
 
 Steps:
 
@@ -489,6 +498,7 @@ tg-smart-inbox/
 │   │   ├── links.py          # Link action callbacks
 │   │   ├── reminders.py      # Reminder FSM and snooze/ack callbacks
 │   │   ├── commands.py       # /start /list /search /reminders /ideas /cancel
+│   │   ├── config.py         # /config settings menu (extensible sub-commands)
 │   │   ├── ideas.py          # /ideas command
 │   │   ├── timezone_setup.py # Three-step FSM for picking a timezone
 │   │   └── voice.py          # Voice message handling

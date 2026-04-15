@@ -147,6 +147,7 @@ bot/
     links.py            # link action callbacks
     reminders.py        # reminder FSM + snooze/ack callbacks
     commands.py         # /start /list /search /reminders /cancel
+    config.py           # /config settings menu (extensible sub-commands)
     ideas.py            # /ideas command
     timezone_setup.py   # three-step FSM: continent → country → city
     voice.py            # voice transcription + routing
