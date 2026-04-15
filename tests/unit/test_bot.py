@@ -4,6 +4,7 @@ from aiogram.enums import ParseMode
 
 from bot.bot import create_bot, create_dispatcher
 from bot.config import Config
+from bot.middlewares.auth import AuthMiddleware
 
 
 def test_create_bot_returns_bot_instance(fake_config: Config) -> None:
@@ -47,3 +48,11 @@ def test_create_dispatcher_includes_routers(dispatcher: Dispatcher) -> None:
     assert config_handler.router.name in router_names
     assert messages.router.name in router_names
     assert timezone_setup.router.name in router_names
+
+
+def test_auth_middleware_registered_on_message(dispatcher: Dispatcher) -> None:
+    assert any(isinstance(m, AuthMiddleware) for m in dispatcher.message.middleware)
+
+
+def test_auth_middleware_registered_on_callback_query(dispatcher: Dispatcher) -> None:
+    assert any(isinstance(m, AuthMiddleware) for m in dispatcher.callback_query.middleware)

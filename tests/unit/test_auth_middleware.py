@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from aiogram.types import Message, User
+from aiogram.types import CallbackQuery, Message, User
 
 from bot.config import Config
 from bot.middlewares.auth import AuthMiddleware
@@ -13,6 +13,15 @@ def make_message(user_id: int) -> Message:
     message = MagicMock(spec=Message)
     message.from_user = user
     return message
+
+
+def make_callback(user_id: int) -> CallbackQuery:
+    """Create a minimal mock CallbackQuery with the given user_id."""
+    user = MagicMock(spec=User)
+    user.id = user_id
+    callback = MagicMock(spec=CallbackQuery)
+    callback.from_user = user
+    return callback
 
 
 async def test_allowed_user_passes_through() -> None:
@@ -96,3 +105,35 @@ def test_extract_user_id_from_non_message_event() -> None:
     event.from_user = MagicMock()
     event.from_user.id = 77
     assert AuthMiddleware._extract_user_id(event) == 77
+
+
+async def test_allowed_user_callback_passes_through() -> None:
+    config = Config(
+        telegram_bot_token="fake-token",
+        anthropic_api_key="sk-ant-fake",
+        allowed_user_ids=[111],
+    )
+    middleware = AuthMiddleware(config)
+    handler = AsyncMock(return_value="ok")
+    callback = make_callback(111)
+
+    result = await middleware(handler, callback, {})
+
+    handler.assert_awaited_once_with(callback, {})
+    assert result == "ok"
+
+
+async def test_unknown_user_callback_is_blocked() -> None:
+    config = Config(
+        telegram_bot_token="fake-token",
+        anthropic_api_key="sk-ant-fake",
+        allowed_user_ids=[111],
+    )
+    middleware = AuthMiddleware(config)
+    handler = AsyncMock()
+    callback = make_callback(999)
+
+    result = await middleware(handler, callback, {})
+
+    handler.assert_not_awaited()
+    assert result is None
