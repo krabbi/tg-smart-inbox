@@ -29,6 +29,7 @@ def create_dispatcher(config: Config) -> Dispatcher:
     """Create Dispatcher with FSM storage, all routers and middleware registered."""
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(AuthMiddleware(config))
+    dp.callback_query.middleware(AuthMiddleware(config))
     dp.include_router(commands.router)
     dp.include_router(config_handler.router)
     dp.include_router(timezone_setup.router)
