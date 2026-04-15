@@ -23,6 +23,7 @@ from bot.services.note_service import NoteService
 from bot.services.reminder_service import ReminderService
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
+from bot.services.user_settings_service import UserSettingsService
 from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ async def _handle_task_with_time(
     state: FSMContext,
     time_parser: TimeParser | None,
     reminder_service: ReminderService | None,
+    user_tz: str = "UTC",
 ) -> None:
     """Try to auto-parse time from task text and create reminder; fall back to FSM on failure."""
     if time_parser is None or reminder_service is None:
@@ -119,7 +121,7 @@ async def _handle_task_with_time(
         return
 
     try:
-        remind_at = await time_parser.parse(text, now=datetime.now(UTC))
+        remind_at = await time_parser.parse(text, now=datetime.now(UTC), user_tz=user_tz)
     except TimeParseError:
         # Could not auto-parse — enter FSM for manual time input
         await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
@@ -156,6 +158,7 @@ async def handle_text(
     note_service: NoteService | None = None,
     time_parser: TimeParser | None = None,
     reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
 ) -> None:
     """Route incoming text to the correct pipeline based on AI classification."""
     text = message.text or ""
@@ -208,6 +211,9 @@ async def handle_text(
             return
         try:
             if has_time_expression(text):
+                user_tz = "UTC"
+                if user_settings_service is not None and user_id:
+                    user_tz = await user_settings_service.get_timezone(user_id)
                 await _handle_task_with_time(
                     message=message,
                     text=text,
@@ -215,6 +221,7 @@ async def handle_text(
                     state=state,
                     time_parser=time_parser,
                     reminder_service=reminder_service,
+                    user_tz=user_tz,
                 )
             else:
                 # No time expression — save without dialog, offer remind button

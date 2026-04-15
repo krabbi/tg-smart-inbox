@@ -74,7 +74,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `link_service.py` | Save links to DB, fetch page text and generate Claude summary |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge reminders |
-| `time_parser.py` | Parse natural-language time expressions using Claude |
+| `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
 | `task_service.py` | Save tasks to DB |
 | `note_service.py` | Save notes to DB |
@@ -340,6 +340,22 @@ the canonical IANA name and the current UTC offset (e.g. `Europe/Moscow (UTC+03:
 `/start` differentiates "user hasn't set a timezone" from "user explicitly picked UTC"
 using `UserSettingsService.has_timezone()`, which returns `True` only when a row exists
 in `user_settings`.
+
+### Timezone-aware time parsing
+
+`TimeParser.parse(text, now, user_tz="UTC")` accepts the user's IANA timezone and
+interprets free-form expressions (e.g. "завтра в 10") as **local** time in `user_tz`,
+converting the result to UTC before returning. Handlers that create reminders
+(`receive_reminder_time` in `handlers/reminders.py` and `_handle_task_with_time` in
+`handlers/messages.py` / `handlers/voice.py`) fetch the timezone via
+`UserSettingsService.get_timezone(user_id)` and pass it to the parser.
+
+Return-type contract (backward-compatible):
+
+- `user_tz == "UTC"` (default) — returns a **naive** UTC `datetime` (legacy behaviour).
+- Any other zone — returns an **aware** UTC `datetime` (`tzinfo=timezone.utc`).
+
+An invalid IANA name falls back silently to UTC and logs a warning.
 
 ---
 

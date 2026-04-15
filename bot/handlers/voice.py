@@ -19,6 +19,7 @@ from bot.services.reminder_service import ReminderService
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
+from bot.services.user_settings_service import UserSettingsService
 from bot.utils.text import extract_url, has_time_expression
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ async def handle_voice(
     note_service: NoteService | None = None,
     time_parser: TimeParser | None = None,
     reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
 ) -> None:
     """Download voice message, transcribe it, then route through the classifier pipeline."""
     if transcription_service is None:
@@ -103,6 +105,9 @@ async def handle_voice(
             return
         try:
             if has_time_expression(transcript):
+                user_tz = "UTC"
+                if user_settings_service is not None and user_id:
+                    user_tz = await user_settings_service.get_timezone(user_id)
                 await _handle_task_with_time(
                     message=message,
                     text=transcript,
@@ -110,6 +115,7 @@ async def handle_voice(
                     state=state,
                     time_parser=time_parser,
                     reminder_service=reminder_service,
+                    user_tz=user_tz,
                 )
             else:
                 await message.answer(

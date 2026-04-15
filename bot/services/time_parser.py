@@ -1,6 +1,7 @@
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bot.exceptions import TimeParseError
 from bot.services.claude_client import ClaudeClient
@@ -9,13 +10,13 @@ logger = logging.getLogger(__name__)
 
 _PARSE_PROMPT = """\
 Convert the following time expression to an absolute datetime.
-Current datetime (ISO 8601, UTC): {now}
+Current datetime (ISO 8601, local time in timezone {tz}): {now}
 
 Rules:
 - Return JSON only: {{"datetime": "YYYY-MM-DDTHH:MM:SS"}}
-- Use UTC timezone
+- Interpret the expression as local time in timezone {tz}
 - Any interval is valid, including very short ones like "через 1 минуту" or "через 30 секунд"
-- If the expression is ambiguous (e.g. "завтра" with no time), default to 09:00 UTC
+- If the expression is ambiguous (e.g. "завтра" with no time), default to 09:00 local time
 - If the expression cannot be parsed at all, return {{"error": "unparseable"}}
 
 Time expression: {text}
@@ -28,34 +29,58 @@ class TimeParser:
     def __init__(self, claude: ClaudeClient) -> None:
         self._claude = claude
 
-    async def parse(self, text: str, now: datetime) -> datetime:
-        """Convert a natural language time string to an absolute UTC datetime.
+    async def parse(self, text: str, now: datetime, user_tz: str = "UTC") -> datetime:
+        """Convert a natural language time string to an absolute datetime.
+
+        Parses the text as local time in ``user_tz`` (IANA tz name) and returns:
+        * naive UTC datetime when ``user_tz == "UTC"`` (backward-compatible behaviour);
+        * aware UTC datetime otherwise.
 
         Raises TimeParseError if the expression cannot be parsed or is in the past.
         """
-        # Normalise now to naive UTC so the prompt is unambiguous for Claude
-        now_utc = now.replace(tzinfo=None) if now.tzinfo is not None else now
+        try:
+            tz = ZoneInfo(user_tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            logger.warning("Invalid user_tz %r, falling back to UTC", user_tz)
+            tz = ZoneInfo("UTC")
+            user_tz = "UTC"
+
+        # Convert ``now`` to local time in the user's timezone so Claude receives
+        # the prompt in the same reference frame as the user's expression.
+        now_aware = now.replace(tzinfo=UTC) if now.tzinfo is None else now
+        now_local = now_aware.astimezone(tz)
+        now_local_naive = now_local.replace(tzinfo=None)
+
         prompt = _PARSE_PROMPT.format(
-            now=now_utc.isoformat(),
+            now=now_local_naive.isoformat(),
+            tz=user_tz,
             text=text,
         )
         try:
             raw = await self._claude.complete(prompt)
-            remind_at = self._parse_response(raw, text)
+            remind_at_naive = self._parse_response(raw, text)
         except TimeParseError:
             raise
         except Exception as exc:
             raise TimeParseError(f"Time parsing failed: {exc}") from exc
 
-        # Validate the result is in the future relative to the now we sent Claude.
-        # Comparing naive datetimes (both UTC) avoids TypeError from mixed tz-awareness.
-        if remind_at <= now_utc:
+        # Interpret Claude's naive datetime as local time in ``tz``
+        remind_at_local = remind_at_naive.replace(tzinfo=tz)
+        remind_at_utc = remind_at_local.astimezone(UTC)
+
+        # Validate the result is in the future (compare aware datetimes)
+        if remind_at_utc <= now_aware:
             raise TimeParseError(f"Parsed time is not in the future for expression {text!r}")
-        return remind_at
+
+        # Backward compatibility: callers that don't care about tzinfo get a naive UTC
+        # datetime when ``user_tz`` is "UTC", matching the old behaviour.
+        if user_tz == "UTC":
+            return remind_at_utc.replace(tzinfo=None)
+        return remind_at_utc
 
     @staticmethod
     def _parse_response(raw: str, original_text: str) -> datetime:
-        """Parse Claude's JSON response into a naive UTC datetime.
+        """Parse Claude's JSON response into a naive datetime (caller applies tzinfo).
 
         Strips markdown code fences (```json ... ```) that Claude sometimes wraps around JSON.
         """
@@ -72,7 +97,7 @@ class TimeParser:
                 raise TimeParseError(f"Cannot parse time: {original_text!r}")
             dt_str = data["datetime"]
             dt = datetime.fromisoformat(dt_str)
-            # Normalise to naive UTC: drop timezone info if Claude included it
+            # Normalise to naive: drop any timezone info Claude may have added
             return dt.replace(tzinfo=None)
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
             raise TimeParseError(f"Malformed time response: {raw!r}") from exc
