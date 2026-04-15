@@ -15,6 +15,7 @@ from bot.services.note_service import NoteService, SavedNote
 from bot.services.reminder_service import ReminderService
 from bot.services.task_service import SavedTask, TaskService
 from bot.services.time_parser import TimeParser
+from bot.services.user_settings_service import UserSettingsService
 from bot.utils.text import extract_url as _extract_url
 from bot.utils.text import has_time_expression as _has_time_expression
 
@@ -171,6 +172,43 @@ async def test_handle_text_task_with_time_auto_creates_reminder() -> None:
     reply = msg.answer.call_args[0][0]
     assert "Задача сохранена" in reply
     assert "\U0001f514" in reply
+
+
+async def test_handle_text_task_with_time_forwards_user_timezone_to_parser() -> None:
+    """Task with time uses UserSettingsService.get_timezone() and forwards it to TimeParser.parse."""
+    msg = make_message("завтра сдать отчёт", user_id=42)
+    classifier = make_classifier(MessageType.TASK)
+    state = make_state()
+
+    mock_item = MagicMock()
+    mock_item.id = uuid.uuid4()
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+
+    remind_at = datetime(2026, 6, 2, 7, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    reminder_svc = MagicMock(spec=ReminderService)
+    reminder_svc.create = AsyncMock()
+
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await handle_text(
+        msg,
+        state=state,
+        classifier=classifier,
+        task_service=task_svc,
+        time_parser=time_parser,
+        reminder_service=reminder_svc,
+        user_settings_service=settings_svc,
+    )
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    time_parser.parse.assert_awaited_once()
+    assert time_parser.parse.call_args.kwargs["user_tz"] == "Europe/Moscow"
+    reminder_svc.create.assert_awaited_once()
 
 
 async def test_handle_text_task_with_time_parse_error_enters_fsm() -> None:
