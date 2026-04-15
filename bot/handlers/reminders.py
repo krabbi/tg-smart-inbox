@@ -16,6 +16,7 @@ from bot.exceptions import TimeParseError
 from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
+from bot.services.user_settings_service import UserSettingsService
 from bot.utils.text import extract_url
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ async def receive_reminder_time(
     time_parser: TimeParser | None = None,
     reminder_service: ReminderService | None = None,
     link_service: LinkService | None = None,
+    user_settings_service: UserSettingsService | None = None,
 ) -> None:
     """Parse the user's time expression and create the reminder."""
     # Local import avoids the reminders ↔ links circular import at module level.
@@ -98,8 +100,15 @@ async def receive_reminder_time(
     data = await state.get_data()
     item_id_str = data.get(_ITEM_ID_KEY, "")
 
+    user_id = message.from_user.id if message.from_user else 0
+    user_tz = "UTC"
+    if user_settings_service is not None and user_id:
+        user_tz = await user_settings_service.get_timezone(user_id)
+
     try:
-        remind_at = await time_parser.parse(message.text or "", now=datetime.now(UTC))
+        remind_at = await time_parser.parse(
+            message.text or "", now=datetime.now(UTC), user_tz=user_tz
+        )
     except TimeParseError:
         data = await state.get_data()
         attempts = data.get(_ATTEMPTS_KEY, 0) + 1

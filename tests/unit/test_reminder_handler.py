@@ -17,6 +17,7 @@ from bot.handlers.reminders import (
 from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
+from bot.services.user_settings_service import UserSettingsService
 
 
 def make_message(text: str = "test", user_id: int = 1) -> Message:
@@ -261,6 +262,36 @@ async def test_receive_reminder_time_with_url_embedded_in_sentence() -> None:
     # URL passed to link_service is the extracted one (trailing comma stripped by regex? actually \S+ greedy)
     saved_url = link_svc.save.call_args[0][0]
     assert saved_url.startswith("https://example.com/a")
+
+
+async def test_receive_reminder_time_uses_user_timezone() -> None:
+    """User's timezone from UserSettingsService is forwarded to TimeParser.parse."""
+    msg = make_message("завтра в 10", user_id=42)
+    item_id = str(uuid.uuid4())
+    state = make_state({"reminder_item_id": item_id})
+
+    remind_at = datetime(2026, 6, 2, 7, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    reminder_svc = MagicMock(spec=ReminderService)
+    reminder_svc.create = AsyncMock()
+
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await receive_reminder_time(
+        msg,
+        state,
+        time_parser=time_parser,
+        reminder_service=reminder_svc,
+        user_settings_service=settings_svc,
+    )
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    time_parser.parse.assert_awaited_once()
+    assert time_parser.parse.call_args.kwargs["user_tz"] == "Europe/Moscow"
+    reminder_svc.create.assert_awaited_once()
 
 
 async def test_receive_reminder_time_save_error() -> None:
