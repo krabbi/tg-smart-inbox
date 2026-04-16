@@ -188,14 +188,62 @@ async def test_auto_resend_reminders_creates_followup() -> None:
 
 
 async def test_auto_resend_stops_after_max_resends() -> None:
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+    from bot.scheduler import _MAX_AUTO_RESENDS
+
+    item = MagicMock(spec=Item)
+    item.user_id = 99
+    item.content = "купить молоко"
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.item_id = "item-id"
+    original.snooze_count = _MAX_AUTO_RESENDS  # already at limit
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+    ):
+        mock_repo_cls.return_value = MagicMock()
+
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.mark_acknowledged = AsyncMock()
+        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    mock_svc.mark_acknowledged.assert_awaited_once_with(original)
+    mock_svc.prepare_auto_resend.assert_not_awaited()
+    # User is notified that the reminder was closed automatically.
+    bot.send_message.assert_awaited_once()
+    call_kwargs = bot.send_message.call_args[1]
+    assert call_kwargs["chat_id"] == 99
+    assert "закрыто автоматически" in call_kwargs["text"]
+    assert "купить молоко" in call_kwargs["text"]
+
+
+async def test_auto_resend_missing_item_still_acks_without_notifying() -> None:
+    """When the item is gone, the reminder is acknowledged silently (no notification)."""
     from bot.models.reminder import Reminder
     from bot.scheduler import _MAX_AUTO_RESENDS
 
     original = MagicMock(spec=Reminder)
     original.id = "orig-id"
-    original.snooze_count = _MAX_AUTO_RESENDS  # already at limit
+    original.item_id = "item-id"
+    original.snooze_count = _MAX_AUTO_RESENDS
 
     session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=None)
 
     with (
         patch("bot.scheduler.ReminderRepository") as mock_repo_cls,

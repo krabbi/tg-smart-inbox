@@ -377,7 +377,10 @@ async def cmd_reminders(
     reminders = await reminder_service.get_upcoming(user_id)
 
     if not reminders:
-        await message.answer("У тебя нет предстоящих напоминаний.")
+        await message.answer(
+            "У тебя нет предстоящих напоминаний. "
+            "Отправь задачу и выбери время, чтобы создать напоминание."
+        )
         return
 
     user_tz = "UTC"
