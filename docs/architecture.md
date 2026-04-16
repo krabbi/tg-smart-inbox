@@ -73,6 +73,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 |------|---------------|
 | `classifier.py` | Classify incoming messages: LINK / TASK / NOTE / IDEA / MEDIA |
 | `claude_client.py` | Thin wrapper around the Anthropic API |
+| `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error |
 | `link_service.py` | Save links to DB, fetch page text and generate Claude summary |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge reminders |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
@@ -189,10 +190,11 @@ All services and the DB session are injected into handlers via `DependencyMiddle
 ```
 DependencyMiddleware.__call__()
   ├── opens session
-  ├── creates: ClaudeClient, ItemRepository, ReminderRepository, IdeaRepository
-  ├── injects: classifier, link_service, reminder_service, time_parser,
-  │            idea_service, task_service, note_service, list_service,
-  │            user_settings_service
+  ├── creates: ClaudeClient, EmbeddingService, ItemRepository,
+  │            ReminderRepository, IdeaRepository
+  ├── injects: classifier, embedding_service, link_service, reminder_service,
+  │            time_parser, idea_service, task_service, note_service,
+  │            list_service, user_settings_service
   ├── if GROQ_API_KEY: injects transcription_service (else None)
   ├── if GOOGLE_DRIVE_FOLDER_ID: injects media_service (else None)
   └── calls handler
@@ -422,14 +424,35 @@ This is a whitelist, not a blocklist — it fails closed by default.
 
 ## Background Scheduler
 
-`bot/scheduler.py` runs two APScheduler jobs every 60 seconds:
+`bot/scheduler.py` runs APScheduler jobs in the background:
 
-| Job | Function | What it does |
-|-----|----------|-------------|
-| Due reminders | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_resend_at = now + 5min`. |
-| Auto-resend | `_auto_resend_reminders` | Finds reminders where `auto_resend_at <= now`. If `snooze_count < 5`, creates new reminder and re-notifies. If `>= 5`, silently acknowledges. |
+| Job | Interval | Function | What it does |
+|-----|----------|----------|-------------|
+| Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_resend_at = now + 5min`. |
+| Auto-resend | 60 seconds | `_auto_resend_reminders` | Finds reminders where `auto_resend_at <= now`. If `snooze_count < 5`, creates new reminder and re-notifies. If `>= 5`, silently acknowledges. |
+| Reindex embeddings | 10 minutes + at startup | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
 
 Each scheduler job opens its own DB session.
+
+### Vector embeddings pipeline
+
+`EmbeddingService` (`bot/services/embedding_service.py`) calls the Anthropic Embeddings
+API via the SDK's low-level HTTP client. When the API is unreachable, returns a payload
+with an unexpected shape, or produces a vector whose length does not match
+`Config.embedding_dim`, the service logs and returns `None` — it never raises.
+
+At save time:
+
+- `LinkService.save()` persists the `Item` and commits, then attempts to generate and
+  store the embedding. The service returns a `SavedLink(item, indexed)` tuple; the
+  handler shows `ℹ️ Умный поиск временно недоступен, запись сохранена без индексации.`
+  when `indexed` is `False`.
+- `IdeaService.save_idea()` persists the `Item` + `Idea`, commits, then attempts to
+  generate embeddings for both records. The `SavedIdea.indexed` flag is `True` only
+  when both vectors were produced and stored successfully; the handler shows the same
+  notification otherwise.
+- Records saved without an embedding (API outage, service disabled, partial failure)
+  are eventually backfilled by the `_reindex_missing_embeddings` scheduler job.
 
 ---
 
@@ -546,6 +569,7 @@ tg-smart-inbox/
 │   ├── services/
 │   │   ├── classifier.py     # Message type classification
 │   │   ├── claude_client.py  # Anthropic API wrapper
+│   │   ├── embedding_service.py  # Vector embeddings via Anthropic Embeddings API
 │   │   ├── link_service.py   # Link save + summarize
 │   │   ├── reminder_service.py # Reminder business logic
 │   │   ├── time_parser.py    # Natural-language time parsing

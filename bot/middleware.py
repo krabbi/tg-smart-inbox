@@ -13,6 +13,7 @@ from bot.repositories.user_settings import UserSettingsRepository
 from bot.services.classifier import ClassifierService
 from bot.services.claude_client import ClaudeClient
 from bot.services.drive_service import DriveService
+from bot.services.embedding_service import EmbeddingService
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
 from bot.services.list_service import ListService
@@ -46,17 +47,29 @@ class DependencyMiddleware(BaseMiddleware):
             data["config"] = self._config
 
             claude = ClaudeClient(self._config)
+            embedding_service = EmbeddingService(self._config)
             item_repo = ItemRepository(session)
             reminder_repo = ReminderRepository(session)
             idea_repo = IdeaRepository(session)
 
             data["classifier"] = ClassifierService(claude)
+            data["embedding_service"] = embedding_service
             data["link_service"] = LinkService(
-                session=session, item_repo=item_repo, scraper=Scraper(), claude=claude
+                session=session,
+                item_repo=item_repo,
+                scraper=Scraper(),
+                claude=claude,
+                embedding_service=embedding_service,
             )
             data["reminder_service"] = ReminderService(session=session, repo=reminder_repo)
             data["time_parser"] = TimeParser(claude)
-            data["idea_service"] = IdeaService(session, item_repo, idea_repo, claude)
+            data["idea_service"] = IdeaService(
+                session,
+                item_repo,
+                idea_repo,
+                claude,
+                embedding_service=embedding_service,
+            )
             data["task_service"] = TaskService(session, item_repo)
             data["note_service"] = NoteService(session, item_repo)
             data["list_service"] = ListService(item_repo=item_repo)

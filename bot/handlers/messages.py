@@ -203,6 +203,10 @@ async def handle_text(
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)
+        if not saved.indexed:
+            await message.answer(
+                "\u2139\ufe0f Умный поиск временно недоступен, запись сохранена без индексации."
+            )
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(text, user_id)

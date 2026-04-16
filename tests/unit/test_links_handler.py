@@ -11,7 +11,7 @@ from bot.handlers.links import (
     cb_link_summary,
     handle_link_message,
 )
-from bot.services.link_service import LinkService, LinkSummary
+from bot.services.link_service import LinkService, LinkSummary, SavedLink
 
 
 def make_message(text: str = "https://example.com", user_id: int = 1) -> Message:
@@ -43,12 +43,13 @@ def make_link_service(
     *,
     summary: LinkSummary | None = None,
     scraping_error: bool = False,
+    indexed: bool = True,
 ) -> LinkService:
     item = MagicMock()
     item.id = uuid.uuid4()
 
     svc = MagicMock(spec=LinkService)
-    svc.save = AsyncMock(return_value=item)
+    svc.save = AsyncMock(return_value=SavedLink(item=item, indexed=indexed))
 
     if scraping_error:
         svc.summarize = AsyncMock(side_effect=ScrapingError("timeout"))
@@ -82,6 +83,17 @@ async def test_handle_link_message_saves_and_replies() -> None:
     message.answer.assert_awaited_once()
     call_kwargs = message.answer.call_args[1]
     assert "reply_markup" in call_kwargs
+
+
+async def test_handle_link_message_warns_when_not_indexed() -> None:
+    """When embedding fails, the handler warns the user after the save confirmation."""
+    message = make_message()
+    svc = make_link_service(indexed=False)
+    await handle_link_message(message, "https://example.com", svc)
+
+    replies = [c[0][0] for c in message.answer.call_args_list]
+    assert any("Ссылка сохранена" in r for r in replies)
+    assert any("Умный поиск временно недоступен" in r for r in replies)
 
 
 async def test_cb_link_summary_edits_message() -> None:

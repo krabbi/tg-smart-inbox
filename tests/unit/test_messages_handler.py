@@ -402,6 +402,28 @@ async def test_handle_text_idea_save_error_sends_error_reply() -> None:
     assert "Не удалось" in msg.answer.call_args[0][0]
 
 
+async def test_handle_text_idea_not_indexed_warns_user() -> None:
+    """When embedding fails, the handler tells the user smart search is temporarily down."""
+    msg = make_message("хочу сделать приложение")
+    classifier = make_classifier(MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    mock_idea = MagicMock()
+    mock_idea.tags = []
+    mock_idea.complexity = None
+    mock_idea.effort = None
+    saved = MagicMock(spec=SavedIdea)
+    saved.idea = mock_idea
+    saved.indexed = False
+    idea_svc.save_idea = AsyncMock(return_value=saved)
+
+    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("Идея сохранена" in r for r in replies)
+    assert any("Умный поиск временно недоступен" in r for r in replies)
+
+
 # ── suggestion query detection ────────────────────────────────────────────────
 
 

@@ -8,7 +8,8 @@ from bot.exceptions import ScrapingError
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
-from bot.services.link_service import _SUMMARIZE_PROMPT, LinkService, LinkSummary
+from bot.services.embedding_service import EmbeddingService
+from bot.services.link_service import _SUMMARIZE_PROMPT, LinkService, LinkSummary, SavedLink
 from bot.services.scraper import Scraper
 
 _PLAIN_RESPONSE = (
@@ -22,9 +23,11 @@ def make_link_service(
     scraper_text: str = "page text",
     claude_response: str = _PLAIN_RESPONSE,
     session: AsyncSession | None = None,
+    embedding: list[float] | None = None,
 ) -> tuple[LinkService, ItemRepository]:
     mock_session = session or MagicMock(spec=AsyncSession)
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
 
     mock_item = MagicMock(spec=Item)
     mock_item.id = uuid.uuid4()
@@ -33,6 +36,7 @@ def make_link_service(
 
     mock_repo = MagicMock(spec=ItemRepository)
     mock_repo.create = AsyncMock(return_value=mock_item)
+    mock_repo.update_embedding = AsyncMock()
 
     mock_scraper = MagicMock(spec=Scraper)
     mock_scraper.fetch_text = AsyncMock(return_value=scraper_text)
@@ -40,11 +44,15 @@ def make_link_service(
     mock_claude = MagicMock(spec=ClaudeClient)
     mock_claude.complete = AsyncMock(return_value=claude_response)
 
+    mock_embedding = MagicMock(spec=EmbeddingService)
+    mock_embedding.generate_for_item = AsyncMock(return_value=embedding)
+
     svc = LinkService(
         session=mock_session,
         item_repo=mock_repo,
         scraper=mock_scraper,
         claude=mock_claude,
+        embedding_service=mock_embedding,
     )
     return svc, mock_repo
 
@@ -60,16 +68,77 @@ async def test_save_creates_item_with_link_type() -> None:
 async def test_save_commits_session() -> None:
     mock_session = MagicMock(spec=AsyncSession)
     mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
     svc, _ = make_link_service(session=mock_session)
     await svc.save("https://example.com", user_id=1)
-    mock_session.commit.assert_awaited_once()
+    # First commit persists the Item; optional second commit persists the embedding.
+    assert mock_session.commit.await_count >= 1
 
 
-async def test_save_returns_item() -> None:
+async def test_save_returns_saved_link() -> None:
     svc, _ = make_link_service()
-    item = await svc.save("https://example.com", user_id=1)
-    assert item is not None
-    assert item.type == ItemType.link
+    saved = await svc.save("https://example.com", user_id=1)
+    assert isinstance(saved, SavedLink)
+    assert saved.item is not None
+    assert saved.item.type == ItemType.link
+
+
+async def test_save_without_embedding_service_returns_not_indexed() -> None:
+    """When no EmbeddingService is wired, the record is still saved but not indexed."""
+    mock_session = MagicMock(spec=AsyncSession)
+    mock_session.commit = AsyncMock()
+    mock_repo = MagicMock(spec=ItemRepository)
+    mock_item = MagicMock(spec=Item)
+    mock_item.id = uuid.uuid4()
+    mock_item.type = ItemType.link
+    mock_repo.create = AsyncMock(return_value=mock_item)
+
+    svc = LinkService(
+        session=mock_session,
+        item_repo=mock_repo,
+        scraper=MagicMock(spec=Scraper),
+        claude=MagicMock(spec=ClaudeClient),
+        embedding_service=None,
+    )
+    saved = await svc.save("https://example.com", user_id=1)
+    assert saved.indexed is False
+
+
+async def test_save_indexes_item_when_embedding_succeeds() -> None:
+    svc, repo = make_link_service(embedding=[0.1] * 1536)
+    saved = await svc.save("https://example.com", user_id=1)
+    assert saved.indexed is True
+    repo.update_embedding.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+async def test_save_marks_not_indexed_when_embedding_returns_none() -> None:
+    svc, repo = make_link_service(embedding=None)
+    saved = await svc.save("https://example.com", user_id=1)
+    assert saved.indexed is False
+    repo.update_embedding.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+async def test_save_handles_embedding_service_exception() -> None:
+    """Embedding crashes must never break the save — item is returned, indexed=False."""
+    svc, _ = make_link_service()
+    svc._embedding.generate_for_item = AsyncMock(side_effect=Exception("API down"))  # type: ignore[attr-defined, union-attr]
+    saved = await svc.save("https://example.com", user_id=1)
+    assert saved.indexed is False
+    assert saved.item is not None
+
+
+async def test_save_rolls_back_when_update_embedding_fails() -> None:
+    """If persisting the vector blows up, the service rolls back and reports not indexed."""
+    mock_session = MagicMock(spec=AsyncSession)
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    svc, repo = make_link_service(session=mock_session, embedding=[0.1] * 1536)
+    repo.update_embedding = AsyncMock(side_effect=Exception("DB blew up"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.indexed is False
+    mock_session.rollback.assert_awaited_once()
 
 
 async def test_summarize_calls_scraper_and_claude() -> None:

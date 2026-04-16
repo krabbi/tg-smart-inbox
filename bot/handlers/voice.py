@@ -96,6 +96,10 @@ async def handle_voice(
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)
+        if not saved.indexed:
+            await message.answer(
+                "ℹ️ Умный поиск временно недоступен, запись сохранена без индексации."
+            )
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(transcript, user_id)

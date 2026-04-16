@@ -141,7 +141,7 @@ bot/
   db.py                 # async engine + session factory
   exceptions.py         # all domain exceptions
   middleware.py         # DependencyMiddleware — DI wiring
-  scheduler.py          # APScheduler: due reminders + auto-resend
+  scheduler.py          # APScheduler: due reminders + auto-resend + embedding reindex
   handlers/
     messages.py         # main router: text, photo, document
     links.py            # link action callbacks
@@ -154,6 +154,7 @@ bot/
   services/
     classifier.py       # LINK/TASK/NOTE/IDEA/MEDIA classification
     claude_client.py    # Anthropic API wrapper
+    embedding_service.py # vector embeddings + graceful fallback
     link_service.py     # link save + summarization
     reminder_service.py
     time_parser.py      # natural-language time parsing

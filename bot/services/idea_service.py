@@ -10,6 +10,7 @@ from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
+from bot.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,11 @@ class IdeasPage:
 
 @dataclass(frozen=True)
 class SavedIdea:
-    """Result of saving an idea."""
+    """Result of saving an idea — persisted Item + Idea plus indexing status."""
 
     item: Item
     idea: Idea
+    indexed: bool = False
 
 
 class IdeaService:
@@ -101,11 +103,13 @@ class IdeaService:
         item_repo: ItemRepository,
         idea_repo: IdeaRepository,
         claude: ClaudeClient,
+        embedding_service: EmbeddingService | None = None,
     ) -> None:
         self._session = session
         self._item_repo = item_repo
         self._idea_repo = idea_repo
         self._claude = claude
+        self._embedding = embedding_service
 
     async def save_idea(self, text: str, user_id: int) -> SavedIdea:
         """Extract tags and classify complexity/effort with Claude, persist Item + Idea."""
@@ -115,7 +119,37 @@ class IdeaService:
             item_id=item.id, tags=tags, complexity=complexity, effort=effort
         )
         await self._session.commit()
-        return SavedIdea(item=item, idea=idea)
+
+        indexed = await self._try_index(item, idea)
+        return SavedIdea(item=item, idea=idea, indexed=indexed)
+
+    async def _try_index(self, item: Item, idea: Idea) -> bool:
+        """Generate and store embeddings for both Item and Idea; partial failures count as failure."""
+        if self._embedding is None:
+            return False
+
+        try:
+            item_vector = await self._embedding.generate_for_item(item)
+            # Attach relationship in memory so _idea_text can read the parent content
+            # without an extra DB round-trip.
+            idea.item = item
+            idea_vector = await self._embedding.generate_for_idea(idea)
+        except Exception:
+            logger.exception("Embedding generation raised for idea %s", idea.id)
+            return False
+
+        if item_vector is None or idea_vector is None:
+            return False
+
+        try:
+            await self._item_repo.update_embedding(item.id, item_vector)
+            await self._idea_repo.update_embedding(idea.id, idea_vector)
+            await self._session.commit()
+        except Exception:
+            logger.exception("Failed to persist embeddings for idea %s", idea.id)
+            await self._session.rollback()
+            return False
+        return True
 
     async def suggest(self, user_id: int, query: str) -> str:
         """Return Claude suggestions based on saved ideas; user-friendly fallback on error."""

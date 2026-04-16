@@ -83,12 +83,19 @@ def _extract_url(message_text: str) -> str:
     return message_text.split("\n")[-1].strip()
 
 
+_EMBEDDING_UNAVAILABLE_NOTICE = (
+    "ℹ️ Умный поиск временно недоступен, запись сохранена без индексации."
+)
+
+
 async def handle_link_message(message: Message, url: str, link_service: LinkService) -> None:
     """Save a link and show action buttons. Called from the messages handler."""
     user_id = message.from_user.id if message.from_user else 0
-    item = await link_service.save(url, user_id)
-    keyboard = _link_keyboard(str(item.id))
+    saved = await link_service.save(url, user_id)
+    keyboard = _link_keyboard(str(saved.item.id))
     await message.answer(f"🔗 Ссылка сохранена:\n{url}", reply_markup=keyboard)
+    if not saved.indexed:
+        await message.answer(_EMBEDDING_UNAVAILABLE_NOTICE)
 
 
 async def _do_summarize(

@@ -144,6 +144,36 @@ async def test_handle_voice_downloads_audio_and_transcribes() -> None:
     svc.transcribe.assert_awaited_once_with(b"fake-audio")
 
 
+async def test_handle_voice_idea_not_indexed_warns_user() -> None:
+    """Voice idea without successful indexing surfaces the 'umny poisk' notification."""
+    msg = make_message()
+    svc = MagicMock(spec=TranscriptionService)
+    svc.transcribe = AsyncMock(return_value="идея для приложения")
+
+    classifier = MagicMock(spec=ClassifierService)
+    classifier.classify = AsyncMock(return_value=MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    saved = MagicMock(spec=SavedIdea)
+    saved.idea = MagicMock()
+    saved.idea.tags = []
+    saved.idea.complexity = None
+    saved.idea.effort = None
+    saved.indexed = False
+    idea_svc.save_idea = AsyncMock(return_value=saved)
+
+    await handle_voice(
+        msg,
+        state=make_state(),
+        transcription_service=svc,
+        classifier=classifier,
+        idea_service=idea_svc,
+    )
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("Умный поиск временно недоступен" in r for r in replies)
+
+
 async def test_handle_voice_routes_idea_shows_complexity_labels() -> None:
     msg = make_message()
     svc = MagicMock(spec=TranscriptionService)

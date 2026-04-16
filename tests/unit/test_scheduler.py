@@ -276,9 +276,177 @@ def test_start_scheduler_returns_scheduler() -> None:
     assert isinstance(scheduler, AsyncIOScheduler)
 
 
-def test_start_scheduler_registers_two_jobs() -> None:
+def test_start_scheduler_registers_two_jobs_without_config() -> None:
     bot = MagicMock()
     factory = MagicMock()
     with patch.object(AsyncIOScheduler, "start"):
         scheduler = start_scheduler(bot, factory)
     assert len(scheduler.get_jobs()) == 2
+
+
+def test_start_scheduler_registers_reindex_job_when_config_given() -> None:
+    from bot.config import Config
+
+    bot = MagicMock()
+    factory = MagicMock()
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+    with patch.object(AsyncIOScheduler, "start"):
+        scheduler = start_scheduler(bot, factory, config)
+    # Reminders + auto-resend + reindex = 3 jobs
+    assert len(scheduler.get_jobs()) == 3
+
+
+async def test_reindex_missing_embeddings_processes_items_and_ideas() -> None:
+    import uuid
+
+    from bot.config import Config
+    from bot.models.idea import Idea
+    from bot.models.item import Item
+    from bot.scheduler import _reindex_missing_embeddings
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "content"
+    item.description = None
+    item.scraped_text = None
+
+    idea = MagicMock(spec=Idea)
+    idea.id = uuid.uuid4()
+    idea.tags = ["tag1"]
+    parent = MagicMock(spec=Item)
+    parent.content = "parent content"
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.IdeaRepository") as mock_idea_repo_cls,
+        patch("bot.scheduler.EmbeddingService") as mock_svc_cls,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_embedding = AsyncMock(return_value=[item])
+        mock_item_repo.update_embedding = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_idea_repo = MagicMock()
+        mock_idea_repo.get_missing_embedding = AsyncMock(return_value=[(parent, idea)])
+        mock_idea_repo.update_embedding = AsyncMock()
+        mock_idea_repo_cls.return_value = mock_idea_repo
+
+        mock_svc = MagicMock()
+        mock_svc.generate_for_item = AsyncMock(return_value=[0.1, 0.2])
+        mock_svc.generate_for_idea = AsyncMock(return_value=[0.3, 0.4])
+        mock_svc_cls.return_value = mock_svc
+
+        factory = make_session_factory(session)
+
+        await _reindex_missing_embeddings(factory, config)
+
+        mock_svc.generate_for_item.assert_awaited_once_with(item)
+        mock_svc.generate_for_idea.assert_awaited_once_with(idea)
+        mock_item_repo.update_embedding.assert_awaited_once_with(item.id, [0.1, 0.2])
+        mock_idea_repo.update_embedding.assert_awaited_once_with(idea.id, [0.3, 0.4])
+
+
+async def test_reindex_missing_embeddings_skips_failed_record_and_continues() -> None:
+    """A single item crashing the embedding pipeline must not stop the whole batch."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _reindex_missing_embeddings
+
+    good_item = MagicMock(spec=Item)
+    good_item.id = uuid.uuid4()
+    good_item.content = "good"
+    good_item.description = None
+    good_item.scraped_text = None
+
+    bad_item = MagicMock(spec=Item)
+    bad_item.id = uuid.uuid4()
+    bad_item.content = "bad"
+    bad_item.description = None
+    bad_item.scraped_text = None
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.IdeaRepository") as mock_idea_repo_cls,
+        patch("bot.scheduler.EmbeddingService") as mock_svc_cls,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_embedding = AsyncMock(return_value=[bad_item, good_item])
+        mock_item_repo.update_embedding = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_idea_repo = MagicMock()
+        mock_idea_repo.get_missing_embedding = AsyncMock(return_value=[])
+        mock_idea_repo_cls.return_value = mock_idea_repo
+
+        mock_svc = MagicMock()
+        # First call (bad_item) raises, second call (good_item) returns vector
+        mock_svc.generate_for_item = AsyncMock(side_effect=[Exception("API down"), [0.5, 0.6]])
+        mock_svc_cls.return_value = mock_svc
+
+        factory = make_session_factory(session)
+
+        # Must not raise — errors are swallowed per record
+        await _reindex_missing_embeddings(factory, config)
+
+        # The good item was still indexed even though the bad one failed.
+        mock_item_repo.update_embedding.assert_awaited_once_with(good_item.id, [0.5, 0.6])
+        session.rollback.assert_awaited()
+
+
+async def test_reindex_missing_embeddings_skips_none_vectors() -> None:
+    """When the API returns None, the record is left untouched and no update happens."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _reindex_missing_embeddings
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "content"
+    item.description = None
+    item.scraped_text = None
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.IdeaRepository") as mock_idea_repo_cls,
+        patch("bot.scheduler.EmbeddingService") as mock_svc_cls,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_embedding = AsyncMock(return_value=[item])
+        mock_item_repo.update_embedding = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_idea_repo = MagicMock()
+        mock_idea_repo.get_missing_embedding = AsyncMock(return_value=[])
+        mock_idea_repo_cls.return_value = mock_idea_repo
+
+        mock_svc = MagicMock()
+        mock_svc.generate_for_item = AsyncMock(return_value=None)
+        mock_svc_cls.return_value = mock_svc
+
+        factory = make_session_factory(session)
+
+        await _reindex_missing_embeddings(factory, config)
+
+        mock_item_repo.update_embedding.assert_not_awaited()
