@@ -269,7 +269,11 @@ async def test_cmd_reminders_empty() -> None:
     svc.get_upcoming = AsyncMock(return_value=[])
 
     await cmd_reminders(msg, reminder_service=svc)
-    assert "нет" in msg.answer.call_args[0][0].lower()
+    text = msg.answer.call_args[0][0]
+    assert "нет" in text.lower()
+    # Empty list should also include a hint how to create the first reminder.
+    assert "Отправь задачу" in text
+    assert "чтобы создать напоминание" in text
 
 
 async def test_cmd_reminders_shows_list() -> None:

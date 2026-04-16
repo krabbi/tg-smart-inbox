@@ -78,13 +78,18 @@ async def _auto_resend_reminders(
         due = await svc.get_due_auto_resend(now)
         for reminder in due:
             try:
-                if reminder.snooze_count >= _MAX_AUTO_RESENDS:
-                    # Too many auto-resends — acknowledge silently to stop spam
+                item: Item = await session.get(Item, reminder.item_id)  # type: ignore[assignment]
+                if item is None:
                     await svc.mark_acknowledged(reminder)
                     continue
 
-                item: Item = await session.get(Item, reminder.item_id)  # type: ignore[assignment]
-                if item is None:
+                if reminder.snooze_count >= _MAX_AUTO_RESENDS:
+                    # Too many auto-resends — notify the user that the reminder
+                    # is being closed automatically, then acknowledge to stop spam.
+                    await bot.send_message(
+                        chat_id=item.user_id,
+                        text=f"🔔 Напоминание закрыто автоматически: {item.content}",
+                    )
                     await svc.mark_acknowledged(reminder)
                     continue
 
