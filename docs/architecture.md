@@ -314,7 +314,7 @@ Bot sends: "🔔 Напоминание: <content>"
               scheduler._auto_resend_reminders()
                     │
                     ├── snooze_count < 5: auto-resend, snooze_count++
-                    └── snooze_count >= 5: silently acknowledge (stop spam)
+                    └── snooze_count >= 5: notify user ("🔔 Напоминание закрыто автоматически: …"), then acknowledge
 ```
 
 ---
