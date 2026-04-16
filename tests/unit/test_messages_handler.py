@@ -108,7 +108,7 @@ async def test_handle_text_link_calls_link_handler() -> None:
     classifier = make_classifier(MessageType.LINK)
     link_service = MagicMock(spec=LinkService)
 
-    with patch("bot.handlers.links.handle_link_message", new=AsyncMock()) as mock_handle:
+    with patch("bot.handlers.messages.handle_link_message", new=AsyncMock()) as mock_handle:
         await handle_text(msg, state=make_state(), classifier=classifier, link_service=link_service)
         mock_handle.assert_awaited_once()
 

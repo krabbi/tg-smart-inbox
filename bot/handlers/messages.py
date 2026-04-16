@@ -9,6 +9,7 @@ from aiogram.types import Message
 
 from bot.exceptions import TimeParseError
 from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
+from bot.handlers.links import EMBEDDING_UNAVAILABLE_NOTICE, handle_link_message
 from bot.handlers.reminders import (
     _ATTEMPTS_KEY,
     _ITEM_ID_KEY,
@@ -181,8 +182,6 @@ async def handle_text(
 
     if msg_type == MessageType.LINK and link_service is not None:
         url = extract_url(text) or text
-        from bot.handlers.links import handle_link_message
-
         await handle_link_message(message, url, link_service)
     elif msg_type == MessageType.IDEA and idea_service is not None:
         try:
@@ -204,9 +203,7 @@ async def handle_text(
             reply += f"\n{tags_str}"
         await message.answer(reply)
         if not saved.indexed:
-            await message.answer(
-                "\u2139\ufe0f Умный поиск временно недоступен, запись сохранена без индексации."
-            )
+            await message.answer(EMBEDDING_UNAVAILABLE_NOTICE)
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(text, user_id)

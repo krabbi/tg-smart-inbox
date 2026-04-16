@@ -83,9 +83,10 @@ def _extract_url(message_text: str) -> str:
     return message_text.split("\n")[-1].strip()
 
 
-_EMBEDDING_UNAVAILABLE_NOTICE = (
-    "ℹ️ Умный поиск временно недоступен, запись сохранена без индексации."
-)
+# Shared notice shown across handlers (text, voice, link) when semantic indexing
+# is temporarily unavailable at save time. Indexing is retried by the background
+# scheduler job.
+EMBEDDING_UNAVAILABLE_NOTICE = "ℹ️ Умный поиск временно недоступен, запись сохранена без индексации."
 
 
 async def handle_link_message(message: Message, url: str, link_service: LinkService) -> None:
@@ -95,7 +96,7 @@ async def handle_link_message(message: Message, url: str, link_service: LinkServ
     keyboard = _link_keyboard(str(saved.item.id))
     await message.answer(f"🔗 Ссылка сохранена:\n{url}", reply_markup=keyboard)
     if not saved.indexed:
-        await message.answer(_EMBEDDING_UNAVAILABLE_NOTICE)
+        await message.answer(EMBEDDING_UNAVAILABLE_NOTICE)
 
 
 async def _do_summarize(
