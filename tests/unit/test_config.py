@@ -43,3 +43,16 @@ def test_config_default_empty_user_ids() -> None:
         anthropic_api_key="sk-ant-fake",
     )
     assert config.allowed_user_ids == []
+
+
+def test_config_default_embedding_dim(fake_config: Config) -> None:
+    assert fake_config.embedding_dim == 1536
+
+
+def test_config_embedding_dim_override() -> None:
+    config = Config(
+        telegram_bot_token="fake-token",
+        anthropic_api_key="sk-ant-fake",
+        embedding_dim=768,
+    )
+    assert config.embedding_dim == 768

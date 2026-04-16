@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.idea import Idea
-from bot.models.item import Item, ItemType
+from bot.models.item import EMBEDDING_DIM, Item, ItemType
 from bot.models.reminder import Reminder
 
 
@@ -162,3 +162,68 @@ async def test_query_items_by_user(db_session: AsyncSession) -> None:
     result = await db_session.execute(select(Item).where(Item.user_id == 111))
     items = result.scalars().all()
     assert len(items) == 3
+
+
+async def test_item_embedding_and_scraped_text_default_none(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.link, content="https://example.com")
+    db_session.add(item)
+    await db_session.commit()
+    await db_session.refresh(item)
+
+    assert item.embedding is None
+    assert item.scraped_text is None
+
+
+async def test_item_with_embedding_and_scraped_text(db_session: AsyncSession) -> None:
+    vector = [0.01 * i for i in range(EMBEDDING_DIM)]
+    item = Item(
+        user_id=42,
+        type=ItemType.link,
+        content="https://example.com",
+        scraped_text="Full page body text.",
+        embedding=vector,
+    )
+    db_session.add(item)
+    await db_session.commit()
+    await db_session.refresh(item)
+
+    result = await db_session.execute(select(Item).where(Item.id == item.id))
+    stored = result.scalar_one()
+    assert stored.scraped_text == "Full page body text."
+    assert stored.embedding is not None
+    assert len(stored.embedding) == EMBEDDING_DIM
+    assert stored.embedding[0] == 0.0
+    assert abs(stored.embedding[1] - 0.01) < 1e-6
+
+
+async def test_idea_embedding_default_none(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.idea, content="Build a submarine")
+    db_session.add(item)
+    await db_session.flush()
+    idea = Idea(item_id=item.id, tags=["ocean"])
+    db_session.add(idea)
+    await db_session.commit()
+    await db_session.refresh(idea)
+
+    assert idea.embedding is None
+
+
+async def test_idea_with_embedding(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.idea, content="Write a novel")
+    db_session.add(item)
+    await db_session.flush()
+    vector = [0.5] * EMBEDDING_DIM
+    idea = Idea(item_id=item.id, tags=["writing"], embedding=vector)
+    db_session.add(idea)
+    await db_session.commit()
+    await db_session.refresh(idea)
+
+    result = await db_session.execute(select(Idea).where(Idea.id == idea.id))
+    stored = result.scalar_one()
+    assert stored.embedding is not None
+    assert len(stored.embedding) == EMBEDDING_DIM
+    assert stored.embedding[0] == 0.5
+
+
+def test_embedding_dim_constant() -> None:
+    assert EMBEDDING_DIM == 1536

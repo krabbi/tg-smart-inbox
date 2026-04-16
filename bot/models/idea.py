@@ -1,10 +1,12 @@
 import enum
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Enum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base, UUIDMixin
+from bot.models.item import EMBEDDING_DIM
 
 
 class IdeaComplexity(enum.Enum):
@@ -33,5 +35,7 @@ class Idea(UUIDMixin, Base):
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     complexity: Mapped[IdeaComplexity | None] = mapped_column(Enum(IdeaComplexity), nullable=True)
     effort: Mapped[IdeaEffort | None] = mapped_column(Enum(IdeaEffort), nullable=True)
+    # Vector embedding dedicated to idea-level semantic search (tags + content blended).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
     item: Mapped["Item"] = relationship("Item", back_populates="idea")  # noqa: F821

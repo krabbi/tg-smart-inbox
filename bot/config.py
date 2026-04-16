@@ -17,6 +17,10 @@ class Config(BaseSettings):
     google_drive_credentials_file: str = "credentials.json"
     google_drive_folder_id: str = ""
 
+    # Vector search — dimensionality of embeddings stored in pgvector columns.
+    # Matches the default OpenAI text-embedding-3-small output size.
+    embedding_dim: int = 1536
+
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
     def parse_user_ids(cls, v: object) -> object:
