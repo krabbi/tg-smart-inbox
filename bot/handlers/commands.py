@@ -17,6 +17,7 @@ from bot.models.item import ItemType
 from bot.services.list_service import _SEARCH_LIMIT, ListPage, ListService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
+from bot.utils.datetime_utils import format_remind_at
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +365,7 @@ async def cmd_search(
 async def cmd_reminders(
     message: Message,
     reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
 ) -> None:
     """List upcoming reminders with cancel buttons."""
     if reminder_service is None:
@@ -378,9 +380,13 @@ async def cmd_reminders(
         await message.answer("У тебя нет предстоящих напоминаний.")
         return
 
+    user_tz = "UTC"
+    if user_settings_service is not None and user_id:
+        user_tz = await user_settings_service.get_timezone(user_id)
+
     for reminder in reminders:
         item = reminder.item
-        due = reminder.remind_at.strftime("%d.%m.%Y %H:%M")
+        due = format_remind_at(reminder.remind_at, user_tz)
         text = f"⏰ <b>{item.content[:100]}</b>\n🗓 {due}"
         kb = InlineKeyboardMarkup(
             inline_keyboard=[

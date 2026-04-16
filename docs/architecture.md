@@ -366,6 +366,28 @@ Return-type contract (backward-compatible):
 
 An invalid IANA name falls back silently to UTC and logs a warning.
 
+### Timezone-aware datetime formatting for user-facing messages
+
+`bot/utils/datetime_utils.py` exposes `format_remind_at(dt, user_tz)` which converts
+a stored UTC `datetime` to the user's local timezone for display. The output is
+`"DD.MM.YYYY HH:MM <ZONE>"`, where `<ZONE>` is the timezone abbreviation reported by
+`zoneinfo` (e.g. `MSK`, `EDT`, `IST`) when it is alphabetic, or the IANA name
+(e.g. `Asia/Kabul`) for zones whose `tzname()` returns a numeric offset string.
+
+Naive datetimes are treated as UTC (legacy contract). Invalid IANA names fall back
+silently to UTC.
+
+Call sites:
+
+- `cmd_reminders` (`/reminders` listing) — uses the user's stored timezone.
+- `receive_reminder_time` (FSM confirmation when a reminder is created).
+- `_handle_task_with_time` (auto-created reminder confirmation in
+  `handlers/messages.py` / `handlers/voice.py`).
+- `cb_remind_snooze` (snooze confirmation).
+- `_send_due_reminders` and `_auto_resend_reminders` in `bot/scheduler.py` —
+  the scheduler builds its own `UserSettingsService` per tick to look up the
+  recipient's timezone, since the DI middleware does not run for background jobs.
+
 ---
 
 ## Access Control
@@ -532,6 +554,7 @@ tg-smart-inbox/
 │   ├── middlewares/
 │   │   └── auth.py           # AuthMiddleware — user ID whitelist
 │   └── utils/
+│       ├── datetime_utils.py # format_remind_at() — UTC → user tz formatting
 │       └── text.py           # extract_url() and other text helpers
 ├── alembic/                  # DB migrations
 ├── tests/

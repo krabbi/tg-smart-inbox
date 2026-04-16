@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.models.item import Item
 from bot.repositories.reminder_repository import ReminderRepository
+from bot.repositories.user_settings import UserSettingsRepository
 from bot.services.reminder_service import ReminderService
+from bot.services.user_settings_service import UserSettingsService
+from bot.utils.datetime_utils import format_remind_at
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,7 @@ async def _send_due_reminders(
     async with session_factory() as session:
         repo = ReminderRepository(session)
         svc = ReminderService(session, repo)
+        settings_svc = UserSettingsService(session, UserSettingsRepository(session))
         due = await svc.get_due(now)
         for reminder in due:
             try:
@@ -49,9 +53,11 @@ async def _send_due_reminders(
                 if item is None:
                     await svc.mark_sent(reminder)
                     continue
+                user_tz = await settings_svc.get_timezone(item.user_id)
+                formatted = format_remind_at(reminder.remind_at, user_tz)
                 await bot.send_message(
                     chat_id=item.user_id,
-                    text=f"🔔 Напоминание:\n{item.content}",
+                    text=f"🔔 Напомню {formatted}\n{item.content}",
                     reply_markup=_snooze_keyboard(str(reminder.id)),
                 )
                 await svc.mark_sent_with_auto_resend(reminder, now + _AUTO_RESEND_DELAY)
@@ -68,6 +74,7 @@ async def _auto_resend_reminders(
     async with session_factory() as session:
         repo = ReminderRepository(session)
         svc = ReminderService(session, repo)
+        settings_svc = UserSettingsService(session, UserSettingsRepository(session))
         due = await svc.get_due_auto_resend(now)
         for reminder in due:
             try:
@@ -82,9 +89,11 @@ async def _auto_resend_reminders(
                     continue
 
                 new_reminder = await svc.prepare_auto_resend(original=reminder, remind_at=now)
+                user_tz = await settings_svc.get_timezone(item.user_id)
+                formatted = format_remind_at(new_reminder.remind_at, user_tz)
                 await bot.send_message(
                     chat_id=item.user_id,
-                    text=f"🔔 Напоминание:\n{item.content}",
+                    text=f"🔔 Напомню {formatted}\n{item.content}",
                     reply_markup=_snooze_keyboard(str(new_reminder.id)),
                 )
                 await svc.mark_sent_with_auto_resend(new_reminder, now + _AUTO_RESEND_DELAY)

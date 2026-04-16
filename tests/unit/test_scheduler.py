@@ -16,6 +16,8 @@ def make_session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSessi
 
 
 async def test_send_due_reminders_sends_notifications() -> None:
+    from datetime import UTC, datetime
+
     from bot.models.item import Item
     from bot.models.reminder import Reminder
 
@@ -26,6 +28,7 @@ async def test_send_due_reminders_sends_notifications() -> None:
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
     reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
@@ -33,12 +36,16 @@ async def test_send_due_reminders_sends_notifications() -> None:
     with (
         patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
         mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_repo_cls.return_value = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="Europe/Moscow")
+        mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
@@ -50,7 +57,10 @@ async def test_send_due_reminders_sends_notifications() -> None:
     call_kwargs = bot.send_message.call_args[1]
     assert call_kwargs["chat_id"] == 123
     assert "купить молоко" in call_kwargs["text"]
+    # User's timezone formatting flows into the notification text
+    assert "13:00 MSK" in call_kwargs["text"]
     assert call_kwargs["reply_markup"] is not None
+    mock_settings.get_timezone.assert_awaited_once_with(123)
     mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
 
 
@@ -84,6 +94,8 @@ async def test_send_due_reminders_no_item_marks_sent() -> None:
 
 
 async def test_send_due_reminders_handles_send_error() -> None:
+    from datetime import UTC, datetime
+
     from bot.models.item import Item
     from bot.models.reminder import Reminder
 
@@ -93,6 +105,7 @@ async def test_send_due_reminders_handles_send_error() -> None:
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
     reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
@@ -100,11 +113,15 @@ async def test_send_due_reminders_handles_send_error() -> None:
     with (
         patch("bot.scheduler.ReminderRepository"),
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
         mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
         bot.send_message = AsyncMock(side_effect=Exception("Telegram error"))
@@ -117,6 +134,8 @@ async def test_send_due_reminders_handles_send_error() -> None:
 
 
 async def test_auto_resend_reminders_creates_followup() -> None:
+    from datetime import UTC, datetime
+
     from bot.models.item import Item
     from bot.models.reminder import Reminder
 
@@ -131,6 +150,7 @@ async def test_auto_resend_reminders_creates_followup() -> None:
 
     new_reminder = MagicMock(spec=Reminder)
     new_reminder.id = "new-id"
+    new_reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
@@ -138,6 +158,7 @@ async def test_auto_resend_reminders_creates_followup() -> None:
     with (
         patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_svc = MagicMock()
         mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
@@ -145,6 +166,9 @@ async def test_auto_resend_reminders_creates_followup() -> None:
         mock_svc.mark_sent_with_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_repo_cls.return_value = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
@@ -158,6 +182,8 @@ async def test_auto_resend_reminders_creates_followup() -> None:
     call_kwargs = bot.send_message.call_args[1]
     assert call_kwargs["chat_id"] == 42
     assert "задача" in call_kwargs["text"]
+    assert "10:00 UTC" in call_kwargs["text"]
+    mock_settings.get_timezone.assert_awaited_once_with(42)
     mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
 
 
