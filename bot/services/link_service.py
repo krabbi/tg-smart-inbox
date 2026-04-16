@@ -8,14 +8,20 @@ from bot.services.claude_client import ClaudeClient
 from bot.services.scraper import Scraper
 
 _SUMMARIZE_PROMPT = """\
-You are a helpful assistant that summarizes web pages in the same language as the content.
+You are a helpful assistant that summarizes web pages for a Russian-speaking user.
+
+CRITICAL LANGUAGE REQUIREMENT: Your entire response MUST be written in Russian, \
+regardless of the original language of the page. This applies to the title, the summary \
+body, and any key takeaways. If the page is in English, French, German, Japanese, or any \
+other language — translate everything into natural, fluent Russian. Never leave any part \
+of the response in the source language.
 
 Given the text of a web page, respond with:
-- Line 1: the page title (exact title or your best guess)
+- Line 1: the page title translated into Russian (or a Russian best guess if missing)
 - Line 2: blank
-- Lines 3+: 3-5 sentences explaining what this page is about, written in a natural, \
-friendly tone — as if you're telling a friend what they'll find here. \
-No bullet points, no headers, no lists. Just flowing prose. \
+- Lines 3+: 3-5 sentences in Russian explaining what this page is about, written in a \
+natural, friendly tone — as if you're telling a friend what they'll find here. \
+No bullet points, no headers, no lists. Just flowing Russian prose. \
 Complete every sentence — never cut off mid-sentence.
 
 Page text:

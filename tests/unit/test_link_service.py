@@ -8,11 +8,12 @@ from bot.exceptions import ScrapingError
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
-from bot.services.link_service import LinkService, LinkSummary
+from bot.services.link_service import _SUMMARIZE_PROMPT, LinkService, LinkSummary
 from bot.services.scraper import Scraper
 
 _PLAIN_RESPONSE = (
-    "How to bake bread\n\nBread baking is simple. Use strong flour.\n• Tip one\n• Tip two"
+    "Как печь хлеб\n\nВыпечка хлеба — это просто. Используй сильную муку."
+    "\n• Совет один\n• Совет два"
 )
 
 
@@ -75,8 +76,8 @@ async def test_summarize_calls_scraper_and_claude() -> None:
     svc, _ = make_link_service()
     result = await svc.summarize("https://example.com")
     assert isinstance(result, LinkSummary)
-    assert result.title == "How to bake bread"
-    assert "simple" in result.body
+    assert result.title == "Как печь хлеб"
+    assert "просто" in result.body
     assert result.url == "https://example.com"
 
 
@@ -85,6 +86,54 @@ async def test_summarize_raises_scraping_error() -> None:
     svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
     with pytest.raises(ScrapingError):
         await svc.summarize("https://example.com")
+
+
+# ── language requirement ─────────────────────────────────────────────────────
+
+
+async def test_summarize_prompt_requires_russian_output() -> None:
+    """Prompt must explicitly instruct Claude to respond in Russian."""
+    assert "Russian" in _SUMMARIZE_PROMPT
+    # Must cover the case when the source page is in another language.
+    assert "regardless of the original language" in _SUMMARIZE_PROMPT
+
+
+async def test_summarize_sends_russian_instruction_to_claude() -> None:
+    """The actual prompt passed to Claude.complete must carry the Russian requirement."""
+    english_page = (
+        "Bread baking is a wonderful hobby. You need flour, water, salt and yeast. "
+        "Mix, knead, proof, bake. Enjoy fresh bread at home."
+    )
+    svc, _ = make_link_service(
+        scraper_text=english_page,
+        claude_response="Как печь хлеб\n\nСтатья о домашней выпечке хлеба.",
+    )
+    result = await svc.summarize("https://example.com/bread")
+
+    # The prompt sent to Claude must include the Russian-language requirement.
+    svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
+    sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
+    assert "Russian" in sent_prompt
+    assert "regardless of the original language" in sent_prompt
+    assert english_page in sent_prompt
+
+    # Title and body come back in Russian (as Claude was instructed to translate).
+    assert result.title == "Как печь хлеб"
+    assert "выпечке" in result.body
+
+
+async def test_summarize_returns_russian_for_non_english_source() -> None:
+    """Summary for a page in any foreign language is returned in Russian."""
+    french_page = "La cuisine française est célèbre dans le monde entier."
+    russian_response = (
+        "Французская кухня\n\nСтраница рассказывает о знаменитой французской кухне "
+        "и её месте в мировой гастрономии."
+    )
+    svc, _ = make_link_service(scraper_text=french_page, claude_response=russian_response)
+    result = await svc.summarize("https://example.com/cuisine")
+
+    assert result.title == "Французская кухня"
+    assert "Французская" in result.body or "французской" in result.body
 
 
 # ── _parse_summary ────────────────────────────────────────────────────────────
