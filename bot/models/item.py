@@ -1,9 +1,15 @@
 import enum
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, Enum, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base, TimestampMixin, UUIDMixin
+
+# Fixed DB-column dimensionality; the matching Config.embedding_dim setting is the
+# source of truth for services that generate embeddings. Changing this requires a
+# new Alembic migration.
+EMBEDDING_DIM = 1536
 
 
 class ItemType(enum.Enum):
@@ -21,6 +27,10 @@ class Item(UUIDMixin, TimestampMixin, Base):
     type: Mapped[ItemType] = mapped_column(Enum(ItemType), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full extracted page text for links — cached so we don't re-scrape for re-embedding.
+    scraped_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Vector embedding for semantic search; populated lazily by a background job.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
     reminders: Mapped[list["Reminder"]] = relationship(  # noqa: F821
         "Reminder", back_populates="item", cascade="all, delete-orphan"

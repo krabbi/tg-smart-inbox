@@ -126,6 +126,10 @@ GROQ_API_KEY=your_groq_key_here
 # Optional: photo/file upload to Google Drive
 GOOGLE_DRIVE_CREDENTIALS_FILE=credentials.json
 GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
+
+# Optional: dimensionality of embeddings used for semantic search (default 1536).
+# Must match the size of the pgvector columns — changing it requires an Alembic migration.
+EMBEDDING_DIM=1536
 ```
 
 ## Contributing

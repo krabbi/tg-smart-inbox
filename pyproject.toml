@@ -25,6 +25,7 @@ dependencies = [
     "apscheduler>=3.10",
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
+    "pgvector>=0.2",
 ]
 
 [project.optional-dependencies]
