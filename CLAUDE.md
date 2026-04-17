@@ -140,6 +140,7 @@ bot/
   config.py             # pydantic-settings Config
   db.py                 # async engine + session factory
   exceptions.py         # all domain exceptions
+  i18n.py               # interface string localization (ru/en) + t() helper
   middleware.py         # DependencyMiddleware — DI wiring
   scheduler.py          # APScheduler: due reminders + auto-resend + embedding reindex
   handlers/
