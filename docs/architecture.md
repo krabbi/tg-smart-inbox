@@ -74,7 +74,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `classifier.py` | Classify incoming messages: LINK / TASK / NOTE / IDEA / MEDIA |
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error |
-| `link_service.py` | Save links to DB, fetch page text and generate Claude summary |
+| `link_service.py` | Save links to DB (with cached page text), reuse the cache when generating Claude summaries |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge reminders |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
@@ -443,10 +443,17 @@ with an unexpected shape, or produces a vector whose length does not match
 
 At save time:
 
-- `LinkService.save()` persists the `Item` and commits, then attempts to generate and
-  store the embedding. The service returns a `SavedLink(item, indexed)` tuple; the
-  handler shows `ℹ️ Умный поиск временно недоступен, запись сохранена без индексации.`
-  when `indexed` is `False`.
+- `LinkService.save()` creates the `Item`, calls `Scraper.fetch_text()` once and stores
+  the result in `Item.scraped_text` before the first commit (best-effort: a scraper
+  failure is logged at WARNING and the link is still persisted). After the commit,
+  the service attempts to generate and store the embedding. It returns a
+  `SavedLink(item, indexed)` tuple; the handler shows
+  `ℹ️ Умный поиск временно недоступен, запись сохранена без индексации.` when
+  `indexed` is `False`.
+- `LinkService.summarize(url, item_id=...)` reuses the cached `scraped_text` when the
+  Item has one — no HTTP request is made. On a cache miss the scraper is called and
+  the fresh text is written back to the Item via `ItemRepository.update_scraped_text()`,
+  so the next summary is served from cache.
 - `IdeaService.save_idea()` persists the `Item` + `Idea`, commits, then attempts to
   generate embeddings for both records. The `SavedIdea.indexed` flag is `True` only
   when both vectors were produced and stored successfully; the handler shows the same

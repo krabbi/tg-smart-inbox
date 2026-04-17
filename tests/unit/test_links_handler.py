@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, User
 from bot.exceptions import ScrapingError
 from bot.handlers.links import (
     _link_keyboard,
+    _parse_item_id,
     cb_link_remind,
     cb_link_save,
     cb_link_summary,
@@ -166,3 +167,44 @@ async def test_cb_link_remind_answers() -> None:
     await cb_link_remind(cb, state=state)
 
     cb.answer.assert_awaited_once()
+
+
+# ── _parse_item_id ────────────────────────────────────────────────────────────
+
+
+def test_parse_item_id_accepts_valid_uuid() -> None:
+    raw = "11111111-2222-3333-4444-555555555555"
+    result = _parse_item_id(raw)
+    assert result == uuid.UUID(raw)
+
+
+def test_parse_item_id_returns_none_for_garbage() -> None:
+    assert _parse_item_id("not-a-uuid") is None
+
+
+def test_parse_item_id_returns_none_for_empty() -> None:
+    assert _parse_item_id("") is None
+
+
+# ── item_id is forwarded to LinkService.summarize ─────────────────────────────
+
+
+async def test_cb_link_summary_forwards_item_id_to_service() -> None:
+    """The handler must pass the parsed UUID so the service can hit the cache."""
+    item_id = uuid.uuid4()
+    cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
+    svc = make_link_service()
+
+    await cb_link_summary(cb, svc)
+
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id)
+
+
+async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> None:
+    """Malformed item_id in callback_data must not crash — fall back to uncached path."""
+    cb = make_callback("link:summary:not-a-uuid", "🔗 Saved:\nhttps://example.com")
+    svc = make_link_service()
+
+    await cb_link_summary(cb, svc)
+
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=None)

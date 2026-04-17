@@ -189,8 +189,11 @@ async def test_cb_link_summary_unexpected_error_shows_retry_button() -> None:
 
 async def test_cb_link_retry_triggers_summarize_flow() -> None:
     """Retry button should re-run the summarize flow."""
+    import uuid
+
+    item_id = uuid.uuid4()
     cb = make_callback(
-        "link:retry:some-uuid",
+        f"link:retry:{item_id}",
         message_text="🔗 https://example.com\n\n❌ Не удалось загрузить страницу.",
     )
     svc = MagicMock(spec=LinkService)
@@ -200,7 +203,7 @@ async def test_cb_link_retry_triggers_summarize_flow() -> None:
 
     await cb_link_retry(cb, link_service=svc)
 
-    svc.summarize.assert_awaited_once_with("https://example.com")
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id)
     # Should show loading then final result (2 edit_text calls)
     assert cb.message.edit_text.await_count == 2
 

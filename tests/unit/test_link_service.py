@@ -24,6 +24,7 @@ def make_link_service(
     claude_response: str = _PLAIN_RESPONSE,
     session: AsyncSession | None = None,
     embedding: list[float] | None = None,
+    cached_item: Item | None = None,
 ) -> tuple[LinkService, ItemRepository]:
     mock_session = session or MagicMock(spec=AsyncSession)
     mock_session.commit = AsyncMock()
@@ -33,10 +34,13 @@ def make_link_service(
     mock_item.id = uuid.uuid4()
     mock_item.type = ItemType.link
     mock_item.content = "https://example.com"
+    mock_item.scraped_text = None
 
     mock_repo = MagicMock(spec=ItemRepository)
     mock_repo.create = AsyncMock(return_value=mock_item)
     mock_repo.update_embedding = AsyncMock()
+    mock_repo.update_scraped_text = AsyncMock()
+    mock_repo.get_by_id = AsyncMock(return_value=cached_item)
 
     mock_scraper = MagicMock(spec=Scraper)
     mock_scraper.fetch_text = AsyncMock(return_value=scraper_text)
@@ -91,12 +95,16 @@ async def test_save_without_embedding_service_returns_not_indexed() -> None:
     mock_item = MagicMock(spec=Item)
     mock_item.id = uuid.uuid4()
     mock_item.type = ItemType.link
+    mock_item.scraped_text = None
     mock_repo.create = AsyncMock(return_value=mock_item)
+
+    mock_scraper = MagicMock(spec=Scraper)
+    mock_scraper.fetch_text = AsyncMock(return_value="page body")
 
     svc = LinkService(
         session=mock_session,
         item_repo=mock_repo,
-        scraper=MagicMock(spec=Scraper),
+        scraper=mock_scraper,
         claude=MagicMock(spec=ClaudeClient),
         embedding_service=None,
     )
@@ -242,3 +250,122 @@ async def test_parse_summary_strips_whitespace() -> None:
     result = LinkService._parse_summary(raw, "https://x.com")
     assert result.title == "Title with spaces"
     assert result.body == "Body text."
+
+
+# ── scraped_text caching ──────────────────────────────────────────────────────
+
+
+async def test_save_caches_scraped_text_on_item() -> None:
+    """The scraper is called at save time and its output is written to scraped_text."""
+    svc, repo = make_link_service(scraper_text="cached page body")
+    saved = await svc.save("https://example.com", user_id=1)
+
+    svc._scraper.fetch_text.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
+    assert saved.item.scraped_text == "cached page body"
+
+
+async def test_save_still_succeeds_when_scraper_raises() -> None:
+    """Scraper failure must not break save — item is persisted without scraped_text."""
+    svc, _ = make_link_service()
+    svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.scraped_text is None
+    # The item was still committed.
+    svc._session.commit.assert_awaited()  # type: ignore[attr-defined]
+
+
+async def test_save_survives_unexpected_scraper_exception() -> None:
+    """Any non-ScrapingError from the scraper is swallowed and logged."""
+    svc, _ = make_link_service()
+    svc._scraper.fetch_text = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.scraped_text is None
+
+
+async def test_save_skips_setting_scraped_text_when_page_is_empty() -> None:
+    """Empty scraped text is treated as a cache miss — don't overwrite the column."""
+    svc, _ = make_link_service(scraper_text="")
+    saved = await svc.save("https://example.com", user_id=1)
+    # MagicMock.scraped_text remains the default (None) set in the factory.
+    assert saved.item.scraped_text is None
+
+
+async def test_summarize_uses_cached_scraped_text_and_skips_http() -> None:
+    """With a cached Item the scraper must not be invoked."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "already have this page"
+    svc, repo = make_link_service(cached_item=cached)
+
+    item_id = uuid.uuid4()
+    result = await svc.summarize("https://example.com", item_id=item_id)
+
+    repo.get_by_id.assert_awaited_once_with(item_id)  # type: ignore[attr-defined]
+    svc._scraper.fetch_text.assert_not_awaited()  # type: ignore[attr-defined]
+    svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
+    sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
+    assert "already have this page" in sent_prompt
+    assert isinstance(result, LinkSummary)
+
+
+async def test_summarize_falls_back_to_scraper_when_cache_is_empty() -> None:
+    """When the Item exists but has no cached text, fetch fresh and write it back."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = None
+    svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
+
+    item_id = uuid.uuid4()
+    await svc.summarize("https://example.com", item_id=item_id)
+
+    svc._scraper.fetch_text.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
+    repo.update_scraped_text.assert_awaited_once_with(item_id, "fresh body")  # type: ignore[attr-defined]
+
+
+async def test_summarize_falls_back_to_scraper_when_item_missing() -> None:
+    """Unknown item_id: fetch fresh text and still try to backfill the cache."""
+    svc, repo = make_link_service(cached_item=None, scraper_text="fresh body")
+
+    item_id = uuid.uuid4()
+    await svc.summarize("https://example.com", item_id=item_id)
+
+    svc._scraper.fetch_text.assert_awaited_once()  # type: ignore[attr-defined]
+    repo.update_scraped_text.assert_awaited_once_with(item_id, "fresh body")  # type: ignore[attr-defined]
+
+
+async def test_summarize_without_item_id_skips_cache_entirely() -> None:
+    """Backwards-compatible path: no item_id means always call the scraper."""
+    svc, repo = make_link_service(scraper_text="fresh body")
+
+    await svc.summarize("https://example.com")
+
+    svc._scraper.fetch_text.assert_awaited_once()  # type: ignore[attr-defined]
+    repo.get_by_id.assert_not_awaited()  # type: ignore[attr-defined]
+    repo.update_scraped_text.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+async def test_summarize_rolls_back_when_cache_write_fails() -> None:
+    """If persisting the cache blows up, the summary still returns successfully."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = None
+    svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
+    repo.update_scraped_text = AsyncMock(side_effect=RuntimeError("DB down"))  # type: ignore[attr-defined]
+
+    item_id = uuid.uuid4()
+    result = await svc.summarize("https://example.com", item_id=item_id)
+
+    svc._session.rollback.assert_awaited_once()  # type: ignore[attr-defined]
+    assert isinstance(result, LinkSummary)
+
+
+async def test_summarize_raises_scraping_error_when_no_cache_and_fetch_fails() -> None:
+    """Cache miss plus unreachable page propagates ScrapingError as before."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = None
+    svc, _ = make_link_service(cached_item=cached)
+    svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
+
+    with pytest.raises(ScrapingError):
+        await svc.summarize("https://example.com", item_id=uuid.uuid4())
