@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,24 @@ class ItemRepository:
         await self._session.flush()
         await self._session.refresh(item)
         return item
+
+    async def update_embedding(self, item_id: uuid.UUID, embedding: list[float]) -> None:
+        """Persist the vector embedding on an existing Item; caller commits."""
+        item = await self._session.get(Item, item_id)
+        if item is None:
+            return
+        item.embedding = embedding
+        await self._session.flush()
+
+    async def get_missing_embedding(self, *, limit: int = 50) -> list[Item]:
+        """Return Items without a stored embedding, oldest first (batch for reindex)."""
+        result = await self._session.execute(
+            select(Item)
+            .where(Item.embedding.is_(None))
+            .order_by(Item.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def get_by_user(self, user_id: int, *, limit: int = 10) -> list[Item]:
         """Return the most recent Items for a user, newest first."""

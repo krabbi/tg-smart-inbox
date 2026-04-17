@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
+from bot.services.embedding_service import EmbeddingService
 from bot.services.scraper import Scraper
+
+logger = logging.getLogger(__name__)
 
 _SUMMARIZE_PROMPT = """\
 You are a helpful assistant that summarizes web pages for a Russian-speaking user.
@@ -39,6 +43,14 @@ class LinkSummary:
     url: str
 
 
+@dataclass(frozen=True)
+class SavedLink:
+    """Result of saving a link — the persisted Item plus indexing status."""
+
+    item: Item
+    indexed: bool
+
+
 class LinkService:
     """Handle link saving and on-demand summarization."""
 
@@ -48,17 +60,41 @@ class LinkService:
         item_repo: ItemRepository,
         scraper: Scraper,
         claude: ClaudeClient,
+        embedding_service: EmbeddingService | None = None,
     ) -> None:
         self._session = session
         self._repo = item_repo
         self._scraper = scraper
         self._claude = claude
+        self._embedding = embedding_service
 
-    async def save(self, url: str, user_id: int) -> Item:
-        """Save a link as an Item in the DB and return it."""
+    async def save(self, url: str, user_id: int) -> SavedLink:
+        """Save a link as an Item and attempt to index it; commit always succeeds."""
         item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
         await self._session.commit()
-        return item
+
+        indexed = await self._try_index(item)
+        return SavedLink(item=item, indexed=indexed)
+
+    async def _try_index(self, item: Item) -> bool:
+        """Generate and store the item's embedding; return True on success, False otherwise."""
+        if self._embedding is None:
+            return False
+        try:
+            vector = await self._embedding.generate_for_item(item)
+        except Exception:
+            logger.exception("Embedding generation raised for item %s", item.id)
+            return False
+        if vector is None:
+            return False
+        try:
+            await self._repo.update_embedding(item.id, vector)
+            await self._session.commit()
+        except Exception:
+            logger.exception("Failed to persist embedding for item %s", item.id)
+            await self._session.rollback()
+            return False
+        return True
 
     async def summarize(self, url: str) -> LinkSummary:
         """Fetch the page and generate a summary using Claude.

@@ -8,7 +8,7 @@ from aiogram.types import Message
 
 from bot.exceptions import TranscriptionError
 from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
-from bot.handlers.links import handle_link_message
+from bot.handlers.links import EMBEDDING_UNAVAILABLE_NOTICE, handle_link_message
 from bot.handlers.messages import _handle_task_with_time
 from bot.handlers.reminders import task_remind_keyboard
 from bot.services.classifier import ClassifierService, MessageType
@@ -96,6 +96,8 @@ async def handle_voice(
         if tags_str:
             reply += f"\n{tags_str}"
         await message.answer(reply)
+        if not saved.indexed:
+            await message.answer(EMBEDDING_UNAVAILABLE_NOTICE)
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(transcript, user_id)

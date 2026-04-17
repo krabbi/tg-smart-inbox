@@ -74,3 +74,20 @@ async def test_middleware_injects_user_settings_service(fake_config: Config) -> 
     await middleware(handler, MagicMock(), {})
 
     assert isinstance(captured["user_settings_service"], UserSettingsService)
+
+
+async def test_middleware_injects_embedding_service(fake_config: Config) -> None:
+    from bot.services.embedding_service import EmbeddingService
+
+    session = MagicMock(spec=AsyncSession)
+    factory = make_session_factory(session)
+    middleware = DependencyMiddleware(factory, fake_config)
+
+    captured: dict = {}
+
+    async def handler(event: object, data: dict) -> None:
+        captured.update(data)
+
+    await middleware(handler, MagicMock(), {})
+
+    assert isinstance(captured["embedding_service"], EmbeddingService)

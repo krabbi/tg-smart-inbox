@@ -60,3 +60,22 @@ class IdeaRepository:
             .where(Item.user_id == user_id, Item.type == ItemType.idea)
         )
         return result.scalar_one()
+
+    async def update_embedding(self, idea_id: uuid.UUID, embedding: list[float]) -> None:
+        """Persist the vector embedding on an existing Idea; caller commits."""
+        idea = await self._session.get(Idea, idea_id)
+        if idea is None:
+            return
+        idea.embedding = embedding
+        await self._session.flush()
+
+    async def get_missing_embedding(self, *, limit: int = 50) -> list[tuple[Item, Idea]]:
+        """Return Ideas without a stored embedding as (Item, Idea) pairs for reindex."""
+        result = await self._session.execute(
+            select(Item, Idea)
+            .join(Idea, Idea.item_id == Item.id)
+            .where(Idea.embedding.is_(None))
+            .order_by(Item.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.all())

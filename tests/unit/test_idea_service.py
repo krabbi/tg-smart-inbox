@@ -8,6 +8,7 @@ from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
+from bot.services.embedding_service import EmbeddingService
 from bot.services.idea_service import IdeaService, IdeasPage, SavedIdea
 
 _DEFAULT_COMPLEXITY = '{"complexity": "simple", "effort": "quick"}'
@@ -17,6 +18,7 @@ def make_service(
     tag_response: str = '["app", "mobile"]',
     complexity_response: str = _DEFAULT_COMPLEXITY,
     suggest_response: str = "Вот идея: сделай приложение.",
+    embedding: list[float] | None = None,
 ) -> tuple[IdeaService, MagicMock, MagicMock, MagicMock]:
     """Build IdeaService with all dependencies mocked.
 
@@ -25,6 +27,7 @@ def make_service(
     """
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
+    session.rollback = AsyncMock()
 
     mock_item = MagicMock(spec=Item)
     mock_item.id = uuid.uuid4()
@@ -33,8 +36,10 @@ def make_service(
 
     item_repo = MagicMock(spec=ItemRepository)
     item_repo.create = AsyncMock(return_value=mock_item)
+    item_repo.update_embedding = AsyncMock()
 
     mock_idea = MagicMock(spec=Idea)
+    mock_idea.id = uuid.uuid4()
     mock_idea.tags = ["app", "mobile"]
     mock_idea.complexity = IdeaComplexity.simple
     mock_idea.effort = IdeaEffort.quick
@@ -42,6 +47,7 @@ def make_service(
     idea_repo = MagicMock(spec=IdeaRepository)
     idea_repo.save = AsyncMock(return_value=mock_idea)
     idea_repo.get_all = AsyncMock(return_value=[])
+    idea_repo.update_embedding = AsyncMock()
 
     claude = MagicMock(spec=ClaudeClient)
     # save_idea calls _extract_tags and _classify_complexity concurrently (asyncio.gather),
@@ -49,7 +55,17 @@ def make_service(
     # side_effect list is consumed in call order which matches gather's task scheduling.
     claude.complete = AsyncMock(side_effect=[tag_response, complexity_response, suggest_response])
 
-    svc = IdeaService(session=session, item_repo=item_repo, idea_repo=idea_repo, claude=claude)
+    embedding_service = MagicMock(spec=EmbeddingService)
+    embedding_service.generate_for_item = AsyncMock(return_value=embedding)
+    embedding_service.generate_for_idea = AsyncMock(return_value=embedding)
+
+    svc = IdeaService(
+        session=session,
+        item_repo=item_repo,
+        idea_repo=idea_repo,
+        claude=claude,
+        embedding_service=embedding_service,
+    )
     return svc, item_repo, idea_repo, claude
 
 
@@ -69,7 +85,68 @@ async def test_save_idea_extracts_tags_and_saves() -> None:
 async def test_save_idea_commits_session() -> None:
     svc, _, _, _ = make_service()
     await svc.save_idea("test idea", user_id=42)
-    svc._session.commit.assert_awaited_once()
+    # Base save commits once; indexing adds another commit when successful.
+    assert svc._session.commit.await_count >= 1
+
+
+async def test_save_idea_marks_indexed_when_both_vectors_succeed() -> None:
+    svc, item_repo, idea_repo, _ = make_service(embedding=[0.1] * 1536)
+    saved = await svc.save_idea("idea", user_id=1)
+    assert saved.indexed is True
+    item_repo.update_embedding.assert_awaited_once()
+    idea_repo.update_embedding.assert_awaited_once()
+
+
+async def test_save_idea_not_indexed_when_embedding_none() -> None:
+    svc, _, _, _ = make_service(embedding=None)
+    saved = await svc.save_idea("idea", user_id=1)
+    assert saved.indexed is False
+
+
+async def test_save_idea_not_indexed_when_embedding_raises() -> None:
+    svc, _, _, _ = make_service()
+    svc._embedding.generate_for_item = AsyncMock(side_effect=Exception("API down"))  # type: ignore[attr-defined, union-attr]
+    saved = await svc.save_idea("idea", user_id=1)
+    assert saved.indexed is False
+
+
+async def test_save_idea_not_indexed_without_embedding_service() -> None:
+    """Without an EmbeddingService the idea still saves but indexing is skipped."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    item_repo = MagicMock(spec=ItemRepository)
+    mock_item = MagicMock(spec=Item)
+    mock_item.id = uuid.uuid4()
+    mock_item.content = "idea"
+    item_repo.create = AsyncMock(return_value=mock_item)
+    mock_idea = MagicMock(spec=Idea)
+    mock_idea.tags = []
+    mock_idea.complexity = None
+    mock_idea.effort = None
+    idea_repo = MagicMock(spec=IdeaRepository)
+    idea_repo.save = AsyncMock(return_value=mock_idea)
+    claude = MagicMock(spec=ClaudeClient)
+    claude.complete = AsyncMock(side_effect=["[]", '{"complexity": "simple", "effort": "quick"}'])
+
+    svc = IdeaService(
+        session=session,
+        item_repo=item_repo,
+        idea_repo=idea_repo,
+        claude=claude,
+        embedding_service=None,
+    )
+    saved = await svc.save_idea("idea", user_id=1)
+    assert saved.indexed is False
+
+
+async def test_save_idea_rolls_back_on_update_embedding_error() -> None:
+    svc, item_repo, _, _ = make_service(embedding=[0.1] * 1536)
+    item_repo.update_embedding = AsyncMock(side_effect=Exception("DB blew up"))
+
+    saved = await svc.save_idea("idea", user_id=1)
+
+    assert saved.indexed is False
+    svc._session.rollback.assert_awaited_once()
 
 
 async def test_save_idea_empty_tags_on_malformed_json() -> None:

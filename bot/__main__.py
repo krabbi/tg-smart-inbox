@@ -27,7 +27,7 @@ async def main() -> None:
     dp = create_dispatcher(config)
     factory = get_session_factory()
     dp.update.middleware(DependencyMiddleware(factory, config))
-    start_scheduler(bot, factory)
+    start_scheduler(bot, factory, config)
     await bot.set_my_commands(_BOT_COMMANDS)
     await dp.start_polling(bot)
 

@@ -107,3 +107,36 @@ async def test_save_empty_tags(db_session: AsyncSession) -> None:
 
     rows = await idea_repo.get_all(user_id=1)
     assert rows[0][1].tags == []
+
+
+async def test_get_missing_embedding_returns_ideas_without_embedding(
+    db_session: AsyncSession,
+) -> None:
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item = await item_repo.create(user_id=1, type=ItemType.idea, content="idea")
+    await idea_repo.save(item_id=item.id, tags=["t1"])
+    await db_session.commit()
+
+    rows = await idea_repo.get_missing_embedding(limit=10)
+    assert len(rows) == 1
+    returned_item, returned_idea = rows[0]
+    assert returned_item.id == item.id
+    assert returned_idea.embedding is None
+
+
+async def test_update_embedding_sets_vector_on_idea(db_session: AsyncSession) -> None:
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item = await item_repo.create(user_id=1, type=ItemType.idea, content="idea")
+    idea = await idea_repo.save(item_id=item.id, tags=[])
+    await db_session.commit()
+
+    vector = [0.1] * 1536
+    await idea_repo.update_embedding(idea.id, vector)
+    await db_session.commit()
+
+    rows = await idea_repo.get_missing_embedding(limit=10)
+    assert rows == []

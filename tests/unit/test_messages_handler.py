@@ -108,7 +108,7 @@ async def test_handle_text_link_calls_link_handler() -> None:
     classifier = make_classifier(MessageType.LINK)
     link_service = MagicMock(spec=LinkService)
 
-    with patch("bot.handlers.links.handle_link_message", new=AsyncMock()) as mock_handle:
+    with patch("bot.handlers.messages.handle_link_message", new=AsyncMock()) as mock_handle:
         await handle_text(msg, state=make_state(), classifier=classifier, link_service=link_service)
         mock_handle.assert_awaited_once()
 
@@ -400,6 +400,28 @@ async def test_handle_text_idea_save_error_sends_error_reply() -> None:
     await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
     msg.answer.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
+
+
+async def test_handle_text_idea_not_indexed_warns_user() -> None:
+    """When embedding fails, the handler tells the user smart search is temporarily down."""
+    msg = make_message("хочу сделать приложение")
+    classifier = make_classifier(MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    mock_idea = MagicMock()
+    mock_idea.tags = []
+    mock_idea.complexity = None
+    mock_idea.effort = None
+    saved = MagicMock(spec=SavedIdea)
+    saved.idea = mock_idea
+    saved.indexed = False
+    idea_svc.save_idea = AsyncMock(return_value=saved)
+
+    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("Идея сохранена" in r for r in replies)
+    assert any("Умный поиск временно недоступен" in r for r in replies)
 
 
 # ── suggestion query detection ────────────────────────────────────────────────
