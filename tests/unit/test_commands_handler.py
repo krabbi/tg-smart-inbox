@@ -1,10 +1,9 @@
-"""Tests for /list, /search, /reminders command handlers."""
+"""Tests for /list, /reminders, /cancel command handlers."""
 
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from aiogram.filters import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
@@ -17,7 +16,6 @@ from bot.handlers.commands import (
     cmd_cancel,
     cmd_list,
     cmd_reminders,
-    cmd_search,
 )
 from bot.models.item import Item, ItemType
 from bot.models.reminder import Reminder
@@ -198,60 +196,6 @@ async def test_cb_list_page_edit_failure_is_silenced() -> None:
 
     # Should not raise
     await cb_list_page(cb, list_service=svc)
-
-
-# ── /search ───────────────────────────────────────────────────────────────────
-
-
-async def test_cmd_search_no_query_shows_hint() -> None:
-    msg = make_message()
-    cmd_obj = MagicMock(spec=CommandObject)
-    cmd_obj.args = None
-    svc = MagicMock(spec=ListService)
-
-    await cmd_search(msg, command=cmd_obj, list_service=svc)
-    assert "/search" in msg.answer.call_args[0][0]
-
-
-async def test_cmd_search_no_results() -> None:
-    msg = make_message()
-    cmd_obj = MagicMock(spec=CommandObject)
-    cmd_obj.args = "unicorn"
-    svc = MagicMock(spec=ListService)
-    svc.search = AsyncMock(return_value=[])
-
-    await cmd_search(msg, command=cmd_obj, list_service=svc)
-    assert "Ничего" in msg.answer.call_args[0][0]
-
-
-async def test_cmd_search_shows_results() -> None:
-    msg = make_message()
-    cmd_obj = MagicMock(spec=CommandObject)
-    cmd_obj.args = "coffee"
-    svc = MagicMock(spec=ListService)
-    svc.search = AsyncMock(return_value=[make_item("coffee shop receipt", ItemType.link)])
-
-    await cmd_search(msg, command=cmd_obj, list_service=svc)
-    assert "coffee shop receipt" in msg.answer.call_args[0][0]
-
-
-async def test_cmd_search_shows_limit_note_when_full_page() -> None:
-    msg = make_message()
-    cmd_obj = MagicMock(spec=CommandObject)
-    cmd_obj.args = "item"
-    svc = MagicMock(spec=ListService)
-    svc.search = AsyncMock(return_value=[make_item(f"item {i}") for i in range(10)])
-
-    await cmd_search(msg, command=cmd_obj, list_service=svc)
-    assert "10" in msg.answer.call_args[0][0]
-
-
-async def test_cmd_search_no_service_gives_stub() -> None:
-    msg = make_message()
-    cmd_obj = MagicMock(spec=CommandObject)
-    cmd_obj.args = "query"
-    await cmd_search(msg, command=cmd_obj, list_service=None)
-    assert "скоро" in msg.answer.call_args[0][0]
 
 
 # ── /reminders ────────────────────────────────────────────────────────────────

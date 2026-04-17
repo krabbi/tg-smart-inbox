@@ -58,9 +58,10 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `messages.py` | Entry point for all incoming text, photo, and document messages |
 | `links.py` | Callback buttons for saved links (summary, save, remind) |
 | `reminders.py` | Reminder dialog (time input FSM), snooze/acknowledge callbacks |
-| `commands.py` | Bot commands: `/start`, `/list`, `/search`, `/reminders`, `/ideas`, `/help`, `/cancel` |
+| `commands.py` | Bot commands: `/start`, `/list`, `/reminders`, `/ideas`, `/help`, `/cancel` |
 | `config.py` | `/config` command — extensible settings menu; currently dispatches to the timezone FSM |
 | `ideas.py` | `/ideas` command — display saved ideas |
+| `search.py` | `/search` command — FSM for picking search mode (plain / semantic) + paginated results |
 | `voice.py` | Voice message transcription and routing |
 | `timezone_setup.py` | Three-step inline FSM for picking a timezone (continent → country → city) |
 
@@ -481,6 +482,28 @@ Results are returned as a list of `SearchResult` dataclasses with fields
 `created_at`. User isolation is enforced in the repository SQL — a user never
 sees another user's records, even when sharing vector space.
 
+### `/search` FSM
+
+`bot/handlers/search.py` drives the user-facing search dialog:
+
+1. `cmd_search` enters `SearchStates.choosing_mode` and shows two inline buttons:
+   `🔍 Обычный` and `🧠 Умный (AI)`.
+2. `cb_pick_mode` stores the choice in FSM data under `search_mode`
+   (`"plain"` or `"smart"`) and transitions to `SearchStates.waiting_query`,
+   prompting the user for a query.
+3. `receive_search_query` runs `ListService.search` for plain mode or
+   `SemanticSearchService.search` for smart mode. On success it transitions to
+   `SearchStates.showing_results`, persists the query under `search_query` in
+   FSM data, and renders the first page with `← Назад` / `Вперёд →` buttons.
+4. `cb_search_page` re-runs the stored query for the requested page and edits
+   the message in place.
+
+Page size is fixed at 5 for both modes. Semantic results are rendered with a
+`●●●●●` relevance bar derived from the cosine score (thresholds `0.9 / 0.75 /
+0.6 / 0.45`). `SemanticSearchUnavailableError` and "service not injected" both
+surface the same "Умный поиск временно недоступен. Попробуйте обычный поиск."
+message without exiting the dialog, so the user can retry or `/cancel`.
+
 ---
 
 ## Configuration
@@ -589,9 +612,10 @@ tg-smart-inbox/
 │   │   ├── messages.py       # Main text/photo/document router
 │   │   ├── links.py          # Link action callbacks
 │   │   ├── reminders.py      # Reminder FSM and snooze/ack callbacks
-│   │   ├── commands.py       # /start /list /search /reminders /ideas /cancel
+│   │   ├── commands.py       # /start /list /reminders /ideas /cancel
 │   │   ├── config.py         # /config settings menu (extensible sub-commands)
 │   │   ├── ideas.py          # /ideas command
+│   │   ├── search.py         # /search FSM — mode picker (plain/semantic) + pagination
 │   │   ├── timezone_setup.py # Three-step FSM for picking a timezone
 │   │   └── voice.py          # Voice message handling
 │   ├── services/

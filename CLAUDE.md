@@ -146,9 +146,10 @@ bot/
     messages.py         # main router: text, photo, document
     links.py            # link action callbacks
     reminders.py        # reminder FSM + snooze/ack callbacks
-    commands.py         # /start /list /search /reminders /cancel
+    commands.py         # /start /list /reminders /cancel
     config.py           # /config settings menu (extensible sub-commands)
     ideas.py            # /ideas command
+    search.py           # /search FSM — mode picker (plain/semantic) + pagination
     timezone_setup.py   # three-step FSM: continent → country → city
     voice.py            # voice transcription + routing
   services/
