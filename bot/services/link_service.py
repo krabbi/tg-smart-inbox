@@ -1,8 +1,10 @@
 import logging
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.exceptions import ScrapingError
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
@@ -69,12 +71,32 @@ class LinkService:
         self._embedding = embedding_service
 
     async def save(self, url: str, user_id: int) -> SavedLink:
-        """Save a link as an Item and attempt to index it; commit always succeeds."""
+        """Save a link as an Item, cache the page text, and attempt to index it.
+
+        The save itself always succeeds. Scraping is best-effort: if the page cannot
+        be fetched, the link is still persisted without ``scraped_text`` and the user
+        is not notified.
+        """
         item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
+        # Populate the cache before the first commit so both fields land in one write.
+        scraped_text = await self._try_scrape(url)
+        if scraped_text:
+            item.scraped_text = scraped_text
         await self._session.commit()
 
         indexed = await self._try_index(item)
         return SavedLink(item=item, indexed=indexed)
+
+    async def _try_scrape(self, url: str) -> str | None:
+        """Fetch the page text for caching; return ``None`` on any failure."""
+        try:
+            return await self._scraper.fetch_text(url)
+        except ScrapingError as exc:
+            logger.warning("Scraping failed for %s: %s", url, exc)
+            return None
+        except Exception:
+            logger.exception("Unexpected error scraping %s", url)
+            return None
 
     async def _try_index(self, item: Item) -> bool:
         """Generate and store the item's embedding; return True on success, False otherwise."""
@@ -96,17 +118,43 @@ class LinkService:
             return False
         return True
 
-    async def summarize(self, url: str) -> LinkSummary:
+    async def summarize(self, url: str, item_id: uuid.UUID | None = None) -> LinkSummary:
         """Fetch the page and generate a summary using Claude.
 
-        Raises ScrapingError if the page is unreachable.
+        When ``item_id`` is provided and the Item already has ``scraped_text`` cached,
+        the cached text is reused and no HTTP request is made. On a cache miss (or when
+        no ``item_id`` is passed) the page is fetched via the scraper, the new text is
+        written back to the cache on the Item, and then summarized. Scraper failures
+        still raise ``ScrapingError`` so the handler can show a retry button.
+
+        Raises ScrapingError if the page is unreachable and no cached text is available.
         Raises ClassificationError if Claude fails.
         """
-        page_text = await self._scraper.fetch_text(url)
+        page_text = await self._resolve_page_text(url, item_id)
         raw = await self._claude.complete(
             _SUMMARIZE_PROMPT + page_text, max_tokens=_SUMMARIZE_MAX_TOKENS
         )
         return self._parse_summary(raw, url)
+
+    async def _resolve_page_text(self, url: str, item_id: uuid.UUID | None) -> str:
+        """Return cached ``scraped_text`` for the Item, or scrape and cache it."""
+        if item_id is not None:
+            item = await self._repo.get_by_id(item_id)
+            if item is not None and item.scraped_text:
+                return item.scraped_text
+
+        page_text = await self._scraper.fetch_text(url)
+
+        # Backfill the cache so subsequent summaries for the same Item hit memory.
+        if item_id is not None:
+            try:
+                await self._repo.update_scraped_text(item_id, page_text)
+                await self._session.commit()
+            except Exception:
+                logger.exception("Failed to cache scraped_text for item %s", item_id)
+                await self._session.rollback()
+
+        return page_text
 
     @staticmethod
     def _parse_summary(raw: str, url: str) -> LinkSummary:

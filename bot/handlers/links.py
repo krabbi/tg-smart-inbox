@@ -1,5 +1,6 @@
 import html
 import logging
+import uuid
 
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
@@ -83,6 +84,14 @@ def _extract_url(message_text: str) -> str:
     return message_text.split("\n")[-1].strip()
 
 
+def _parse_item_id(raw: str) -> uuid.UUID | None:
+    """Return the callback item_id as a UUID, or ``None`` if it is malformed."""
+    try:
+        return uuid.UUID(raw)
+    except (ValueError, AttributeError):
+        return None
+
+
 # Shared notice shown across handlers (text, voice, link) when semantic indexing
 # is temporarily unavailable at save time. Indexing is retried by the background
 # scheduler job.
@@ -110,7 +119,8 @@ async def _do_summarize(
     )
 
     try:
-        summary = await link_service.summarize(url)
+        parsed_item_id = _parse_item_id(item_id)
+        summary = await link_service.summarize(url, item_id=parsed_item_id)
         text = (
             f"🔗 {html.escape(url)}\n\n"
             f"📋 <b>{html.escape(summary.title)}</b>\n\n"

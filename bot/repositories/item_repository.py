@@ -28,6 +28,18 @@ class ItemRepository:
         item.embedding = embedding
         await self._session.flush()
 
+    async def update_scraped_text(self, item_id: uuid.UUID, scraped_text: str) -> None:
+        """Persist the cached page text on an existing Item; caller commits."""
+        item = await self._session.get(Item, item_id)
+        if item is None:
+            return
+        item.scraped_text = scraped_text
+        await self._session.flush()
+
+    async def get_by_id(self, item_id: uuid.UUID) -> Item | None:
+        """Return the Item with this id, or ``None`` if it does not exist."""
+        return await self._session.get(Item, item_id)
+
     async def get_missing_embedding(self, *, limit: int = 50) -> list[Item]:
         """Return Items without a stored embedding, oldest first (batch for reindex)."""
         result = await self._session.execute(

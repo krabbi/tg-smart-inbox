@@ -80,3 +80,42 @@ async def test_update_embedding_noop_for_missing_item(db_session: AsyncSession) 
     repo = ItemRepository(db_session)
     # Using a random UUID that doesn't match any row — must not raise.
     await repo.update_embedding(uuid.uuid4(), [0.0] * 1536)
+
+
+async def test_update_scraped_text_persists_value(db_session: AsyncSession) -> None:
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://example.com")
+    await db_session.commit()
+
+    await repo.update_scraped_text(item.id, "full page body here")
+    await db_session.commit()
+
+    stored = await repo.get_by_id(item.id)
+    assert stored is not None
+    assert stored.scraped_text == "full page body here"
+
+
+async def test_update_scraped_text_noop_for_missing_item(db_session: AsyncSession) -> None:
+    """Silently skip when the Item no longer exists (e.g. deleted between save and summarize)."""
+    import uuid
+
+    repo = ItemRepository(db_session)
+    # Using a random UUID that doesn't match any row — must not raise.
+    await repo.update_scraped_text(uuid.uuid4(), "page body")
+
+
+async def test_get_by_id_returns_item(db_session: AsyncSession) -> None:
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://x.com")
+    await db_session.commit()
+
+    result = await repo.get_by_id(item.id)
+    assert result is not None
+    assert result.id == item.id
+
+
+async def test_get_by_id_returns_none_for_unknown_id(db_session: AsyncSession) -> None:
+    import uuid
+
+    repo = ItemRepository(db_session)
+    assert await repo.get_by_id(uuid.uuid4()) is None
