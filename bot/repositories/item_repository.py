@@ -116,3 +116,21 @@ class ItemRepository:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def search_by_embedding(
+        self, embedding: list[float], user_id: int, *, limit: int = 20
+    ) -> list[tuple[Item, float]]:
+        """Return the user's Items closest to ``embedding`` as (item, score) pairs.
+
+        Uses pgvector's cosine distance operator (``<=>``). Score is ``1 - distance``
+        so higher means more similar. Items with ``embedding IS NULL`` are filtered
+        out. Results are ordered by distance ascending (most similar first).
+        """
+        distance = Item.embedding.cosine_distance(embedding)
+        result = await self._session.execute(
+            select(Item, distance.label("distance"))
+            .where(Item.user_id == user_id, Item.embedding.is_not(None))
+            .order_by(distance.asc())
+            .limit(limit)
+        )
+        return [(item, 1.0 - float(dist)) for item, dist in result.all()]

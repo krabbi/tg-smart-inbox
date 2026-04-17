@@ -81,6 +81,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `task_service.py` | Save tasks to DB |
 | `note_service.py` | Save notes to DB |
 | `list_service.py` | Paginated item listing and full-text search |
+| `semantic_search_service.py` | Cosine-similarity search over Item and Idea embeddings via pgvector |
 | `media_service.py` | Process photos/files: vision categorization + Drive upload |
 | `drive_service.py` | Google Drive API wrapper |
 | `scraper.py` | HTTP page fetcher for link summarization |
@@ -194,7 +195,7 @@ DependencyMiddleware.__call__()
   │            ReminderRepository, IdeaRepository
   ├── injects: classifier, embedding_service, link_service, reminder_service,
   │            time_parser, idea_service, task_service, note_service,
-  │            list_service, user_settings_service
+  │            list_service, semantic_search_service, user_settings_service
   ├── if GROQ_API_KEY: injects transcription_service (else None)
   ├── if GOOGLE_DRIVE_FOLDER_ID: injects media_service (else None)
   └── calls handler
@@ -461,6 +462,25 @@ At save time:
 - Records saved without an embedding (API outage, service disabled, partial failure)
   are eventually backfilled by the `_reindex_missing_embeddings` scheduler job.
 
+### Semantic search
+
+`SemanticSearchService` (`bot/services/semantic_search_service.py`) exposes a single
+`search(user_id, query, limit=20, offset=0)` method that:
+
+1. Generates an embedding for the query via `EmbeddingService.generate`.
+   If the API is unavailable, raises `SemanticSearchUnavailableError`.
+2. Calls `ItemRepository.search_by_embedding` and `IdeaRepository.search_by_embedding`
+   — both use pgvector's cosine-distance operator (`<=>`) to return the nearest
+   `limit + offset` rows per table, filtered by `user_id` and skipping rows where
+   `embedding IS NULL`.
+3. Merges the two result sets, sorts by score (higher = more similar, computed as
+   `1 - cosine_distance`), and applies the requested pagination window.
+
+Results are returned as a list of `SearchResult` dataclasses with fields
+`id`, `type` (`"item"` or `"idea"`), `title`, `preview_text`, `score`, and
+`created_at`. User isolation is enforced in the repository SQL — a user never
+sees another user's records, even when sharing vector space.
+
 ---
 
 ## Configuration
@@ -546,6 +566,7 @@ All domain exceptions are defined in `bot/exceptions.py`:
 | `TimeParseError` | Claude cannot parse a natural-language time expression |
 | `TranscriptionError` | Groq Whisper transcription fails |
 | `InvalidTimezoneError` | User-supplied timezone is not a valid IANA name |
+| `SemanticSearchUnavailableError` | Embedding API is unreachable, so semantic search cannot run |
 
 Services raise these exceptions; handlers catch them and send user-friendly messages.
 Raw exceptions never reach the user.

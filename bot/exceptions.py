@@ -24,3 +24,7 @@ class TranscriptionError(Exception):
 
 class InvalidTimezoneError(Exception):
     """Raised when an invalid IANA timezone name is provided."""
+
+
+class SemanticSearchUnavailableError(Exception):
+    """Raised when semantic search cannot produce a query embedding."""

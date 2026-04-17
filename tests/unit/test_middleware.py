@@ -91,3 +91,20 @@ async def test_middleware_injects_embedding_service(fake_config: Config) -> None
     await middleware(handler, MagicMock(), {})
 
     assert isinstance(captured["embedding_service"], EmbeddingService)
+
+
+async def test_middleware_injects_semantic_search_service(fake_config: Config) -> None:
+    from bot.services.semantic_search_service import SemanticSearchService
+
+    session = MagicMock(spec=AsyncSession)
+    factory = make_session_factory(session)
+    middleware = DependencyMiddleware(factory, fake_config)
+
+    captured: dict = {}
+
+    async def handler(event: object, data: dict) -> None:
+        captured.update(data)
+
+    await middleware(handler, MagicMock(), {})
+
+    assert isinstance(captured["semantic_search_service"], SemanticSearchService)

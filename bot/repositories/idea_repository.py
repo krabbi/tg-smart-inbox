@@ -79,3 +79,26 @@ class IdeaRepository:
             .limit(limit)
         )
         return list(result.all())
+
+    async def search_by_embedding(
+        self, embedding: list[float], user_id: int, *, limit: int = 20
+    ) -> list[tuple[Item, Idea, float]]:
+        """Return the user's Ideas closest to ``embedding`` as (item, idea, score) triples.
+
+        Uses pgvector's cosine distance operator (``<=>``). Score is ``1 - distance``
+        so higher means more similar. Ideas with ``embedding IS NULL`` are filtered
+        out. Results are ordered by distance ascending (most similar first).
+        """
+        distance = Idea.embedding.cosine_distance(embedding)
+        result = await self._session.execute(
+            select(Item, Idea, distance.label("distance"))
+            .join(Idea, Idea.item_id == Item.id)
+            .where(
+                Item.user_id == user_id,
+                Item.type == ItemType.idea,
+                Idea.embedding.is_not(None),
+            )
+            .order_by(distance.asc())
+            .limit(limit)
+        )
+        return [(item, idea, 1.0 - float(dist)) for item, idea, dist in result.all()]

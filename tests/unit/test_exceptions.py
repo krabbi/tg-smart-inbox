@@ -1,4 +1,9 @@
-from bot.exceptions import ClassificationError, DriveUploadError, ReminderParseError
+from bot.exceptions import (
+    ClassificationError,
+    DriveUploadError,
+    ReminderParseError,
+    SemanticSearchUnavailableError,
+)
 
 
 def test_classification_error_is_exception() -> None:
@@ -19,8 +24,19 @@ def test_reminder_parse_error_is_exception() -> None:
     assert str(err) == "cannot parse time"
 
 
+def test_semantic_search_unavailable_error_is_exception() -> None:
+    err = SemanticSearchUnavailableError("embedding api down")
+    assert isinstance(err, Exception)
+    assert str(err) == "embedding api down"
+
+
 def test_exceptions_are_catchable_as_base_exception() -> None:
-    for exc_class in (ClassificationError, DriveUploadError, ReminderParseError):
+    for exc_class in (
+        ClassificationError,
+        DriveUploadError,
+        ReminderParseError,
+        SemanticSearchUnavailableError,
+    ):
         try:
             raise exc_class("test")
         except Exception as e:
