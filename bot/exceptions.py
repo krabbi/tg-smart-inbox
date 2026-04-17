@@ -26,5 +26,9 @@ class InvalidTimezoneError(Exception):
     """Raised when an invalid IANA timezone name is provided."""
 
 
+class InvalidLanguageError(Exception):
+    """Raised when an unsupported language code is provided."""
+
+
 class SemanticSearchUnavailableError(Exception):
     """Raised when semantic search cannot produce a query embedding."""

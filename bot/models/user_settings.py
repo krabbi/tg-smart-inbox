@@ -15,6 +15,9 @@ class UserSettings(Base):
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, server_default="UTC", default="UTC"
     )
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="en", default="en"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
