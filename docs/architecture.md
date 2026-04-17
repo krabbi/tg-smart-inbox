@@ -88,7 +88,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `scraper.py` | HTTP page fetcher for link summarization |
 | `transcription_service.py` | Groq Whisper API wrapper for voice messages |
 | `vision_service.py` | Claude Vision API for image description |
-| `user_settings_service.py` | Read/write per-user preferences (timezone) with IANA validation |
+| `user_settings_service.py` | Read/write per-user preferences (timezone, language) with IANA / supported-language validation |
 
 ### Repositories (`bot/repositories/`)
 
@@ -173,8 +173,20 @@ Per-user preferences. One row per Telegram user; created lazily on first write.
 |--------|------|-------------|
 | `user_id` | BigInteger (PK) | Telegram user ID |
 | `timezone` | String(64) | IANA tz name (e.g. `Europe/Moscow`); NOT NULL, default `UTC` |
+| `language` | String(8) | Interface language — `ru` or `en`; NOT NULL, default `en` |
 | `created_at` | DateTime (TZ) | Row creation timestamp |
 | `updated_at` | DateTime (TZ) | Last update timestamp (auto-bumped on UPDATE) |
+
+On first creation the language is derived from Telegram's `language_code` field:
+codes starting with `ru` (case-insensitive) yield `ru`, everything else yields the
+default `en`. The derivation lives in `UserSettingsService.ensure_user_settings()`.
+Once a row exists, subsequent calls to `ensure_user_settings()` never overwrite the
+stored language — the user-set value wins over Telegram locale drift.
+
+`UserSettingsService` exposes `get_language(user_id)`, `set_language(user_id, lang)`
+(raises `InvalidLanguageError` for anything outside `{"ru", "en"}`), and
+`ensure_user_settings(user_id, language_code)`. The repository provides
+`set_language()` and a `get_or_create()` that accepts an initial `language` kwarg.
 
 ---
 
@@ -589,6 +601,7 @@ All domain exceptions are defined in `bot/exceptions.py`:
 | `TimeParseError` | Claude cannot parse a natural-language time expression |
 | `TranscriptionError` | Groq Whisper transcription fails |
 | `InvalidTimezoneError` | User-supplied timezone is not a valid IANA name |
+| `InvalidLanguageError` | User-supplied language code is not in the supported set (`ru`, `en`) |
 | `SemanticSearchUnavailableError` | Embedding API is unreachable, so semantic search cannot run |
 
 Services raise these exceptions; handlers catch them and send user-friendly messages.
