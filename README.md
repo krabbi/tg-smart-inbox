@@ -37,7 +37,7 @@ You forward links, photos, and notes to Telegram "Saved Messages" with the inten
 ```
 /start      — Welcome message and overview
 /list       — Browse your last 10 saved items (paginated)
-/search     — Full-text search across everything you've saved
+/search     — Search across everything you've saved (plain or AI-powered)
 /reminders  — View and cancel upcoming reminders
 /ideas      — View your saved ideas with tags and complexity
 /cancel     — Cancel any active dialog (e.g. reminder time input)

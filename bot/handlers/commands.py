@@ -2,7 +2,7 @@ import logging
 import uuid
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -14,7 +14,7 @@ from aiogram.types import (
 from bot.config import Config
 from bot.handlers.timezone_setup import start_timezone_setup
 from bot.models.item import ItemType
-from bot.services.list_service import _SEARCH_LIMIT, ListPage, ListService
+from bot.services.list_service import ListPage, ListService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
@@ -97,7 +97,7 @@ def _build_help_text(config: Config) -> str:
     sections.append(
         "<b>Команды</b>\n"
         "/list — последние 10 записей с пагинацией\n"
-        "/search <code>&lt;запрос&gt;</code> — поиск по сохранённому\n"
+        "/search — поиск по сохранённому (обычный или умный AI)\n"
         "/reminders — список предстоящих напоминаний\n"
         "/ideas — банк идей с тегами и сложностью\n"
         "/config — настройки (часовой пояс и т.д.)\n"
@@ -322,43 +322,6 @@ async def cb_list_filter(
         await callback.message.edit_text(reply, reply_markup=kb)
     except Exception:
         logger.warning("Could not edit list message (already deleted or unchanged)")
-
-
-@router.message(Command("search"))
-async def cmd_search(
-    message: Message,
-    command: CommandObject,
-    list_service: ListService | None = None,
-) -> None:
-    """Full-text search across saved items."""
-    if list_service is None:
-        logger.warning("list_service not injected — DI misconfiguration")
-        await message.answer("Команда /search скоро будет доступна.")
-        return
-
-    query = (command.args or "").strip()
-    if not query:
-        await message.answer("Введи запрос: <code>/search чек из магазина</code>")
-        return
-
-    user_id = message.from_user.id if message.from_user else 0
-    items = await list_service.search(user_id, query)
-
-    if not items:
-        await message.answer(f"Ничего не найдено по запросу: <b>{query}</b>")
-        return
-
-    lines = [f"🔍 <b>Результаты по «{query}»:</b>\n"]
-    for item in items:
-        emoji = _TYPE_EMOJI.get(item.type, "📄")
-        snippet = item.content[:80] + ("…" if len(item.content) > 80 else "")
-        date_str = item.created_at.strftime("%d.%m.%Y")
-        lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
-
-    if len(items) == _SEARCH_LIMIT:
-        lines.append(f"\n<i>Показаны первые {_SEARCH_LIMIT} результатов</i>")
-
-    await message.answer("\n".join(lines))
 
 
 @router.message(Command("reminders"))
