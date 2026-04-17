@@ -21,6 +21,7 @@ from bot.services.media_service import MediaService
 from bot.services.note_service import NoteService
 from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
+from bot.services.semantic_search_service import SemanticSearchService
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
@@ -73,6 +74,11 @@ class DependencyMiddleware(BaseMiddleware):
             data["task_service"] = TaskService(session, item_repo)
             data["note_service"] = NoteService(session, item_repo)
             data["list_service"] = ListService(item_repo=item_repo)
+            data["semantic_search_service"] = SemanticSearchService(
+                embedding_service=embedding_service,
+                item_repo=item_repo,
+                idea_repo=idea_repo,
+            )
             data["user_settings_service"] = UserSettingsService(
                 session=session, repo=UserSettingsRepository(session)
             )
