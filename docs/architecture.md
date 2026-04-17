@@ -188,6 +188,27 @@ stored language — the user-set value wins over Telegram locale drift.
 `ensure_user_settings(user_id, language_code)`. The repository provides
 `set_language()` and a `get_or_create()` that accepts an initial `language` kwarg.
 
+### Interface string localization (`bot/i18n.py`)
+
+All user-facing interface strings — confirmations, button labels, reminder
+notifications, error messages, and the text for `/list`, `/search`, `/ideas`,
+`/reminders`, `/config` — live in a single module, `bot/i18n.py`, and are looked
+up through `t(key: str, lang: str, **kwargs) -> str`. Two dictionaries,
+`_RU` and `_EN`, hold the translations; both are kept in sync (tests enforce
+that every key exists in both). `kwargs` are passed to `str.format` so callers
+can interpolate values like `{formatted}`, `{content}`, or `{query}`.
+
+Resolution order in `t()`:
+
+1. Look up the key in the requested language's table.
+2. Fall back to English (`DEFAULT_LANGUAGE`) if the key is missing there.
+3. As a last resort return the raw key — so a typo surfaces visibly in logs/UI
+   rather than raising `KeyError` in production.
+
+The per-user language is read from `UserSettingsService.get_language()` at the
+handler layer; handlers pass it into `t()` when rendering a reply. The i18n
+module itself is pure: it has no I/O, no session, no external calls.
+
 ---
 
 ## Dependency Injection
@@ -619,6 +640,7 @@ tg-smart-inbox/
 │   ├── config.py             # pydantic-settings Config
 │   ├── db.py                 # Async engine + session factory
 │   ├── exceptions.py         # All domain exceptions
+│   ├── i18n.py               # Interface string localization (ru, en)
 │   ├── middleware.py         # DependencyMiddleware — DI wiring
 │   ├── scheduler.py          # APScheduler jobs for reminders
 │   ├── handlers/
