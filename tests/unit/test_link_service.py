@@ -168,15 +168,18 @@ async def test_summarize_raises_scraping_error() -> None:
 # ── language requirement ─────────────────────────────────────────────────────
 
 
-async def test_summarize_prompt_requires_russian_output() -> None:
-    """Prompt must explicitly instruct Claude to respond in Russian."""
-    assert "Russian" in _SUMMARIZE_PROMPT
-    # Must cover the case when the source page is in another language.
+async def test_summarize_prompt_template_is_language_neutral() -> None:
+    """Prompt template must use a placeholder, never hardcode a specific language."""
+    assert "{language}" in _SUMMARIZE_PROMPT
+    # The previous hardcoded "Russian" directive is gone — the language is
+    # interpolated per-request from the caller's ``lang`` argument.
+    assert "Russian" not in _SUMMARIZE_PROMPT
+    # Must still cover the case when the source page is in another language.
     assert "regardless of the original language" in _SUMMARIZE_PROMPT
 
 
-async def test_summarize_sends_russian_instruction_to_claude() -> None:
-    """The actual prompt passed to Claude.complete must carry the Russian requirement."""
+async def test_summarize_sends_russian_instruction_when_lang_ru() -> None:
+    """When lang='ru' the prompt sent to Claude must instruct a Russian response."""
     english_page = (
         "Bread baking is a wonderful hobby. You need flour, water, salt and yeast. "
         "Mix, knead, proof, bake. Enjoy fresh bread at home."
@@ -185,9 +188,8 @@ async def test_summarize_sends_russian_instruction_to_claude() -> None:
         scraper_text=english_page,
         claude_response="Как печь хлеб\n\nСтатья о домашней выпечке хлеба.",
     )
-    result = await svc.summarize("https://example.com/bread")
+    result = await svc.summarize("https://example.com/bread", lang="ru")
 
-    # The prompt sent to Claude must include the Russian-language requirement.
     svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
     sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
     assert "Russian" in sent_prompt
@@ -199,15 +201,40 @@ async def test_summarize_sends_russian_instruction_to_claude() -> None:
     assert "выпечке" in result.body
 
 
+async def test_summarize_sends_english_instruction_when_lang_en() -> None:
+    """When lang='en' the prompt sent to Claude must instruct an English response."""
+    russian_page = "Выпечка хлеба — это чудесное хобби."
+    svc, _ = make_link_service(
+        scraper_text=russian_page,
+        claude_response="Bread baking\n\nA page about baking bread at home.",
+    )
+    await svc.summarize("https://example.com/bread", lang="en")
+
+    sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
+    assert "English" in sent_prompt
+    # With lang='en' there must be no Russian directive in the prompt.
+    assert "Russian" not in sent_prompt
+
+
+async def test_summarize_default_lang_is_english() -> None:
+    """Omitting lang falls back to the default (English) — not Russian."""
+    svc, _ = make_link_service()
+    await svc.summarize("https://example.com")
+
+    sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
+    assert "English" in sent_prompt
+    assert "Russian" not in sent_prompt
+
+
 async def test_summarize_returns_russian_for_non_english_source() -> None:
-    """Summary for a page in any foreign language is returned in Russian."""
+    """Summary for a page in any foreign language is returned in the requested language."""
     french_page = "La cuisine française est célèbre dans le monde entier."
     russian_response = (
         "Французская кухня\n\nСтраница рассказывает о знаменитой французской кухне "
         "и её месте в мировой гастрономии."
     )
     svc, _ = make_link_service(scraper_text=french_page, claude_response=russian_response)
-    result = await svc.summarize("https://example.com/cuisine")
+    result = await svc.summarize("https://example.com/cuisine", lang="ru")
 
     assert result.title == "Французская кухня"
     assert "Французская" in result.body or "французской" in result.body

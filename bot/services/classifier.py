@@ -3,6 +3,7 @@ import json
 import logging
 import re
 
+from bot.i18n import DEFAULT_LANGUAGE, language_name
 from bot.services.claude_client import ClaudeClient
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,8 @@ logger = logging.getLogger(__name__)
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 _CLASSIFY_PROMPT = """\
-Classify the following message into exactly one category.
+Classify the following message into exactly one category. The user's language \
+is {language} — interpret the message in that language when choosing the category.
 
 Categories:
 - task: something the user needs to do, a reminder, or an action item \
@@ -23,7 +25,7 @@ Categories:
 When in doubt between idea and note, prefer idea for anything inventive or hypothetical.
 
 Respond with JSON only, no explanation:
-{"type": "task"} or {"type": "idea"} or {"type": "note"}
+{{"type": "task"}} or {{"type": "idea"}} or {{"type": "note"}}
 
 Message:
 """
@@ -45,11 +47,15 @@ class ClassifierService:
     def __init__(self, claude: ClaudeClient) -> None:
         self._claude = claude
 
-    async def classify(self, text: str, *, has_media: bool = False) -> MessageType:
+    async def classify(
+        self, text: str, *, has_media: bool = False, lang: str = DEFAULT_LANGUAGE
+    ) -> MessageType:
         """Return the MessageType for the given message content.
 
         Short-circuits without an API call for MEDIA and LINK types.
         Falls back to NOTE if Claude returns a malformed response or errors out.
+        The ``lang`` argument is forwarded into the Claude prompt so the model
+        interprets the message in the user's language.
         """
         if has_media:
             return MessageType.MEDIA
@@ -57,12 +63,13 @@ class ClassifierService:
         if _URL_RE.search(text):
             return MessageType.LINK
 
-        return await self._classify_with_claude(text)
+        return await self._classify_with_claude(text, lang)
 
-    async def _classify_with_claude(self, text: str) -> MessageType:
+    async def _classify_with_claude(self, text: str, lang: str) -> MessageType:
         """Call Claude API to classify text; return NOTE on any failure."""
+        prompt = _CLASSIFY_PROMPT.format(language=language_name(lang)) + text
         try:
-            response = await self._claude.complete(_CLASSIFY_PROMPT + text)
+            response = await self._claude.complete(prompt)
             return self._parse_response(response)
         except Exception:
             logger.exception("Classification failed, falling back to NOTE")

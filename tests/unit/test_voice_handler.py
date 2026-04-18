@@ -105,7 +105,7 @@ async def test_handle_voice_routes_idea_to_idea_service() -> None:
         idea_service=idea_svc,
     )
 
-    idea_svc.save_idea.assert_awaited_once_with("идея для приложения", 1)
+    idea_svc.save_idea.assert_awaited_once_with("идея для приложения", 1, lang="en")
     replies = [c[0][0] for c in msg.answer.call_args_list]
     assert any("💡" in r for r in replies)
 

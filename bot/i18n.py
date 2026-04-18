@@ -27,6 +27,23 @@ from collections.abc import Mapping
 DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES: frozenset[str] = frozenset({"ru", "en"})
 
+# Human-readable names for Claude prompts. Kept inside i18n because it is
+# the canonical source of language identity in the project.
+_LANGUAGE_NAMES: dict[str, str] = {
+    "ru": "Russian",
+    "en": "English",
+}
+
+
+def language_name(lang: str) -> str:
+    """Return the English human-readable language name (e.g. ``'Russian'``) for a code.
+
+    Used to interpolate the user's language into Claude prompts. Unknown or
+    empty codes fall back to the default language's name so prompts never
+    contain an empty placeholder.
+    """
+    return _LANGUAGE_NAMES.get(lang, _LANGUAGE_NAMES[DEFAULT_LANGUAGE])
+
 
 # ---------------------------------------------------------------------------
 # Russian translations

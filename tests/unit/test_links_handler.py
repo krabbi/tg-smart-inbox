@@ -197,7 +197,7 @@ async def test_cb_link_summary_forwards_item_id_to_service() -> None:
 
     await cb_link_summary(cb, svc, lang="ru")
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id)
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="ru")
 
 
 async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> None:
@@ -207,4 +207,15 @@ async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> N
 
     await cb_link_summary(cb, svc, lang="ru")
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=None)
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=None, lang="ru")
+
+
+async def test_cb_link_summary_forwards_lang_to_service() -> None:
+    """The user's language must be forwarded to LinkService.summarize."""
+    item_id = uuid.uuid4()
+    cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
+    svc = make_link_service()
+
+    await cb_link_summary(cb, svc, lang="en")
+
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="en")

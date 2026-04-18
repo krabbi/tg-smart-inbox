@@ -203,7 +203,7 @@ async def test_cb_link_retry_triggers_summarize_flow() -> None:
 
     await cb_link_retry(cb, link_service=svc)
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id)
+    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="en")
     # Should show loading then final result (2 edit_text calls)
     assert cb.message.edit_text.await_count == 2
 

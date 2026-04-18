@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.i18n import t
+from bot.i18n import DEFAULT_LANGUAGE, t
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.drive_service import DriveFile, DriveService
@@ -58,12 +58,16 @@ class MediaService:
         filename: str,
         user_id: int,
         media_type: str = "image/jpeg",
+        lang: str = DEFAULT_LANGUAGE,
     ) -> MediaResult:
         """Analyze, upload, save, and return MediaResult.
 
+        ``lang`` is forwarded to :class:`VisionService` so the image description
+        is produced in the user's interface language.
+
         Raises VisionService fallback errors or DriveUploadError on failure.
         """
-        analysis = await self._vision.analyze(file_bytes, media_type)
+        analysis = await self._vision.analyze(file_bytes, media_type, lang=lang)
         drive_file = await asyncio.get_running_loop().run_in_executor(
             None, self._drive.upload, file_bytes, filename, analysis.category
         )

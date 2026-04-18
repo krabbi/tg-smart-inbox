@@ -9,7 +9,14 @@ from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
 from bot.services.embedding_service import EmbeddingService
-from bot.services.idea_service import IdeaService, IdeasPage, SavedIdea
+from bot.services.idea_service import (
+    _CLASSIFY_PROMPT,
+    _SUGGEST_PROMPT,
+    _TAG_PROMPT,
+    IdeaService,
+    IdeasPage,
+    SavedIdea,
+)
 
 _DEFAULT_COMPLEXITY = '{"complexity": "simple", "effort": "quick"}'
 
@@ -302,3 +309,94 @@ async def test_ideas_page_has_prev_and_has_next() -> None:
     page = IdeasPage(rows=[], page=1, total=30)
     assert page.has_prev
     assert page.has_next
+
+
+# ── Language propagation ─────────────────────────────────────────────────────
+
+
+async def test_prompt_templates_are_language_neutral() -> None:
+    """All three IdeaService prompts must reference ``{language}`` and not hardcode Russian."""
+    for template in (_TAG_PROMPT, _CLASSIFY_PROMPT, _SUGGEST_PROMPT):
+        assert "{language}" in template
+        assert "Russian" not in template
+
+
+async def test_save_idea_forwards_russian_into_both_prompts() -> None:
+    """lang='ru' must surface as 'Russian' in tag-extraction and complexity prompts."""
+    svc, _, _, claude = make_service()
+    await svc.save_idea("купить вертолёт", user_id=1, lang="ru")
+
+    # Two prompts are sent concurrently (tags + complexity); both must carry 'Russian'.
+    sent_prompts = [call.args[0] for call in claude.complete.await_args_list]
+    assert len(sent_prompts) == 2
+    for prompt in sent_prompts:
+        assert "Russian" in prompt
+        assert "English" not in prompt
+
+
+async def test_save_idea_forwards_english_into_both_prompts() -> None:
+    """lang='en' must surface as 'English' in tag-extraction and complexity prompts."""
+    svc, _, _, claude = make_service()
+    await svc.save_idea("buy a helicopter", user_id=1, lang="en")
+
+    sent_prompts = [call.args[0] for call in claude.complete.await_args_list]
+    assert len(sent_prompts) == 2
+    for prompt in sent_prompts:
+        assert "English" in prompt
+        assert "Russian" not in prompt
+
+
+async def test_save_idea_default_lang_is_english() -> None:
+    """Omitting lang on save_idea defaults to English in the Claude prompts."""
+    svc, _, _, claude = make_service()
+    await svc.save_idea("some idea", user_id=1)
+
+    sent_prompts = [call.args[0] for call in claude.complete.await_args_list]
+    for prompt in sent_prompts:
+        assert "English" in prompt
+        assert "Russian" not in prompt
+
+
+async def test_suggest_forwards_russian_into_prompt() -> None:
+    """lang='ru' must interpolate into the suggest prompt."""
+    svc, _, idea_repo, claude = make_service()
+    idea_repo.get_all = AsyncMock(
+        return_value=[(MagicMock(content="idea", spec=Item), MagicMock(tags=[], spec=Idea))]
+    )
+    claude.complete = AsyncMock(return_value="Вот что можно сделать.")
+
+    await svc.suggest(user_id=1, query="что поделать?", lang="ru")
+
+    sent_prompt = claude.complete.await_args.args[0]
+    assert "Russian" in sent_prompt
+    assert "English" not in sent_prompt
+
+
+async def test_suggest_forwards_english_into_prompt() -> None:
+    """lang='en' must interpolate into the suggest prompt."""
+    svc, _, idea_repo, claude = make_service()
+    idea_repo.get_all = AsyncMock(
+        return_value=[(MagicMock(content="idea", spec=Item), MagicMock(tags=[], spec=Idea))]
+    )
+    claude.complete = AsyncMock(return_value="Here's what to do.")
+
+    await svc.suggest(user_id=1, query="what should I do?", lang="en")
+
+    sent_prompt = claude.complete.await_args.args[0]
+    assert "English" in sent_prompt
+    assert "Russian" not in sent_prompt
+
+
+async def test_suggest_default_lang_is_english() -> None:
+    """Omitting lang on suggest defaults to English in the prompt."""
+    svc, _, idea_repo, claude = make_service()
+    idea_repo.get_all = AsyncMock(
+        return_value=[(MagicMock(content="idea", spec=Item), MagicMock(tags=[], spec=Idea))]
+    )
+    claude.complete = AsyncMock(return_value="Here's what to do.")
+
+    await svc.suggest(user_id=1, query="what should I do?")
+
+    sent_prompt = claude.complete.await_args.args[0]
+    assert "English" in sent_prompt
+    assert "Russian" not in sent_prompt

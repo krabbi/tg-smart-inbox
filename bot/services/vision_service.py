@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import anthropic
 
 from bot.config import Config
-from bot.i18n import DEFAULT_LANGUAGE, t
+from bot.i18n import DEFAULT_LANGUAGE, language_name, t
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ _SUPPORTED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 _ANALYZE_PROMPT = """\
 Analyze this image and return a JSON object with:
 - "category": one of: receipt, document, screenshot, photo, meme, other
-- "description": 1-2 sentence description of what this is (in the same language as any text in the image, default Russian)
+- "description": 1-2 sentence description of what this is, written in {language}
 
 Respond with JSON only. No explanation outside the JSON.
 
@@ -46,11 +46,17 @@ class VisionService:
     def __init__(self, config: Config) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
 
-    async def analyze(self, image_bytes: bytes, media_type: str = "image/jpeg") -> MediaAnalysis:
+    async def analyze(
+        self,
+        image_bytes: bytes,
+        media_type: str = "image/jpeg",
+        lang: str = DEFAULT_LANGUAGE,
+    ) -> MediaAnalysis:
         """Analyze image bytes and return category + description.
 
-        Falls back to category 'other' if Claude returns an unknown category or
-        if the media type is not supported by Claude Vision.
+        ``lang`` is the user's interface language; the description is requested
+        in that language. Falls back to category ``'other'`` if Claude returns
+        an unknown category or if the media type is not supported.
         """
         if media_type not in _SUPPORTED_MEDIA_TYPES:
             logger.warning(
@@ -58,9 +64,10 @@ class VisionService:
             )
             return MediaAnalysis(
                 category="other",
-                description=t("vision_unsupported_format", DEFAULT_LANGUAGE),
+                description=t("vision_unsupported_format", lang),
             )
         b64 = base64.standard_b64encode(image_bytes).decode()
+        prompt_text = _ANALYZE_PROMPT.format(language=language_name(lang))
         try:
             response = await self._client.messages.create(
                 model=self.MODEL,
@@ -77,23 +84,23 @@ class VisionService:
                                     "data": b64,
                                 },
                             },
-                            {"type": "text", "text": _ANALYZE_PROMPT},
+                            {"type": "text", "text": prompt_text},
                         ],
                     }
                 ],
             )
-            return self._parse_response(response.content[0].text)  # type: ignore[union-attr]
+            return self._parse_response(response.content[0].text, lang)  # type: ignore[union-attr]
         except Exception:
             logger.exception("Vision analysis failed, falling back to 'other'")
             return MediaAnalysis(
                 category="other",
-                description=t("vision_analyze_failed", DEFAULT_LANGUAGE),
+                description=t("vision_analyze_failed", lang),
             )
 
     @staticmethod
-    def _parse_response(raw: str) -> MediaAnalysis:
+    def _parse_response(raw: str, lang: str = DEFAULT_LANGUAGE) -> MediaAnalysis:
         """Parse Claude's JSON response into MediaAnalysis, defaulting to 'other'."""
-        default_description = t("vision_media_default", DEFAULT_LANGUAGE)
+        default_description = t("vision_media_default", lang)
         try:
             data = json.loads(raw.strip())
             category = str(data.get("category", "other")).lower()

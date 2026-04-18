@@ -44,11 +44,27 @@ async def test_process_analyzes_and_uploads() -> None:
     svc, vision, drive = make_media_service()
     result = await svc.process(b"image bytes", "photo.jpg", user_id=1)
 
-    vision.analyze.assert_awaited_once_with(b"image bytes", "image/jpeg")
+    vision.analyze.assert_awaited_once_with(b"image bytes", "image/jpeg", lang="en")
     drive.upload.assert_called_once_with(b"image bytes", "photo.jpg", "photo")
     assert isinstance(result, MediaResult)
     assert result.analysis.category == "photo"
     assert result.drive_file.file_id == "abc"
+
+
+async def test_process_forwards_lang_to_vision_service() -> None:
+    """``lang`` passed to MediaService.process must reach VisionService.analyze."""
+    svc, vision, _ = make_media_service()
+    await svc.process(b"bytes", "img.jpg", user_id=1, lang="ru")
+
+    vision.analyze.assert_awaited_once_with(b"bytes", "image/jpeg", lang="ru")
+
+
+async def test_process_default_lang_is_english() -> None:
+    """Omitting ``lang`` on process must still reach VisionService as 'en'."""
+    svc, vision, _ = make_media_service()
+    await svc.process(b"bytes", "img.jpg", user_id=1)
+
+    vision.analyze.assert_awaited_once_with(b"bytes", "image/jpeg", lang="en")
 
 
 async def test_process_saves_item_with_description() -> None:

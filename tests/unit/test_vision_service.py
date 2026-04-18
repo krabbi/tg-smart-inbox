@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.config import Config
-from bot.services.vision_service import VisionService
+from bot.services.vision_service import _ANALYZE_PROMPT, VisionService
 
 
 def make_config() -> Config:
@@ -96,3 +96,70 @@ async def test_analyze_passes_media_type() -> None:
     call_kwargs = svc._client.messages.create.call_args[1]
     msg_content = call_kwargs["messages"][0]["content"]
     assert msg_content[0]["source"]["media_type"] == "image/png"
+
+
+# ── Language propagation ─────────────────────────────────────────────────────
+
+
+async def test_analyze_prompt_template_is_language_neutral() -> None:
+    """The prompt template must use ``{language}`` and not hardcode Russian."""
+    assert "{language}" in _ANALYZE_PROMPT
+    assert "Russian" not in _ANALYZE_PROMPT
+
+
+async def test_analyze_forwards_russian_into_prompt() -> None:
+    """lang='ru' must surface as 'Russian' in the text prompt sent to Claude."""
+    svc = make_service('{"category": "photo", "description": "Фотография улицы"}')
+    await svc.analyze(b"image bytes", media_type="image/jpeg", lang="ru")
+
+    call_kwargs = svc._client.messages.create.call_args[1]
+    prompt_text = call_kwargs["messages"][0]["content"][1]["text"]
+    assert "Russian" in prompt_text
+    assert "English" not in prompt_text
+
+
+async def test_analyze_forwards_english_into_prompt() -> None:
+    """lang='en' must surface as 'English' in the text prompt sent to Claude."""
+    svc = make_service('{"category": "photo", "description": "Street photo"}')
+    await svc.analyze(b"image bytes", media_type="image/jpeg", lang="en")
+
+    call_kwargs = svc._client.messages.create.call_args[1]
+    prompt_text = call_kwargs["messages"][0]["content"][1]["text"]
+    assert "English" in prompt_text
+    assert "Russian" not in prompt_text
+
+
+async def test_analyze_default_lang_is_english() -> None:
+    """Omitting lang falls back to English in the Claude prompt."""
+    svc = make_service('{"category": "photo", "description": "A photo"}')
+    await svc.analyze(b"image bytes", media_type="image/jpeg")
+
+    call_kwargs = svc._client.messages.create.call_args[1]
+    prompt_text = call_kwargs["messages"][0]["content"][1]["text"]
+    assert "English" in prompt_text
+    assert "Russian" not in prompt_text
+
+
+async def test_analyze_unsupported_media_uses_localized_fallback() -> None:
+    """Unsupported media fallback description must honour the caller's language."""
+    svc = VisionService(make_config())
+    svc._client = MagicMock()
+    result_ru = await svc.analyze(b"pdf bytes", media_type="application/pdf", lang="ru")
+    result_en = await svc.analyze(b"pdf bytes", media_type="application/pdf", lang="en")
+    # The i18n tables return different strings per language — compare directly.
+    assert result_ru.description != result_en.description
+    assert "не поддерживается" in result_ru.description
+    assert "not supported" in result_en.description
+
+
+async def test_analyze_api_error_uses_localized_fallback() -> None:
+    """API error fallback description must honour the caller's language."""
+    svc = VisionService(make_config())
+    svc._client = MagicMock()
+    svc._client.messages.create = AsyncMock(side_effect=Exception("API boom"))
+    result_ru = await svc.analyze(b"bytes", media_type="image/jpeg", lang="ru")
+    assert "Не удалось проанализировать" in result_ru.description
+
+    svc._client.messages.create = AsyncMock(side_effect=Exception("API boom"))
+    result_en = await svc.analyze(b"bytes", media_type="image/jpeg", lang="en")
+    assert "Failed to analyze" in result_en.description

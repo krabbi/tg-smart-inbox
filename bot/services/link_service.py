@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.exceptions import ScrapingError
+from bot.i18n import DEFAULT_LANGUAGE, language_name
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
@@ -14,20 +15,20 @@ from bot.services.scraper import Scraper
 logger = logging.getLogger(__name__)
 
 _SUMMARIZE_PROMPT = """\
-You are a helpful assistant that summarizes web pages for a Russian-speaking user.
+You are a helpful assistant that summarizes web pages for a {language}-speaking user.
 
-CRITICAL LANGUAGE REQUIREMENT: Your entire response MUST be written in Russian, \
+CRITICAL LANGUAGE REQUIREMENT: Your entire response MUST be written in {language}, \
 regardless of the original language of the page. This applies to the title, the summary \
-body, and any key takeaways. If the page is in English, French, German, Japanese, or any \
-other language — translate everything into natural, fluent Russian. Never leave any part \
-of the response in the source language.
+body, and any key takeaways. If the page is in a different language — translate \
+everything into natural, fluent {language}. Never leave any part of the response in the \
+source language.
 
 Given the text of a web page, respond with:
-- Line 1: the page title translated into Russian (or a Russian best guess if missing)
+- Line 1: the page title in {language} (translated or rendered naturally)
 - Line 2: blank
-- Lines 3+: 3-5 sentences in Russian explaining what this page is about, written in a \
-natural, friendly tone — as if you're telling a friend what they'll find here. \
-No bullet points, no headers, no lists. Just flowing Russian prose. \
+- Lines 3+: 3-5 sentences in {language} explaining what this page is about, written in \
+a natural, friendly tone — as if you're telling a friend what they'll find here. \
+No bullet points, no headers, no lists. Just flowing {language} prose. \
 Complete every sentence — never cut off mid-sentence.
 
 Page text:
@@ -118,8 +119,13 @@ class LinkService:
             return False
         return True
 
-    async def summarize(self, url: str, item_id: uuid.UUID | None = None) -> LinkSummary:
-        """Fetch the page and generate a summary using Claude.
+    async def summarize(
+        self,
+        url: str,
+        item_id: uuid.UUID | None = None,
+        lang: str = DEFAULT_LANGUAGE,
+    ) -> LinkSummary:
+        """Fetch the page and generate a summary using Claude in the user's language.
 
         When ``item_id`` is provided and the Item already has ``scraped_text`` cached,
         the cached text is reused and no HTTP request is made. On a cache miss (or when
@@ -127,13 +133,15 @@ class LinkService:
         written back to the cache on the Item, and then summarized. Scraper failures
         still raise ``ScrapingError`` so the handler can show a retry button.
 
+        The ``lang`` argument is interpolated into the Claude prompt so the title and
+        body are returned in the user's interface language (``"ru"`` or ``"en"``).
+
         Raises ScrapingError if the page is unreachable and no cached text is available.
         Raises ClassificationError if Claude fails.
         """
         page_text = await self._resolve_page_text(url, item_id)
-        raw = await self._claude.complete(
-            _SUMMARIZE_PROMPT + page_text, max_tokens=_SUMMARIZE_MAX_TOKENS
-        )
+        prompt = _SUMMARIZE_PROMPT.format(language=language_name(lang)) + page_text
+        raw = await self._claude.complete(prompt, max_tokens=_SUMMARIZE_MAX_TOKENS)
         return self._parse_summary(raw, url)
 
     async def _resolve_page_text(self, url: str, item_id: uuid.UUID | None) -> str:

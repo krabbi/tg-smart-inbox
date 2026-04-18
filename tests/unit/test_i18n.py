@@ -2,7 +2,7 @@
 
 import pytest
 
-from bot.i18n import _EN, _RU, DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, t
+from bot.i18n import _EN, _RU, DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, language_name, t
 
 
 def test_supported_languages_are_exactly_ru_and_en() -> None:
@@ -274,3 +274,23 @@ def test_unsupported_language_with_kwargs_falls_back_and_formats() -> None:
     """Unknown lang falls back to English AND still applies format kwargs."""
     result = t("reminder_created", "fr", formatted="tomorrow")
     assert result == "🔔 I'll remind you tomorrow!"
+
+
+# ── language_name helper (used by Claude prompts) ────────────────────────────
+
+
+def test_language_name_returns_russian_for_ru() -> None:
+    """``'ru'`` maps to the English word ``'Russian'`` — used in Claude prompts."""
+    assert language_name("ru") == "Russian"
+
+
+def test_language_name_returns_english_for_en() -> None:
+    """``'en'`` maps to ``'English'``."""
+    assert language_name("en") == "English"
+
+
+def test_language_name_unknown_falls_back_to_default() -> None:
+    """Unknown codes fall back to the default language's name."""
+    assert language_name("fr") == "English"
+    assert language_name("") == "English"
+    assert language_name("xx-YY") == "English"

@@ -124,7 +124,7 @@ async def _do_summarize(
 
     try:
         parsed_item_id = _parse_item_id(item_id)
-        summary = await link_service.summarize(url, item_id=parsed_item_id)
+        summary = await link_service.summarize(url, item_id=parsed_item_id, lang=lang)
         text = t(
             "link_summary_result",
             lang,
