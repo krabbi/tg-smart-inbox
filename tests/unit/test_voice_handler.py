@@ -130,8 +130,8 @@ async def test_handle_voice_routes_link_to_link_handler() -> None:
         )
 
     mock_link.assert_awaited_once()
-    _, called_url, _ = mock_link.call_args[0]
-    assert called_url == "https://example.com"
+    call_args = mock_link.call_args[0]
+    assert call_args[1] == "https://example.com"
 
 
 async def test_handle_voice_downloads_audio_and_transcribes() -> None:
@@ -168,6 +168,7 @@ async def test_handle_voice_idea_not_indexed_warns_user() -> None:
         transcription_service=svc,
         classifier=classifier,
         idea_service=idea_svc,
+        lang="ru",
     )
 
     replies = [c[0][0] for c in msg.answer.call_args_list]
@@ -196,6 +197,7 @@ async def test_handle_voice_routes_idea_shows_complexity_labels() -> None:
         transcription_service=svc,
         classifier=classifier,
         idea_service=idea_svc,
+        lang="ru",
     )
 
     replies = [c[0][0] for c in msg.answer.call_args_list]
@@ -223,6 +225,7 @@ async def test_handle_voice_routes_task_without_time_shows_remind_button() -> No
         transcription_service=svc,
         classifier=classifier,
         task_service=task_svc,
+        lang="ru",
     )
 
     task_svc.save.assert_awaited_once_with("купить молоко", 1)

@@ -56,7 +56,7 @@ def make_state(data: dict | None = None) -> FSMContext:
 def test_task_remind_keyboard_has_item_id() -> None:
     """Keyboard button stores item_id in callback_data."""
     item_id = str(uuid.uuid4())
-    kb = task_remind_keyboard(item_id)
+    kb = task_remind_keyboard(item_id, lang="ru")
     assert len(kb.inline_keyboard) == 1
     btn = kb.inline_keyboard[0][0]
     assert btn.callback_data == f"task_remind:{item_id}"
@@ -137,7 +137,9 @@ async def test_receive_reminder_time_parse_error() -> None:
 
     svc = MagicMock(spec=ReminderService)
 
-    await receive_reminder_time(msg, state, time_parser=time_parser, reminder_service=svc)
+    await receive_reminder_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
 
     msg.answer.assert_awaited_once()
     assert "Не смог" in msg.answer.call_args[0][0]
@@ -173,7 +175,9 @@ async def test_receive_reminder_time_aborts_after_max_attempts() -> None:
 
     svc = MagicMock(spec=ReminderService)
 
-    await receive_reminder_time(msg, state, time_parser=time_parser, reminder_service=svc)
+    await receive_reminder_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
 
     state.clear.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
@@ -227,6 +231,7 @@ async def test_receive_reminder_time_with_url_and_no_link_service_replies_unavai
         time_parser=time_parser,
         reminder_service=reminder_svc,
         link_service=None,
+        lang="ru",
     )
 
     state.clear.assert_awaited_once()
@@ -310,7 +315,9 @@ async def test_receive_reminder_time_save_error() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.create = AsyncMock(side_effect=Exception("DB error"))
 
-    await receive_reminder_time(msg, state, time_parser=time_parser, reminder_service=svc)
+    await receive_reminder_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
 
     msg.answer.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
@@ -341,7 +348,7 @@ async def test_cb_remind_snooze_1h_calls_snooze() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.snooze = AsyncMock(return_value=True)
 
-    await cb_remind_snooze(cb, reminder_service=svc)
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
 
     svc.snooze.assert_awaited_once()
     call_kwargs = svc.snooze.call_args[1]
@@ -379,7 +386,7 @@ async def test_cb_remind_snooze_1d_calls_snooze() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.snooze = AsyncMock(return_value=True)
 
-    await cb_remind_snooze(cb, reminder_service=svc)
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
 
     assert "1 день" in cb.message.answer.call_args[0][0]
     from datetime import timedelta
@@ -397,7 +404,7 @@ async def test_cb_remind_snooze_not_owned_sends_message() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.snooze = AsyncMock(return_value=False)
 
-    await cb_remind_snooze(cb, reminder_service=svc)
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
 
     cb.message.answer.assert_awaited_once()
     assert "не найдено" in cb.message.answer.call_args[0][0].lower()
@@ -407,7 +414,7 @@ async def test_cb_remind_snooze_no_service_replies_unavailable() -> None:
     reminder_id = str(uuid.uuid4())
     cb = make_callback_with_user(f"remind_snooze:1h:{reminder_id}")
 
-    await cb_remind_snooze(cb, reminder_service=None)
+    await cb_remind_snooze(cb, reminder_service=None, lang="ru")
 
     cb.message.answer.assert_awaited_once()
     assert "недоступен" in cb.message.answer.call_args[0][0].lower()
@@ -422,7 +429,7 @@ async def test_cb_remind_ack_acknowledges_reminder() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.acknowledge = AsyncMock(return_value=True)
 
-    await cb_remind_ack(cb, reminder_service=svc)
+    await cb_remind_ack(cb, reminder_service=svc, lang="ru")
 
     svc.acknowledge.assert_awaited_once_with(reminder_id=uuid.UUID(reminder_id), user_id=7)
     cb.message.edit_text.assert_awaited_once()
@@ -443,7 +450,7 @@ async def test_cb_remind_ack_falls_back_to_text_when_no_html_text() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.acknowledge = AsyncMock(return_value=True)
 
-    await cb_remind_ack(cb, reminder_service=svc)
+    await cb_remind_ack(cb, reminder_service=svc, lang="ru")
 
     call_args = cb.message.edit_text.call_args
     assert "купить молоко" in call_args[0][0]
@@ -454,7 +461,7 @@ async def test_cb_remind_ack_no_service_replies_unavailable() -> None:
     reminder_id = str(uuid.uuid4())
     cb = make_callback_with_user(f"remind_ack:{reminder_id}")
 
-    await cb_remind_ack(cb, reminder_service=None)
+    await cb_remind_ack(cb, reminder_service=None, lang="ru")
 
     cb.message.answer.assert_awaited_once()
     assert "недоступен" in cb.message.answer.call_args[0][0].lower()
@@ -497,7 +504,7 @@ async def test_cb_remind_ack_service_error_replies_error() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.acknowledge = AsyncMock(side_effect=Exception("db error"))
 
-    await cb_remind_ack(cb, reminder_service=svc)
+    await cb_remind_ack(cb, reminder_service=svc, lang="ru")
 
     cb.message.answer.assert_awaited_once()
     assert "Не удалось" in cb.message.answer.call_args[0][0]

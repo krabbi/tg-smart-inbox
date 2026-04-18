@@ -50,7 +50,7 @@ def make_idea_row(
 
 async def test_handle_ideas_no_service_sends_stub() -> None:
     msg = make_message()
-    await handle_ideas_command(msg, idea_service=None)
+    await handle_ideas_command(msg, idea_service=None, lang="ru")
     msg.answer.assert_awaited_once()
     assert "скоро" in msg.answer.call_args[0][0]
 
@@ -60,7 +60,7 @@ async def test_handle_ideas_empty_list() -> None:
     svc = MagicMock(spec=IdeaService)
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=[], page=0, total=0))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     msg.answer.assert_awaited_once()
     assert (
         "нет идей" in msg.answer.call_args[0][0].lower()
@@ -77,7 +77,7 @@ async def test_handle_ideas_shows_list() -> None:
     ]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=2))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     reply = msg.answer.call_args[0][0]
     assert "Telegram bot" in reply
     assert "#bot" in reply
@@ -91,7 +91,7 @@ async def test_handle_ideas_truncates_long_content() -> None:
     rows = [make_idea_row(long_text, [])]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=1))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     reply = msg.answer.call_args[0][0]
     assert "…" in reply
 
@@ -109,7 +109,7 @@ async def test_handle_ideas_shows_complexity_and_effort() -> None:
     ]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=1))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     reply = msg.answer.call_args[0][0]
     assert "сложная" in reply
     assert "долгосрочно" in reply
@@ -121,7 +121,7 @@ async def test_handle_ideas_shows_total_count() -> None:
     rows = [make_idea_row(f"idea {i}", []) for i in range(10)]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=15))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     reply = msg.answer.call_args[0][0]
     assert "15" in reply
 
@@ -132,7 +132,7 @@ async def test_handle_ideas_no_pagination_for_single_page() -> None:
     rows = [make_idea_row("idea", []) for _ in range(3)]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=3))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     _, kwargs = msg.answer.call_args
     assert kwargs.get("reply_markup") is None
 
@@ -143,7 +143,7 @@ async def test_handle_ideas_shows_next_button_when_more() -> None:
     rows = [make_idea_row(f"idea {i}", []) for i in range(10)]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=0, total=15))
 
-    await handle_ideas_command(msg, idea_service=svc)
+    await handle_ideas_command(msg, idea_service=svc, lang="ru")
     _, kwargs = msg.answer.call_args
     kb = kwargs.get("reply_markup")
     assert kb is not None
@@ -160,7 +160,7 @@ async def test_cb_ideas_page_edits_message() -> None:
     rows = [make_idea_row("idea a", [])]
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=1, total=15))
 
-    await cb_ideas_page(cb, idea_service=svc)
+    await cb_ideas_page(cb, idea_service=svc, lang="ru")
     cb.message.edit_text.assert_awaited_once()
     svc.get_page.assert_awaited_once_with(cb.from_user.id, page=1)
 
@@ -169,7 +169,7 @@ async def test_cb_ideas_page_invalid_data_is_ignored() -> None:
     cb = make_callback("ideas_page:notanint")
     svc = MagicMock(spec=IdeaService)
 
-    await cb_ideas_page(cb, idea_service=svc)
+    await cb_ideas_page(cb, idea_service=svc, lang="ru")
     svc.get_page.assert_not_awaited()
 
 
@@ -181,12 +181,12 @@ async def test_cb_ideas_page_edit_failure_is_silenced() -> None:
     cb.message.edit_text = AsyncMock(side_effect=Exception("Message not modified"))
 
     # Should not raise
-    await cb_ideas_page(cb, idea_service=svc)
+    await cb_ideas_page(cb, idea_service=svc, lang="ru")
 
 
 async def test_cb_ideas_page_no_service_is_safe() -> None:
     cb = make_callback("ideas_page:0")
-    await cb_ideas_page(cb, idea_service=None)
+    await cb_ideas_page(cb, idea_service=None, lang="ru")
     cb.message.edit_text.assert_not_awaited()
 
 
@@ -195,12 +195,12 @@ async def test_cb_ideas_page_no_service_is_safe() -> None:
 
 def test_ideas_keyboard_no_buttons_single_page() -> None:
     page = IdeasPage(rows=[], page=0, total=5)
-    assert _ideas_keyboard(page) is None
+    assert _ideas_keyboard(page, "ru") is None
 
 
 def test_ideas_keyboard_next_only_first_page() -> None:
     page = IdeasPage(rows=[], page=0, total=15)
-    kb = _ideas_keyboard(page)
+    kb = _ideas_keyboard(page, "ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Вперёд" in t for t in texts)
@@ -209,7 +209,7 @@ def test_ideas_keyboard_next_only_first_page() -> None:
 
 def test_ideas_keyboard_prev_only_last_page() -> None:
     page = IdeasPage(rows=[], page=1, total=15)
-    kb = _ideas_keyboard(page)
+    kb = _ideas_keyboard(page, "ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Назад" in t for t in texts)
@@ -218,7 +218,7 @@ def test_ideas_keyboard_prev_only_last_page() -> None:
 
 def test_ideas_keyboard_both_buttons_middle_page() -> None:
     page = IdeasPage(rows=[], page=1, total=30)
-    kb = _ideas_keyboard(page)
+    kb = _ideas_keyboard(page, "ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Назад" in t for t in texts)
@@ -231,7 +231,7 @@ async def test_handle_ideas_page_numbering_on_second_page() -> None:
     svc.get_page = AsyncMock(return_value=IdeasPage(rows=rows, page=1, total=15))
 
     cb = make_callback("ideas_page:1")
-    await cb_ideas_page(cb, idea_service=svc)
+    await cb_ideas_page(cb, idea_service=svc, lang="ru")
 
     reply = cb.message.edit_text.call_args[0][0]
     # Items on page 2 should start numbering from 11

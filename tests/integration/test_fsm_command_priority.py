@@ -26,7 +26,7 @@ async def test_cancel_command_clears_fsm_during_waiting_for_time() -> None:
     msg.from_user = user
     msg.answer = AsyncMock()
 
-    await cmd_cancel(msg, state=state)
+    await cmd_cancel(msg, state=state, lang="ru")
 
     state.clear.assert_awaited_once()
     msg.answer.assert_awaited_once()
@@ -45,7 +45,7 @@ async def test_cancel_command_when_no_active_state() -> None:
     msg.from_user = user
     msg.answer = AsyncMock()
 
-    await cmd_cancel(msg, state=state)
+    await cmd_cancel(msg, state=state, lang="ru")
 
     state.clear.assert_not_awaited()
     msg.answer.assert_awaited_once()

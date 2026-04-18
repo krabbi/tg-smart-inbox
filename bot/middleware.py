@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject
+from aiogram.types import CallbackQuery, Message, TelegramObject, Update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Config
@@ -25,8 +25,23 @@ from bot.services.semantic_search_service import SemanticSearchService
 from bot.services.task_service import TaskService
 from bot.services.time_parser import TimeParser
 from bot.services.transcription_service import TranscriptionService
-from bot.services.user_settings_service import UserSettingsService
+from bot.services.user_settings_service import DEFAULT_LANGUAGE, UserSettingsService
 from bot.services.vision_service import VisionService
+
+
+def _extract_user_id(event: TelegramObject) -> int | None:
+    """Return the Telegram user id from an update/message/callback, or None if absent."""
+    if isinstance(event, Update):
+        if event.message and event.message.from_user:
+            return event.message.from_user.id
+        if event.callback_query and event.callback_query.from_user:
+            return event.callback_query.from_user.id
+        return None
+    if isinstance(event, Message) and event.from_user:
+        return event.from_user.id
+    if isinstance(event, CallbackQuery) and event.from_user:
+        return event.from_user.id
+    return None
 
 
 class DependencyMiddleware(BaseMiddleware):
@@ -79,9 +94,20 @@ class DependencyMiddleware(BaseMiddleware):
                 item_repo=item_repo,
                 idea_repo=idea_repo,
             )
-            data["user_settings_service"] = UserSettingsService(
+            user_settings_service = UserSettingsService(
                 session=session, repo=UserSettingsRepository(session)
             )
+            data["user_settings_service"] = user_settings_service
+
+            # Resolve the caller's language once per update and inject it as ``lang``
+            # so every handler can localize its reply via ``t(key, lang)``. Fall back
+            # to the default language when no user context is available or settings
+            # are missing (e.g. first-time users).
+            user_id = _extract_user_id(event)
+            if user_id is not None:
+                data["lang"] = await user_settings_service.get_language(user_id)
+            else:
+                data["lang"] = DEFAULT_LANGUAGE
 
             # Whisper transcription — only available when Groq key is configured
             if self._config.groq_api_key:

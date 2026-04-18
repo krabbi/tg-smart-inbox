@@ -75,7 +75,7 @@ def make_list_page(items: list, page: int = 0, total: int | None = None) -> List
 
 async def test_cmd_list_no_service_gives_stub() -> None:
     msg = make_message()
-    await cmd_list(msg, list_service=None)
+    await cmd_list(msg, list_service=None, lang="ru")
     assert "скоро" in msg.answer.call_args[0][0]
 
 
@@ -84,7 +84,7 @@ async def test_cmd_list_empty_gives_friendly_message() -> None:
     svc = MagicMock(spec=ListService)
     svc.list_recent = AsyncMock(return_value=make_list_page([], total=0))
 
-    await cmd_list(msg, list_service=svc)
+    await cmd_list(msg, list_service=svc, lang="ru")
     assert "ничего не сохранено" in msg.answer.call_args[0][0].lower()
 
 
@@ -97,7 +97,7 @@ async def test_cmd_list_shows_items() -> None:
         )
     )
 
-    await cmd_list(msg, list_service=svc)
+    await cmd_list(msg, list_service=svc, lang="ru")
     reply = msg.answer.call_args[0][0]
     assert "cool link" in reply
     assert "buy milk" in reply
@@ -112,7 +112,7 @@ async def test_cmd_list_no_nav_buttons_for_single_page() -> None:
         return_value=make_list_page([make_item("x") for _ in range(3)], total=3)
     )
 
-    await cmd_list(msg, list_service=svc)
+    await cmd_list(msg, list_service=svc, lang="ru")
     _, kwargs = msg.answer.call_args
     kb = kwargs.get("reply_markup")
     assert kb is not None
@@ -130,7 +130,7 @@ async def test_cmd_list_shows_next_button_when_more() -> None:
         return_value=make_list_page([make_item(f"item {i}") for i in range(10)], total=15)
     )
 
-    await cmd_list(msg, list_service=svc)
+    await cmd_list(msg, list_service=svc, lang="ru")
     _, kwargs = msg.answer.call_args
     kb = kwargs.get("reply_markup")
     assert kb is not None
@@ -148,7 +148,7 @@ async def test_cb_list_page_edits_message() -> None:
         return_value=make_list_page([make_item("item a")], page=1, total=15)
     )
 
-    await cb_list_page(cb, list_service=svc)
+    await cb_list_page(cb, list_service=svc, lang="ru")
     cb.message.edit_text.assert_awaited_once()
     svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=1, item_type=None)
 
@@ -165,7 +165,7 @@ async def test_cb_list_page_with_type_filter() -> None:
         )
     )
 
-    await cb_list_page(cb, list_service=svc)
+    await cb_list_page(cb, list_service=svc, lang="ru")
     svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=ItemType.link)
 
 
@@ -176,7 +176,7 @@ async def test_cb_list_page_without_type_suffix() -> None:
         return_value=make_list_page([make_item("item a")], page=1, total=15)
     )
 
-    await cb_list_page(cb, list_service=svc)
+    await cb_list_page(cb, list_service=svc, lang="ru")
     svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=1, item_type=None)
 
 
@@ -184,7 +184,7 @@ async def test_cb_list_page_invalid_data_is_ignored() -> None:
     cb = make_callback("list_page:notanint")
     svc = MagicMock(spec=ListService)
 
-    await cb_list_page(cb, list_service=svc)
+    await cb_list_page(cb, list_service=svc, lang="ru")
     svc.list_recent.assert_not_awaited()
 
 
@@ -195,7 +195,7 @@ async def test_cb_list_page_edit_failure_is_silenced() -> None:
     cb.message.edit_text = AsyncMock(side_effect=Exception("Message not modified"))
 
     # Should not raise
-    await cb_list_page(cb, list_service=svc)
+    await cb_list_page(cb, list_service=svc, lang="ru")
 
 
 # ── /reminders ────────────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ async def test_cb_list_page_edit_failure_is_silenced() -> None:
 
 async def test_cmd_reminders_no_service_gives_stub() -> None:
     msg = make_message()
-    await cmd_reminders(msg, reminder_service=None)
+    await cmd_reminders(msg, reminder_service=None, lang="ru")
     assert "скоро" in msg.answer.call_args[0][0]
 
 
@@ -212,7 +212,7 @@ async def test_cmd_reminders_empty() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.get_upcoming = AsyncMock(return_value=[])
 
-    await cmd_reminders(msg, reminder_service=svc)
+    await cmd_reminders(msg, reminder_service=svc, lang="ru")
     text = msg.answer.call_args[0][0]
     assert "нет" in text.lower()
     # Empty list should also include a hint how to create the first reminder.
@@ -227,7 +227,7 @@ async def test_cmd_reminders_shows_list() -> None:
         return_value=[make_reminder("buy milk"), make_reminder("call dentist")]
     )
 
-    await cmd_reminders(msg, reminder_service=svc)
+    await cmd_reminders(msg, reminder_service=svc, lang="ru")
     assert msg.answer.await_count == 2
     calls = [c[0][0] for c in msg.answer.call_args_list]
     assert any("buy milk" in c for c in calls)
@@ -246,7 +246,7 @@ async def test_cmd_reminders_uses_user_timezone() -> None:
     settings_svc = MagicMock(spec=UserSettingsService)
     settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
 
-    await cmd_reminders(msg, reminder_service=svc, user_settings_service=settings_svc)
+    await cmd_reminders(msg, reminder_service=svc, user_settings_service=settings_svc, lang="ru")
 
     settings_svc.get_timezone.assert_awaited_once_with(42)
     text = msg.answer.call_args[0][0]
@@ -262,7 +262,7 @@ async def test_cmd_reminders_falls_back_to_utc_without_settings_service() -> Non
         return_value=[make_reminder("buy milk", remind_at=datetime(2026, 4, 7, 10, 0, tzinfo=UTC))]
     )
 
-    await cmd_reminders(msg, reminder_service=svc, user_settings_service=None)
+    await cmd_reminders(msg, reminder_service=svc, user_settings_service=None, lang="ru")
 
     text = msg.answer.call_args[0][0]
     assert "07.04.2026 10:00 UTC" in text
@@ -277,7 +277,7 @@ async def test_cb_cancel_reminder_cancels_and_edits() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.cancel_for_user = AsyncMock(return_value=True)
 
-    await cb_cancel_reminder(cb, reminder_service=svc)
+    await cb_cancel_reminder(cb, reminder_service=svc, lang="ru")
     svc.cancel_for_user.assert_awaited_once_with(rid, cb.from_user.id)
     cb.message.edit_text.assert_awaited_once()
     assert "отменено" in cb.message.edit_text.call_args[0][0].lower()
@@ -289,7 +289,7 @@ async def test_cb_cancel_reminder_not_owned_does_not_edit() -> None:
     svc = MagicMock(spec=ReminderService)
     svc.cancel_for_user = AsyncMock(return_value=False)
 
-    await cb_cancel_reminder(cb, reminder_service=svc)
+    await cb_cancel_reminder(cb, reminder_service=svc, lang="ru")
     cb.message.edit_text.assert_not_awaited()
 
 
@@ -297,7 +297,7 @@ async def test_cb_cancel_reminder_invalid_uuid_is_safe() -> None:
     cb = make_callback("cancel_reminder:not-a-uuid")
     svc = MagicMock(spec=ReminderService)
 
-    await cb_cancel_reminder(cb, reminder_service=svc)
+    await cb_cancel_reminder(cb, reminder_service=svc, lang="ru")
     svc.cancel_for_user.assert_not_awaited()
 
 
@@ -309,7 +309,7 @@ async def test_cb_cancel_reminder_edit_failure_is_silenced() -> None:
     cb.message.edit_text = AsyncMock(side_effect=Exception("Message deleted"))
 
     # Should not raise
-    await cb_cancel_reminder(cb, reminder_service=svc)
+    await cb_cancel_reminder(cb, reminder_service=svc, lang="ru")
 
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
@@ -321,7 +321,7 @@ async def test_cmd_cancel_with_active_state_clears_and_confirms() -> None:
     state.get_state = AsyncMock(return_value="reminders:waiting_for_time")
     state.clear = AsyncMock()
 
-    await cmd_cancel(msg, state=state)
+    await cmd_cancel(msg, state=state, lang="ru")
 
     state.clear.assert_awaited_once()
     assert "Отменено" in msg.answer.call_args[0][0]
@@ -333,7 +333,7 @@ async def test_cmd_cancel_with_no_active_state_notifies_user() -> None:
     state.get_state = AsyncMock(return_value=None)
     state.clear = AsyncMock()
 
-    await cmd_cancel(msg, state=state)
+    await cmd_cancel(msg, state=state, lang="ru")
 
     state.clear.assert_not_awaited()
     assert "Нет активного" in msg.answer.call_args[0][0]
@@ -344,7 +344,7 @@ async def test_cmd_cancel_with_no_active_state_notifies_user() -> None:
 
 def test_list_keyboard_filter_buttons_always_present() -> None:
     page = make_list_page([MagicMock()] * 5, page=0, total=5)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     filter_texts = [b.text for b in kb.inline_keyboard[0]]
     assert any("Все" in t for t in filter_texts)
@@ -356,7 +356,7 @@ def test_list_keyboard_filter_buttons_always_present() -> None:
 
 def test_list_keyboard_no_nav_single_page() -> None:
     page = make_list_page([MagicMock()] * 5, page=0, total=5)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     # Only filter row, no nav row
     assert len(kb.inline_keyboard) == 1
@@ -364,7 +364,7 @@ def test_list_keyboard_no_nav_single_page() -> None:
 
 def test_list_keyboard_next_only_first_page() -> None:
     page = make_list_page([MagicMock()] * 10, page=0, total=15)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     nav_row = kb.inline_keyboard[1]
     texts = [b.text for b in nav_row]
@@ -374,7 +374,7 @@ def test_list_keyboard_next_only_first_page() -> None:
 
 def test_list_keyboard_prev_only_last_page() -> None:
     page = make_list_page([MagicMock()] * 5, page=1, total=15)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     nav_row = kb.inline_keyboard[1]
     texts = [b.text for b in nav_row]
@@ -384,7 +384,7 @@ def test_list_keyboard_prev_only_last_page() -> None:
 
 def test_list_keyboard_both_buttons_middle_page() -> None:
     page = make_list_page([MagicMock()] * 10, page=1, total=30)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     nav_row = kb.inline_keyboard[1]
     texts = [b.text for b in nav_row]
@@ -394,7 +394,7 @@ def test_list_keyboard_both_buttons_middle_page() -> None:
 
 def test_list_keyboard_active_filter_is_highlighted() -> None:
     page = ListPage(items=[], page=0, total=5, item_type=ItemType.link)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     filter_texts = [b.text for b in kb.inline_keyboard[0]]
     assert any("[" in t and "Ссылки" in t for t in filter_texts)
@@ -402,7 +402,7 @@ def test_list_keyboard_active_filter_is_highlighted() -> None:
 
 def test_list_keyboard_nav_buttons_include_type_suffix() -> None:
     page = ListPage(items=[MagicMock()] * 10, page=0, total=15, item_type=ItemType.task)
-    kb = _list_keyboard(page)
+    kb = _list_keyboard(page, "ru")
     assert kb is not None
     nav_row = kb.inline_keyboard[1]
     assert any("task" in b.callback_data for b in nav_row)
@@ -441,7 +441,7 @@ async def test_cb_list_filter_resets_to_page_zero() -> None:
         )
     )
 
-    await cb_list_filter(cb, list_service=svc)
+    await cb_list_filter(cb, list_service=svc, lang="ru")
     svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=ItemType.link)
     cb.message.edit_text.assert_awaited_once()
 
@@ -451,13 +451,13 @@ async def test_cb_list_filter_all_passes_none() -> None:
     svc = MagicMock(spec=ListService)
     svc.list_recent = AsyncMock(return_value=make_list_page([make_item("x")], total=1))
 
-    await cb_list_filter(cb, list_service=svc)
+    await cb_list_filter(cb, list_service=svc, lang="ru")
     svc.list_recent.assert_awaited_once_with(cb.from_user.id, page=0, item_type=None)
 
 
 async def test_cb_list_filter_no_service_is_safe() -> None:
     cb = make_callback("list_filter:link")
-    await cb_list_filter(cb, list_service=None)
+    await cb_list_filter(cb, list_service=None, lang="ru")
     cb.message.edit_text.assert_not_awaited()
 
 
@@ -470,4 +470,4 @@ async def test_cb_list_filter_edit_failure_is_silenced() -> None:
     cb.message.edit_text = AsyncMock(side_effect=Exception("Message not modified"))
 
     # Should not raise
-    await cb_list_filter(cb, list_service=svc)
+    await cb_list_filter(cb, list_service=svc, lang="ru")

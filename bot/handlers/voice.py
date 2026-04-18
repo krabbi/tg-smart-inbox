@@ -7,10 +7,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.exceptions import TranscriptionError
-from bot.handlers.ideas import _COMPLEXITY_LABEL, _EFFORT_LABEL
-from bot.handlers.links import EMBEDDING_UNAVAILABLE_NOTICE, handle_link_message
-from bot.handlers.messages import _handle_task_with_time
+from bot.handlers.links import handle_link_message
+from bot.handlers.messages import _format_idea_reply, _handle_task_with_time
 from bot.handlers.reminders import task_remind_keyboard
+from bot.i18n import t
 from bot.services.classifier import ClassifierService, MessageType
 from bot.services.idea_service import IdeaService
 from bot.services.link_service import LinkService
@@ -40,13 +40,11 @@ async def handle_voice(
     time_parser: TimeParser | None = None,
     reminder_service: ReminderService | None = None,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Download voice message, transcribe it, then route through the classifier pipeline."""
     if transcription_service is None:
-        await message.answer(
-            "Голосовые сообщения не настроены.\n"
-            "Добавь <code>GROQ_API_KEY</code> в конфигурацию (бесплатно: console.groq.com)."
-        )
+        await message.answer(t("voice_not_configured", lang))
         return
 
     voice = message.voice  # type: ignore[union-attr]
@@ -62,11 +60,12 @@ async def handle_voice(
             message.from_user and message.from_user.id,
             exc,
         )
-        # exc carries a user-facing message prepared by TranscriptionService
-        await message.answer(str(exc))
+        # ``exc`` carries an i18n key prepared by TranscriptionService — translate
+        # it against the caller's language so the user sees a localized message.
+        await message.answer(t(str(exc), lang))
         return
 
-    await message.answer(f"🎤 Распознал: <i>«{transcript}»</i>")
+    await message.answer(t("voice_transcribed", lang, text=transcript))
 
     if classifier is None:
         return
@@ -76,34 +75,23 @@ async def handle_voice(
 
     if msg_type == MessageType.LINK and link_service is not None:
         url = extract_url(transcript) or transcript
-        await handle_link_message(message, url, link_service)
+        await handle_link_message(message, url, link_service, lang)
     elif msg_type == MessageType.IDEA and idea_service is not None:
         try:
             saved = await idea_service.save_idea(transcript, user_id)
         except Exception:
             logger.exception("Idea save failed for user %s", user_id)
-            await message.answer("Не удалось сохранить идею. Попробуй ещё раз.")
+            await message.answer(t("idea_save_failed", lang))
             return
-        reply = "💡 Идея сохранена!"
-        meta = []
-        if saved.idea.complexity:
-            meta.append(_COMPLEXITY_LABEL[saved.idea.complexity])
-        if saved.idea.effort:
-            meta.append(_EFFORT_LABEL[saved.idea.effort])
-        if meta:
-            reply += f" ({', '.join(meta)})"
-        tags_str = " ".join(f"#{t}" for t in saved.idea.tags) if saved.idea.tags else ""
-        if tags_str:
-            reply += f"\n{tags_str}"
-        await message.answer(reply)
+        await message.answer(_format_idea_reply(saved, lang))
         if not saved.indexed:
-            await message.answer(EMBEDDING_UNAVAILABLE_NOTICE)
+            await message.answer(t("embedding_unavailable_notice", lang))
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(transcript, user_id)
         except Exception:
             logger.exception("Task save failed for user %s", user_id)
-            await message.answer("Не удалось сохранить задачу. Попробуй ещё раз.")
+            await message.answer(t("task_save_failed", lang))
             return
         try:
             if has_time_expression(transcript):
@@ -117,23 +105,24 @@ async def handle_voice(
                     state=state,
                     time_parser=time_parser,
                     reminder_service=reminder_service,
+                    lang=lang,
                     user_tz=user_tz,
                 )
             else:
                 await message.answer(
-                    "✅ Задача сохранена!",
-                    reply_markup=task_remind_keyboard(str(saved.item.id)),
+                    t("task_saved", lang),
+                    reply_markup=task_remind_keyboard(str(saved.item.id), lang),
                 )
         except Exception:
             logger.exception("Failed to handle task reminder for user %s", user_id)
-            await message.answer("Задача сохранена, но не удалось запустить диалог напоминания.")
+            await message.answer(t("task_reminder_dialog_failed", lang))
     elif msg_type == MessageType.NOTE and note_service is not None:
         try:
             await note_service.save(transcript, user_id)
         except Exception:
             logger.exception("Note save failed for user %s", user_id)
-            await message.answer("Не удалось сохранить заметку. Попробуй ещё раз.")
+            await message.answer(t("note_save_failed", lang))
             return
-        await message.answer("📝 Заметка сохранена!")
+        await message.answer(t("note_saved", lang))
     else:
-        await message.answer("Голосовое сообщение сохранено!")
+        await message.answer(t("voice_fallback_saved", lang))

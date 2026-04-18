@@ -13,6 +13,7 @@ from aiogram.types import (
 
 from bot.config import Config
 from bot.handlers.timezone_setup import start_timezone_setup
+from bot.i18n import t
 from bot.models.item import ItemType
 from bot.services.list_service import ListPage, ListService
 from bot.services.reminder_service import ReminderService
@@ -31,89 +32,38 @@ _TYPE_EMOJI = {
     ItemType.idea: "💡",
 }
 
-WELCOME_TEXT = (
-    "Привет! Я твой умный инбокс.\n\n"
-    "Просто пришли мне сообщение — я автоматически определю тип и сохраню:\n"
-    "• <b>Ссылку</b> — сохраню и предложу саммари\n"
-    "• <b>Задачу</b> — сохраню и предложу напоминание\n"
-    "• <b>Идею</b> — сохраню с тегами и оценкой сложности\n"
-    "• <b>Заметку</b> — просто сохраню на память\n\n"
-    "<b>Команды:</b>\n"
-    "/list — последние записи\n"
-    "/search — поиск по сохранённому\n"
-    "/reminders — предстоящие напоминания\n"
-    "/ideas — банк идей\n"
-    "/config — настройки (например, часовой пояс)\n"
-    "/help — подробная справка\n"
-    "/cancel — отмена текущего действия"
-)
 
-_HELP_KEYBOARD = InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text="Подробнее", callback_data="help")]]
-)
+def _help_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """Build the inline 'More' button shown under the welcome message."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=t("help_button_more", lang), callback_data="help")]
+        ]
+    )
 
 
-def _build_help_text(config: Config) -> str:
+def _build_help_text(config: Config, lang: str) -> str:
     """Build the detailed help message, hiding unconfigured optional features."""
-    sections = [
-        "<b>Подробная справка</b>\n",
-        (
-            "<b>Типы контента</b>\n"
-            "Отправь любое сообщение — бот определит тип автоматически:\n\n"
-            "🔗 <b>Ссылка</b> — отправь URL, например:\n"
-            "<code>https://example.com/interesting-article</code>\n"
-            "Бот сохранит и предложит кнопки: Саммари, Сохранить, Напомнить.\n\n"
-            "✅ <b>Задача</b> — напиши что нужно сделать, например:\n"
-            "<code>купить молоко завтра</code>\n"
-            "Бот предложит создать напоминание на нужное время.\n\n"
-            "💡 <b>Идея</b> — напиши идею или концепцию, например:\n"
-            "<code>а что если сделать бота для учёта расходов</code>\n"
-            "Бот сохранит с тегами и оценкой сложности.\n"
-            "Напиши <code>что поделать?</code> — бот предложит идею из банка.\n\n"
-            "📝 <b>Заметка</b> — любой другой текст сохранится как заметка."
-        ),
-    ]
+    sections = [t("help_title", lang), t("help_content_types", lang)]
 
     if config.groq_api_key:
-        sections.append(
-            "🎤 <b>Голосовые сообщения</b>\n"
-            "Отправь голосовое — бот расшифрует и обработает как текст."
-        )
+        sections.append(t("help_voice", lang))
 
     if config.google_drive_folder_id:
-        sections.append(
-            "🖼️ <b>Фото и файлы</b>\nОтправь фото или документ — бот загрузит в Google Drive."
-        )
+        sections.append(t("help_media", lang))
 
-    sections.append(
-        "<b>Напоминания</b>\n"
-        "Когда напоминание сработает, появятся кнопки:\n"
-        "⏰ +1ч — отложить на час\n"
-        "🌙 +1д — отложить на день\n"
-        "✅ Принято — отметить выполненным\n"
-        "Если не нажать кнопку — бот напомнит повторно через 5 минут."
-    )
-
-    sections.append(
-        "<b>Команды</b>\n"
-        "/list — последние 10 записей с пагинацией\n"
-        "/search — поиск по сохранённому (обычный или умный AI)\n"
-        "/reminders — список предстоящих напоминаний\n"
-        "/ideas — банк идей с тегами и сложностью\n"
-        "/config — настройки (часовой пояс и т.д.)\n"
-        "/help — эта справка\n"
-        "/cancel — отмена текущего действия"
-    )
+    sections.append(t("help_reminders", lang))
+    sections.append(t("help_commands", lang))
 
     return "\n\n".join(sections)
 
 
-_TYPE_FILTER_LABEL = {
-    None: "Все",
-    ItemType.link: "🔗 Ссылки",
-    ItemType.task: "✅ Задачи",
-    ItemType.idea: "💡 Идеи",
-    ItemType.note: "📝 Заметки",
+_TYPE_FILTER_LABEL_KEY = {
+    None: "list_filter_all",
+    ItemType.link: "list_filter_links",
+    ItemType.task: "list_filter_tasks",
+    ItemType.idea: "list_filter_ideas",
+    ItemType.note: "list_filter_notes",
 }
 
 _TYPE_FILTER_ORDER: list[ItemType | None] = [
@@ -130,12 +80,12 @@ def _type_suffix(item_type: ItemType | None) -> str:
     return item_type.value if item_type else "all"
 
 
-def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup:
+def _list_keyboard(list_page: ListPage, lang: str) -> InlineKeyboardMarkup:
     """Build filter + prev/next pagination keyboard."""
     # Filter row
     filter_buttons = []
     for ft in _TYPE_FILTER_ORDER:
-        label = _TYPE_FILTER_LABEL[ft]
+        label = t(_TYPE_FILTER_LABEL_KEY[ft], lang)
         if ft == list_page.item_type:
             label = f"[{label}]"
         cb_data = f"list_filter:{_type_suffix(ft)}"
@@ -149,14 +99,16 @@ def _list_keyboard(list_page: ListPage) -> InlineKeyboardMarkup:
         suffix = _type_suffix(list_page.item_type)
         nav_buttons.append(
             InlineKeyboardButton(
-                text="← Назад", callback_data=f"list_page:{list_page.page - 1}:{suffix}"
+                text=t("pagination_prev", lang),
+                callback_data=f"list_page:{list_page.page - 1}:{suffix}",
             )
         )
     if list_page.has_next:
         suffix = _type_suffix(list_page.item_type)
         nav_buttons.append(
             InlineKeyboardButton(
-                text="Вперёд →", callback_data=f"list_page:{list_page.page + 1}:{suffix}"
+                text=t("pagination_next", lang),
+                callback_data=f"list_page:{list_page.page + 1}:{suffix}",
             )
         )
     if nav_buttons:
@@ -175,20 +127,20 @@ def _parse_type_suffix(suffix: str) -> ItemType | None:
         return None
 
 
-def _format_list_page(list_page: ListPage) -> str:
+def _format_list_page(list_page: ListPage, lang: str) -> str:
     """Format a page of items as a text message."""
     if list_page.item_type is not None:
-        type_label = _TYPE_FILTER_LABEL.get(list_page.item_type, "")
-        header = f"📋 <b>{type_label}</b> (стр. {list_page.page + 1}):\n"
+        type_label = t(_TYPE_FILTER_LABEL_KEY[list_page.item_type], lang)
+        header = t("list_header_filtered", lang, label=type_label, page=list_page.page + 1)
     else:
-        header = f"📋 <b>Последние записи</b> (стр. {list_page.page + 1}):\n"
+        header = t("list_header_all", lang, page=list_page.page + 1)
     lines = [header]
     for item in list_page.items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
         snippet = item.content[:60] + ("…" if len(item.content) > 60 else "")
         date_str = item.created_at.strftime("%d.%m.%Y")
         lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
-    lines.append(f"\n<i>Всего: {list_page.total}</i>")
+    lines.append(t("list_total", lang, total=list_page.total))
     return "\n".join(lines)
 
 
@@ -197,6 +149,7 @@ async def cmd_start(
     message: Message,
     state: FSMContext,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle /start — run timezone setup on first run, else show the welcome message."""
     user_id = message.from_user.id if message.from_user else 0
@@ -209,66 +162,69 @@ async def cmd_start(
     if user_settings_service is not None and user_id:
         has_tz = await user_settings_service.has_timezone(user_id)
         if not has_tz:
-            await start_timezone_setup(message, state)
+            await start_timezone_setup(message, state, lang)
             return
 
-    await message.answer(WELCOME_TEXT, reply_markup=_HELP_KEYBOARD)
+    await message.answer(t("welcome", lang), reply_markup=_help_keyboard(lang))
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message, config: Config | None = None) -> None:
+async def cmd_help(message: Message, config: Config | None = None, lang: str = "en") -> None:
     """Show detailed help message with all features and examples."""
     if config is None:
-        await message.answer(WELCOME_TEXT, reply_markup=_HELP_KEYBOARD)
+        await message.answer(t("welcome", lang), reply_markup=_help_keyboard(lang))
         return
-    await message.answer(_build_help_text(config))
+    await message.answer(_build_help_text(config, lang))
 
 
 @router.callback_query(F.data == "help")
-async def cb_help(callback: CallbackQuery, config: Config | None = None) -> None:
+async def cb_help(
+    callback: CallbackQuery,
+    config: Config | None = None,
+    lang: str = "en",
+) -> None:
     """Show detailed help when the inline button is pressed."""
     await callback.answer()
     if callback.message is None:
         return
     if config is None:
-        await callback.message.answer(WELCOME_TEXT)
+        await callback.message.answer(t("welcome", lang))
         return
-    await callback.message.answer(_build_help_text(config))
+    await callback.message.answer(_build_help_text(config, lang))
 
 
 @router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext) -> None:
+async def cmd_cancel(message: Message, state: FSMContext, lang: str = "en") -> None:
     """Cancel any active FSM dialog (e.g. reminder time input)."""
     current = await state.get_state()
     if current is None:
-        await message.answer("Нет активного действия для отмены.")
+        await message.answer(t("cancel_nothing_to_cancel", lang))
         return
     await state.clear()
-    await message.answer("Отменено.")
+    await message.answer(t("cancel_done", lang))
 
 
 @router.message(Command("list"))
 async def cmd_list(
     message: Message,
     list_service: ListService | None = None,
+    lang: str = "en",
 ) -> None:
     """Show the last 10 items for the user with pagination and type filter."""
     if list_service is None:
         logger.warning("list_service not injected — DI misconfiguration")
-        await message.answer("Команда /list скоро будет доступна.")
+        await message.answer(t("list_command_unavailable", lang))
         return
 
     user_id = message.from_user.id if message.from_user else 0
     list_page = await list_service.list_recent(user_id, page=0)
 
     if list_page.total == 0:
-        await message.answer(
-            "У тебя пока ничего не сохранено.\nПришли ссылку, задачу, идею или фото — я запомню!"
-        )
+        await message.answer(t("list_empty", lang))
         return
 
-    reply = _format_list_page(list_page)
-    kb = _list_keyboard(list_page)
+    reply = _format_list_page(list_page, lang)
+    kb = _list_keyboard(list_page, lang)
     await message.answer(reply, reply_markup=kb)
 
 
@@ -276,6 +232,7 @@ async def cmd_list(
 async def cb_list_page(
     callback: CallbackQuery,
     list_service: ListService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle pagination for /list."""
     await callback.answer()
@@ -293,8 +250,8 @@ async def cb_list_page(
 
     user_id = callback.from_user.id
     list_page = await list_service.list_recent(user_id, page=page, item_type=item_type)
-    reply = _format_list_page(list_page)
-    kb = _list_keyboard(list_page)
+    reply = _format_list_page(list_page, lang)
+    kb = _list_keyboard(list_page, lang)
     try:
         await callback.message.edit_text(reply, reply_markup=kb)
     except Exception:
@@ -305,6 +262,7 @@ async def cb_list_page(
 async def cb_list_filter(
     callback: CallbackQuery,
     list_service: ListService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle type filter selection for /list."""
     await callback.answer()
@@ -316,8 +274,8 @@ async def cb_list_filter(
 
     user_id = callback.from_user.id
     list_page = await list_service.list_recent(user_id, page=0, item_type=item_type)
-    reply = _format_list_page(list_page)
-    kb = _list_keyboard(list_page)
+    reply = _format_list_page(list_page, lang)
+    kb = _list_keyboard(list_page, lang)
     try:
         await callback.message.edit_text(reply, reply_markup=kb)
     except Exception:
@@ -329,21 +287,19 @@ async def cmd_reminders(
     message: Message,
     reminder_service: ReminderService | None = None,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """List upcoming reminders with cancel buttons."""
     if reminder_service is None:
         logger.warning("reminder_service not injected — DI misconfiguration")
-        await message.answer("Команда /reminders скоро будет доступна.")
+        await message.answer(t("reminders_command_unavailable", lang))
         return
 
     user_id = message.from_user.id if message.from_user else 0
     reminders = await reminder_service.get_upcoming(user_id)
 
     if not reminders:
-        await message.answer(
-            "У тебя нет предстоящих напоминаний. "
-            "Отправь задачу и выбери время, чтобы создать напоминание."
-        )
+        await message.answer(t("reminders_empty", lang))
         return
 
     user_tz = "UTC"
@@ -353,12 +309,12 @@ async def cmd_reminders(
     for reminder in reminders:
         item = reminder.item
         due = format_remind_at(reminder.remind_at, user_tz)
-        text = f"⏰ <b>{item.content[:100]}</b>\n🗓 {due}"
+        text = t("reminders_entry", lang, content=item.content[:100], due=due)
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="❌ Отменить",
+                        text=t("reminder_btn_cancel", lang),
                         callback_data=f"cancel_reminder:{reminder.id}",
                     )
                 ]
@@ -371,6 +327,7 @@ async def cmd_reminders(
 async def cb_cancel_reminder(
     callback: CallbackQuery,
     reminder_service: ReminderService | None = None,
+    lang: str = "en",
 ) -> None:
     """Cancel a reminder — ownership is verified before cancelling."""
     if reminder_service is None or callback.message is None:
@@ -381,19 +338,19 @@ async def cb_cancel_reminder(
         reminder_id = uuid.UUID(callback.data.split(":")[1])  # type: ignore[union-attr]
     except (ValueError, IndexError):
         logger.warning("Invalid cancel_reminder callback data: %s", callback.data)
-        await callback.answer("Неверный запрос.")
+        await callback.answer(t("reminder_cancel_invalid", lang))
         return
 
     cancelled = await reminder_service.cancel_for_user(reminder_id, callback.from_user.id)
     if not cancelled:
-        await callback.answer("Напоминание не найдено или уже отменено.")
+        await callback.answer(t("reminder_cancel_not_found", lang))
         return
 
     await callback.answer()
 
     try:
         await callback.message.edit_text(
-            callback.message.text + "\n\n<i>✅ Напоминание отменено</i>",  # type: ignore[operator]
+            callback.message.text + f"\n\n<i>{t('reminder_cancelled_marker', lang)}</i>",  # type: ignore[operator]
             reply_markup=None,
         )
     except Exception:

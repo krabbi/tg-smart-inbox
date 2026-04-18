@@ -110,11 +110,11 @@ def test_relevance_bar_maps_score_to_dots() -> None:
 
 
 def test_pagination_keyboard_none_on_first_page_without_next() -> None:
-    assert _pagination_keyboard(page=0, has_next=False) is None
+    assert _pagination_keyboard(page=0, has_next=False, lang="ru") is None
 
 
 def test_pagination_keyboard_shows_only_next_on_first_page() -> None:
-    kb = _pagination_keyboard(page=0, has_next=True)
+    kb = _pagination_keyboard(page=0, has_next=True, lang="ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Вперёд" in t for t in texts)
@@ -122,7 +122,7 @@ def test_pagination_keyboard_shows_only_next_on_first_page() -> None:
 
 
 def test_pagination_keyboard_shows_only_prev_on_last_page() -> None:
-    kb = _pagination_keyboard(page=2, has_next=False)
+    kb = _pagination_keyboard(page=2, has_next=False, lang="ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Назад" in t for t in texts)
@@ -130,7 +130,7 @@ def test_pagination_keyboard_shows_only_prev_on_last_page() -> None:
 
 
 def test_pagination_keyboard_shows_both_on_middle_page() -> None:
-    kb = _pagination_keyboard(page=1, has_next=True)
+    kb = _pagination_keyboard(page=1, has_next=True, lang="ru")
     assert kb is not None
     texts = [b.text for row in kb.inline_keyboard for b in row]
     assert any("Назад" in t for t in texts)
@@ -138,7 +138,7 @@ def test_pagination_keyboard_shows_both_on_middle_page() -> None:
 
 
 def test_pagination_keyboard_carries_correct_callback_data() -> None:
-    kb = _pagination_keyboard(page=1, has_next=True)
+    kb = _pagination_keyboard(page=1, has_next=True, lang="ru")
     assert kb is not None
     cbs = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "search_page:0" in cbs
@@ -150,7 +150,7 @@ def test_pagination_keyboard_carries_correct_callback_data() -> None:
 
 def test_format_plain_results_escapes_query_and_content() -> None:
     items = [make_item(content="<script>alert(1)</script>", item_type=ItemType.note)]
-    text = _format_plain_results(items, query="<b>q</b>", page=0)
+    text = _format_plain_results(items, query="<b>q</b>", page=0, lang="ru")
 
     assert "&lt;script&gt;" in text
     assert "&lt;b&gt;q&lt;/b&gt;" in text
@@ -160,7 +160,7 @@ def test_format_plain_results_escapes_query_and_content() -> None:
 
 def test_format_plain_results_shows_type_emoji_and_date() -> None:
     items = [make_item(content="buy milk", item_type=ItemType.task)]
-    text = _format_plain_results(items, query="milk", page=0)
+    text = _format_plain_results(items, query="milk", page=0, lang="ru")
 
     assert "✅" in text
     assert "buy milk" in text
@@ -170,7 +170,7 @@ def test_format_plain_results_shows_type_emoji_and_date() -> None:
 def test_format_plain_results_truncates_long_content() -> None:
     long_content = "x" * 200
     items = [make_item(content=long_content)]
-    text = _format_plain_results(items, query="x", page=0)
+    text = _format_plain_results(items, query="x", page=0, lang="ru")
 
     # Max 80 chars per snippet before ellipsis.
     assert "x" * 80 + "…" in text
@@ -183,7 +183,7 @@ def test_format_semantic_results_shows_relevance_bar_and_type_label() -> None:
     results = [
         make_search_result(score=0.92, result_type="idea", title="Идея", preview_text="текст")
     ]
-    text = _format_semantic_results(results, query="ai", page=0)
+    text = _format_semantic_results(results, query="ai", page=0, lang="ru")
 
     assert "●●●●●" in text
     assert "[идея]" in text
@@ -198,7 +198,7 @@ def test_format_semantic_results_item_uses_generic_label() -> None:
             score=0.5, result_type="item", title="Some note", preview_text="note body"
         )
     ]
-    text = _format_semantic_results(results, query="q", page=0)
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
 
     assert "[запись]" in text
     assert "●●○○○" in text
@@ -206,7 +206,7 @@ def test_format_semantic_results_item_uses_generic_label() -> None:
 
 def test_format_semantic_results_skips_preview_when_equal_to_title() -> None:
     results = [make_search_result(score=0.5, result_type="item", title="same", preview_text="same")]
-    text = _format_semantic_results(results, query="q", page=0)
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
 
     # Expect exactly one "same" — duplicated preview should be omitted.
     assert text.count("same") == 1
@@ -221,7 +221,7 @@ def test_format_semantic_results_escapes_html_in_title_and_preview() -> None:
             preview_text="<i>preview</i>",
         )
     ]
-    text = _format_semantic_results(results, query="<q>", page=0)
+    text = _format_semantic_results(results, query="<q>", page=0, lang="ru")
 
     assert "&lt;b&gt;" in text
     assert "&lt;i&gt;" in text
@@ -230,7 +230,7 @@ def test_format_semantic_results_escapes_html_in_title_and_preview() -> None:
 
 def test_format_semantic_results_shows_page_number() -> None:
     results = [make_search_result(score=0.5, title="t", preview_text="p")]
-    text = _format_semantic_results(results, query="q", page=2)
+    text = _format_semantic_results(results, query="q", page=2, lang="ru")
 
     assert "стр. 3" in text
 
@@ -242,7 +242,7 @@ async def test_cmd_search_enters_choosing_mode() -> None:
     msg = make_message()
     state = make_state()
 
-    await cmd_search(msg, state=state)
+    await cmd_search(msg, state=state, lang="ru")
 
     state.clear.assert_awaited_once()
     state.set_state.assert_awaited_once_with(SearchStates.choosing_mode)
@@ -262,7 +262,7 @@ async def test_cb_pick_mode_plain_advances_to_query_prompt() -> None:
     cb = make_callback("search_mode:plain")
     state = make_state()
 
-    await cb_pick_mode(cb, state=state)
+    await cb_pick_mode(cb, state=state, lang="ru")
 
     state.update_data.assert_awaited_once_with({"search_mode": "plain"})
     state.set_state.assert_awaited_once_with(SearchStates.waiting_query)
@@ -274,7 +274,7 @@ async def test_cb_pick_mode_smart_uses_smart_prompt() -> None:
     cb = make_callback("search_mode:smart")
     state = make_state()
 
-    await cb_pick_mode(cb, state=state)
+    await cb_pick_mode(cb, state=state, lang="ru")
 
     state.update_data.assert_awaited_once_with({"search_mode": "smart"})
     assert "умного" in cb.message.edit_text.call_args[0][0].lower()
@@ -284,7 +284,7 @@ async def test_cb_pick_mode_ignores_unknown_mode() -> None:
     cb = make_callback("search_mode:unknown")
     state = make_state()
 
-    await cb_pick_mode(cb, state=state)
+    await cb_pick_mode(cb, state=state, lang="ru")
 
     state.update_data.assert_not_awaited()
     state.set_state.assert_not_awaited()
@@ -296,7 +296,7 @@ async def test_cb_pick_mode_falls_back_to_answer_on_edit_failure() -> None:
     cb.message.edit_text = AsyncMock(side_effect=Exception("not modified"))
     state = make_state()
 
-    await cb_pick_mode(cb, state=state)
+    await cb_pick_mode(cb, state=state, lang="ru")
 
     cb.message.answer.assert_awaited_once()
 
@@ -310,7 +310,9 @@ async def test_receive_search_query_plain_shows_results() -> None:
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[make_item("buy milk", ItemType.task)])
 
-    await receive_search_query(msg, state=state, list_service=svc, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=svc, semantic_search_service=None, lang="ru"
+    )
 
     svc.search.assert_awaited_once_with(1, "milk")
     state.set_state.assert_awaited_with(SearchStates.showing_results)
@@ -326,7 +328,9 @@ async def test_receive_search_query_plain_no_results_stays_in_query_state() -> N
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[])
 
-    await receive_search_query(msg, state=state, list_service=svc, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=svc, semantic_search_service=None, lang="ru"
+    )
 
     # Stays in waiting_query — no transition to showing_results.
     for call in state.set_state.await_args_list:
@@ -340,7 +344,9 @@ async def test_receive_search_query_empty_query_asks_for_text() -> None:
     state = make_state({"search_mode": "plain"})
     svc = MagicMock(spec=ListService)
 
-    await receive_search_query(msg, state=state, list_service=svc, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=svc, semantic_search_service=None, lang="ru"
+    )
 
     svc.search = AsyncMock()  # ensure no search ran
     assert "пустой" in msg.answer.call_args[0][0].lower()
@@ -350,7 +356,9 @@ async def test_receive_search_query_plain_no_service_sends_error() -> None:
     msg = make_message(text="milk")
     state = make_state({"search_mode": "plain"})
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=None, lang="ru"
+    )
 
     assert "временно недоступен" in msg.answer.call_args[0][0].lower()
 
@@ -361,7 +369,9 @@ async def test_receive_search_query_plain_paginates_when_many_results() -> None:
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[make_item(f"item {i}") for i in range(10)])
 
-    await receive_search_query(msg, state=state, list_service=svc, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=svc, semantic_search_service=None, lang="ru"
+    )
 
     _, kwargs = msg.answer.call_args
     kb = kwargs.get("reply_markup")
@@ -381,7 +391,9 @@ async def test_receive_search_query_smart_shows_results() -> None:
         return_value=[make_search_result(score=0.8, title="Build a rocket", preview_text="body")]
     )
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=svc)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=svc, lang="ru"
+    )
 
     svc.search.assert_awaited_once_with(1, "rockets", limit=5, offset=0)
     state.update_data.assert_any_await({"search_query": "rockets"})
@@ -394,7 +406,9 @@ async def test_receive_search_query_smart_no_service_sends_error() -> None:
     msg = make_message(text="rockets")
     state = make_state({"search_mode": "smart"})
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=None)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=None, lang="ru"
+    )
 
     text = msg.answer.call_args[0][0]
     assert "обычный поиск" in text.lower()
@@ -406,7 +420,9 @@ async def test_receive_search_query_smart_unavailable_sends_fallback_message() -
     svc = MagicMock(spec=SemanticSearchService)
     svc.search = AsyncMock(side_effect=SemanticSearchUnavailableError())
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=svc)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=svc, lang="ru"
+    )
 
     assert "обычный поиск" in msg.answer.call_args[0][0].lower()
 
@@ -417,7 +433,9 @@ async def test_receive_search_query_smart_no_hits_shows_try_rephrasing() -> None
     svc = MagicMock(spec=SemanticSearchService)
     svc.search = AsyncMock(return_value=[])
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=svc)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=svc, lang="ru"
+    )
 
     assert "перефраз" in msg.answer.call_args[0][0].lower()
 
@@ -430,7 +448,9 @@ async def test_receive_search_query_smart_paginates_on_full_page() -> None:
         return_value=[make_search_result(score=0.5, title=f"r{i}") for i in range(5)]
     )
 
-    await receive_search_query(msg, state=state, list_service=None, semantic_search_service=svc)
+    await receive_search_query(
+        msg, state=state, list_service=None, semantic_search_service=svc, lang="ru"
+    )
 
     _, kwargs = msg.answer.call_args
     kb = kwargs.get("reply_markup")
@@ -448,7 +468,7 @@ async def test_cb_search_page_edits_message_with_next_page_plain() -> None:
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[make_item(f"item {i}") for i in range(10)])
 
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
     cb.message.edit_text.assert_awaited_once()
     assert "стр. 2" in cb.message.edit_text.call_args[0][0]
@@ -460,7 +480,7 @@ async def test_cb_search_page_uses_semantic_for_smart_mode() -> None:
     svc = MagicMock(spec=SemanticSearchService)
     svc.search = AsyncMock(return_value=[make_search_result(score=0.5)])
 
-    await cb_search_page(cb, state=state, list_service=None, semantic_search_service=svc)
+    await cb_search_page(cb, state=state, list_service=None, semantic_search_service=svc, lang="ru")
 
     svc.search.assert_awaited_once_with(1, "ai", limit=5, offset=5)
     cb.message.edit_text.assert_awaited_once()
@@ -471,7 +491,7 @@ async def test_cb_search_page_invalid_page_is_ignored() -> None:
     state = make_state({"search_mode": "plain", "search_query": "x"})
     svc = MagicMock(spec=ListService)
 
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
     cb.message.edit_text.assert_not_awaited()
 
@@ -482,7 +502,7 @@ async def test_cb_search_page_negative_page_is_ignored() -> None:
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[make_item("x")])
 
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
     cb.message.edit_text.assert_not_awaited()
 
@@ -493,7 +513,7 @@ async def test_cb_search_page_without_stored_query_is_ignored() -> None:
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock()
 
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
     svc.search.assert_not_awaited()
     cb.message.edit_text.assert_not_awaited()
@@ -507,7 +527,7 @@ async def test_cb_search_page_edit_failure_is_silenced() -> None:
     svc.search = AsyncMock(return_value=[make_item("x")])
 
     # Should not raise.
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
 
 async def test_cb_search_page_plain_out_of_range_bounces_to_first_page() -> None:
@@ -517,7 +537,7 @@ async def test_cb_search_page_plain_out_of_range_bounces_to_first_page() -> None
     svc = MagicMock(spec=ListService)
     svc.search = AsyncMock(return_value=[make_item(f"item {i}") for i in range(3)])
 
-    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None)
+    await cb_search_page(cb, state=state, list_service=svc, semantic_search_service=None, lang="ru")
 
     cb.message.edit_text.assert_awaited_once()
     # Shows page 1 (page=0 in zero-indexed state), not "стр. 6".
@@ -530,7 +550,7 @@ async def test_cb_search_page_semantic_unavailable_shows_error_inline() -> None:
     svc = MagicMock(spec=SemanticSearchService)
     svc.search = AsyncMock(side_effect=SemanticSearchUnavailableError())
 
-    await cb_search_page(cb, state=state, list_service=None, semantic_search_service=svc)
+    await cb_search_page(cb, state=state, list_service=None, semantic_search_service=svc, lang="ru")
 
     cb.message.edit_text.assert_awaited_once()
     text, kwargs = cb.message.edit_text.call_args[0][0], cb.message.edit_text.call_args[1]

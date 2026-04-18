@@ -5,14 +5,14 @@ from aiogram.types import CallbackQuery, Message, User
 
 from bot.config import Config
 from bot.handlers.commands import (
-    _HELP_KEYBOARD,
-    WELCOME_TEXT,
     _build_help_text,
+    _help_keyboard,
     cb_help,
     cmd_help,
     cmd_start,
 )
 from bot.handlers.messages import handle_document, handle_photo, handle_text
+from bot.i18n import t
 from bot.services.user_settings_service import UserSettingsService
 
 
@@ -77,7 +77,9 @@ def _make_tz_service(has_tz: bool = True) -> MagicMock:
 async def test_cmd_start_sends_welcome_when_tz_set() -> None:
     message = make_message()
     state = _make_fsm_state()
-    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
+    await cmd_start(
+        message, state=state, user_settings_service=_make_tz_service(has_tz=True), lang="ru"
+    )
     message.answer.assert_awaited_once()
     call_text = message.answer.call_args[0][0]
     assert "привет" in call_text.lower()
@@ -86,7 +88,9 @@ async def test_cmd_start_sends_welcome_when_tz_set() -> None:
 async def test_cmd_start_includes_commands_when_tz_set() -> None:
     message = make_message()
     state = _make_fsm_state()
-    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
+    await cmd_start(
+        message, state=state, user_settings_service=_make_tz_service(has_tz=True), lang="ru"
+    )
     call_text = message.answer.call_args[0][0]
     for cmd in ["/list", "/search", "/reminders", "/ideas", "/help", "/cancel"]:
         assert cmd in call_text, f"{cmd} not found in /start message"
@@ -95,16 +99,18 @@ async def test_cmd_start_includes_commands_when_tz_set() -> None:
 async def test_cmd_start_has_help_button_when_tz_set() -> None:
     message = make_message()
     state = _make_fsm_state()
-    await cmd_start(message, state=state, user_settings_service=_make_tz_service(has_tz=True))
+    await cmd_start(
+        message, state=state, user_settings_service=_make_tz_service(has_tz=True), lang="ru"
+    )
     _, kwargs = message.answer.call_args
-    assert kwargs.get("reply_markup") is _HELP_KEYBOARD
+    assert kwargs.get("reply_markup") == _help_keyboard("ru")
 
 
 async def test_cmd_start_triggers_tz_setup_when_not_set() -> None:
     message = make_message()
     state = _make_fsm_state()
     svc = _make_tz_service(has_tz=False)
-    await cmd_start(message, state=state, user_settings_service=svc)
+    await cmd_start(message, state=state, user_settings_service=svc, lang="ru")
     svc.has_timezone.assert_awaited_once_with(message.from_user.id)
     # FSM entered and continent picker sent
     state.set_state.assert_awaited()
@@ -116,16 +122,16 @@ async def test_cmd_start_triggers_tz_setup_when_not_set() -> None:
 async def test_cmd_start_fallback_when_service_missing() -> None:
     message = make_message()
     state = _make_fsm_state()
-    await cmd_start(message, state=state, user_settings_service=None)
+    await cmd_start(message, state=state, user_settings_service=None, lang="ru")
     # Should still send the welcome message so the bot is not silent.
     message.answer.assert_awaited_once()
-    assert message.answer.call_args[0][0] == WELCOME_TEXT
+    assert message.answer.call_args[0][0] == t("welcome", "ru")
 
 
 async def test_cmd_help_shows_detailed_guide() -> None:
     message = make_message()
     config = _make_config()
-    await cmd_help(message, config=config)
+    await cmd_help(message, config=config, lang="ru")
     message.answer.assert_awaited_once()
     call_text = message.answer.call_args[0][0]
     assert "Подробная справка" in call_text
@@ -135,39 +141,39 @@ async def test_cmd_help_shows_detailed_guide() -> None:
 
 async def test_cmd_help_without_config_falls_back() -> None:
     message = make_message()
-    await cmd_help(message, config=None)
+    await cmd_help(message, config=None, lang="ru")
     message.answer.assert_awaited_once()
     call_text = message.answer.call_args[0][0]
-    assert call_text == WELCOME_TEXT
+    assert call_text == t("welcome", "ru")
 
 
 async def test_build_help_text_hides_voice_when_not_configured() -> None:
     config = _make_config(groq_api_key="")
-    text = _build_help_text(config)
+    text = _build_help_text(config, "ru")
     assert "Голосовые сообщения" not in text
 
 
 async def test_build_help_text_shows_voice_when_configured() -> None:
     config = _make_config(groq_api_key="gsk_fake_key")
-    text = _build_help_text(config)
+    text = _build_help_text(config, "ru")
     assert "Голосовые сообщения" in text
 
 
 async def test_build_help_text_hides_drive_when_not_configured() -> None:
     config = _make_config(google_drive_folder_id="")
-    text = _build_help_text(config)
+    text = _build_help_text(config, "ru")
     assert "Фото и файлы" not in text
 
 
 async def test_build_help_text_shows_drive_when_configured() -> None:
     config = _make_config(google_drive_folder_id="folder123")
-    text = _build_help_text(config)
+    text = _build_help_text(config, "ru")
     assert "Фото и файлы" in text
 
 
 async def test_build_help_text_shows_all_optional_features() -> None:
     config = _make_config(groq_api_key="gsk_key", google_drive_folder_id="folder123")
-    text = _build_help_text(config)
+    text = _build_help_text(config, "ru")
     assert "Голосовые сообщения" in text
     assert "Фото и файлы" in text
 
@@ -175,7 +181,7 @@ async def test_build_help_text_shows_all_optional_features() -> None:
 async def test_cb_help_sends_detailed_guide() -> None:
     cb = _make_callback()
     config = _make_config()
-    await cb_help(cb, config=config)
+    await cb_help(cb, config=config, lang="ru")
     cb.answer.assert_awaited_once()
     cb.message.answer.assert_awaited_once()
     call_text = cb.message.answer.call_args[0][0]
@@ -184,18 +190,18 @@ async def test_cb_help_sends_detailed_guide() -> None:
 
 async def test_cb_help_without_config_falls_back() -> None:
     cb = _make_callback()
-    await cb_help(cb, config=None)
+    await cb_help(cb, config=None, lang="ru")
     cb.answer.assert_awaited_once()
     cb.message.answer.assert_awaited_once()
     call_text = cb.message.answer.call_args[0][0]
-    assert call_text == WELCOME_TEXT
+    assert call_text == t("welcome", "ru")
 
 
 async def test_cb_help_no_message_returns_early() -> None:
     cb = _make_callback()
     cb.message = None
     config = _make_config()
-    await cb_help(cb, config=config)
+    await cb_help(cb, config=config, lang="ru")
     cb.answer.assert_awaited_once()
 
 
@@ -208,7 +214,7 @@ async def test_handle_text_replies() -> None:
     state.update_data = AsyncMock()
     state.set_state = AsyncMock()
     message = make_message(text="Hello bot")
-    await handle_text(message, state=state)
+    await handle_text(message, state=state, lang="ru")
     message.answer.assert_awaited_once()
 
 
@@ -221,20 +227,20 @@ async def test_handle_text_forwarded_replies() -> None:
     state.update_data = AsyncMock()
     state.set_state = AsyncMock()
     message = make_message(text="Forwarded text", forwarded=True)
-    await handle_text(message, state=state)
+    await handle_text(message, state=state, lang="ru")
     message.answer.assert_awaited_once()
 
 
 async def test_handle_photo_replies() -> None:
     message = make_message()
-    await handle_photo(message)
+    await handle_photo(message, lang="ru")
     message.answer.assert_awaited_once()
     assert "Фото" in message.answer.call_args[0][0]
 
 
 async def test_handle_document_replies() -> None:
     message = make_message()
-    await handle_document(message)
+    await handle_document(message, lang="ru")
     message.answer.assert_awaited_once()
     assert "Файл" in message.answer.call_args[0][0]
 
@@ -249,5 +255,5 @@ async def test_handle_text_without_user() -> None:
     state.set_state = AsyncMock()
     message = make_message(text="hi")
     message.from_user = None
-    await handle_text(message, state=state)
+    await handle_text(message, state=state, lang="ru")
     message.answer.assert_awaited_once()

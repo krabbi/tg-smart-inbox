@@ -67,7 +67,7 @@ def make_link_service(
 
 
 def test_link_keyboard_returns_inline_markup() -> None:
-    kb = _link_keyboard("abc-123")
+    kb = _link_keyboard("abc-123", "ru")
     assert isinstance(kb, InlineKeyboardMarkup)
     buttons = kb.inline_keyboard[0]
     assert len(buttons) == 3
@@ -79,7 +79,7 @@ def test_link_keyboard_returns_inline_markup() -> None:
 async def test_handle_link_message_saves_and_replies() -> None:
     message = make_message()
     svc = make_link_service()
-    await handle_link_message(message, "https://example.com", svc)
+    await handle_link_message(message, "https://example.com", svc, "ru")
     svc.save.assert_awaited_once_with("https://example.com", 1)
     message.answer.assert_awaited_once()
     call_kwargs = message.answer.call_args[1]
@@ -90,7 +90,7 @@ async def test_handle_link_message_warns_when_not_indexed() -> None:
     """When embedding fails, the handler warns the user after the save confirmation."""
     message = make_message()
     svc = make_link_service(indexed=False)
-    await handle_link_message(message, "https://example.com", svc)
+    await handle_link_message(message, "https://example.com", svc, "ru")
 
     replies = [c[0][0] for c in message.answer.call_args_list]
     assert any("Ссылка сохранена" in r for r in replies)
@@ -101,7 +101,7 @@ async def test_cb_link_summary_edits_message() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
     svc = make_link_service()
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
     cb.answer.assert_awaited_once()
     # Two edit_text calls: loading state + final summary
     assert cb.message.edit_text.await_count == 2
@@ -115,7 +115,7 @@ async def test_cb_link_summary_uses_html_parse_mode() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
     svc = make_link_service()
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
     # Final summary is the second edit_text call
     _, kwargs = cb.message.edit_text.call_args_list[1]
     assert kwargs.get("parse_mode") == "HTML"
@@ -130,7 +130,7 @@ async def test_cb_link_summary_with_body_only() -> None:
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
     summary = LinkSummary(title="T", body="Short body.", url="https://x.com")
     svc = make_link_service(summary=summary)
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
     # Two edit_text calls: loading state + final summary
     assert cb.message.edit_text.await_count == 2
 
@@ -139,7 +139,7 @@ async def test_cb_link_summary_scraping_error_shows_error_message() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}")
     svc = make_link_service(scraping_error=True)
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
     # Two edit_text calls: loading state + error message
     assert cb.message.edit_text.await_count == 2
     assert "❌" in cb.message.edit_text.call_args_list[1][0][0]
@@ -148,7 +148,7 @@ async def test_cb_link_summary_scraping_error_shows_error_message() -> None:
 async def test_cb_link_save_appends_confirmation_text() -> None:
     cb = make_callback("link:save:abc")
     cb.message.html_text = "🔗 Ссылка сохранена:\nhttps://example.com"
-    await cb_link_save(cb)
+    await cb_link_save(cb, lang="ru")
     cb.answer.assert_awaited_once()
     cb.message.edit_text.assert_awaited_once()
     text = cb.message.edit_text.call_args[0][0]
@@ -164,7 +164,7 @@ async def test_cb_link_remind_answers() -> None:
     state.update_data = AsyncMock()
     state.set_state = AsyncMock()
 
-    await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state, lang="ru")
 
     cb.answer.assert_awaited_once()
 
@@ -195,7 +195,7 @@ async def test_cb_link_summary_forwards_item_id_to_service() -> None:
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
     svc = make_link_service()
 
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
 
     svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id)
 
@@ -205,6 +205,6 @@ async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> N
     cb = make_callback("link:summary:not-a-uuid", "🔗 Saved:\nhttps://example.com")
     svc = make_link_service()
 
-    await cb_link_summary(cb, svc)
+    await cb_link_summary(cb, svc, lang="ru")
 
     svc.summarize.assert_awaited_once_with("https://example.com", item_id=None)

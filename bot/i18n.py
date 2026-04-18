@@ -252,6 +252,16 @@ _RU: dict[str, str] = {
         "Неизвестная настройка. Отправь /config без аргументов, чтобы увидеть список."
     ),
     "config_btn_timezone": "🕐 Часовой пояс",
+    "config_btn_language": "🌐 Язык",
+    "language_choose": "Выбери язык интерфейса:",
+    "language_btn_ru": "🇷🇺 Русский",
+    "language_btn_en": "🇬🇧 English",
+    "language_btn_current_mark": " ✓",
+    "language_saved": "✅ Язык интерфейса установлен: <b>Русский</b>",
+    "language_save_failed": "Не удалось сохранить выбранный язык. Попробуй ещё раз.",
+    "language_settings_service_unavailable": (
+        "Сервис настроек временно недоступен. Попробуй позже."
+    ),
     # --- Timezone setup -----------------------------------------------------
     "tz_choose_continent": "Давай настроим твой часовой пояс. Выбери континент:",
     "tz_no_zones_on_continent": ("Для этого континента нет доступных зон. Попробуй другой."),
@@ -493,6 +503,16 @@ _EN: dict[str, str] = {
     "config_menu_title": "Settings. Choose what you want to change:",
     "config_unknown_setting": ("Unknown setting. Send /config without arguments to see the list."),
     "config_btn_timezone": "🕐 Timezone",
+    "config_btn_language": "🌐 Language",
+    "language_choose": "Choose the interface language:",
+    "language_btn_ru": "🇷🇺 Русский",
+    "language_btn_en": "🇬🇧 English",
+    "language_btn_current_mark": " ✓",
+    "language_saved": "✅ Interface language set to: <b>English</b>",
+    "language_save_failed": "Failed to save the selected language. Try again.",
+    "language_settings_service_unavailable": (
+        "The settings service is temporarily unavailable. Try later."
+    ),
     # --- Timezone setup -----------------------------------------------------
     "tz_choose_continent": "Let's set up your timezone. Choose a continent:",
     "tz_no_zones_on_continent": ("No available zones for this continent. Try another one."),

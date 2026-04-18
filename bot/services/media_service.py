@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.i18n import t
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.drive_service import DriveFile, DriveService
@@ -15,6 +16,15 @@ _CATEGORY_EMOJI = {
     "photo": "🖼️",
     "meme": "😄",
     "other": "📦",
+}
+
+_CATEGORY_KEY = {
+    "receipt": "media_category_receipt",
+    "document": "media_category_document",
+    "screenshot": "media_category_screenshot",
+    "photo": "media_category_photo",
+    "meme": "media_category_meme",
+    "other": "media_category_other",
 }
 
 
@@ -67,11 +77,15 @@ class MediaService:
         return MediaResult(item=item, analysis=analysis, drive_file=drive_file)
 
     @staticmethod
-    def format_reply(result: MediaResult) -> str:
+    def format_reply(result: MediaResult, lang: str = "en") -> str:
         """Format the bot reply message for a processed media file."""
         emoji = _CATEGORY_EMOJI.get(result.analysis.category, "📦")
+        category_label = t(
+            _CATEGORY_KEY.get(result.analysis.category, "media_category_other"), lang
+        )
+        open_label = t("media_open_in_drive", lang)
         return (
-            f"{emoji} <b>{result.analysis.category.capitalize()}</b>\n\n"
+            f"{emoji} <b>{category_label}</b>\n\n"
             f"{result.analysis.description}\n\n"
-            f'<a href="{result.drive_file.web_link}">Открыть в Drive</a>'
+            f'<a href="{result.drive_file.web_link}">{open_label}</a>'
         )

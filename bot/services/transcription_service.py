@@ -18,7 +18,12 @@ class TranscriptionService:
         self._client = groq.AsyncGroq(api_key=config.groq_api_key)
 
     async def transcribe(self, audio_bytes: bytes) -> str:
-        """Send OGG audio to Groq Whisper and return the transcript text."""
+        """Send OGG audio to Groq Whisper and return the transcript text.
+
+        On failure ``TranscriptionError`` is raised carrying an i18n key as its
+        ``args[0]`` (via ``str(exc)``). Handlers translate the key against the
+        user's language before replying.
+        """
         try:
             response = await self._client.audio.transcriptions.create(
                 model="whisper-large-v3",
@@ -27,14 +32,10 @@ class TranscriptionService:
             return response.text
         except groq.AuthenticationError as exc:
             logger.error("Groq authentication failed: %s", exc)
-            raise TranscriptionError(
-                "Неверный GROQ_API_KEY. Проверь ключ на console.groq.com."
-            ) from exc
+            raise TranscriptionError("transcription_bad_key") from exc
         except groq.APIConnectionError as exc:
             logger.error("Groq connection error: %s", exc)
-            raise TranscriptionError("Сервис транскрипции недоступен. Попробуй позже.") from exc
+            raise TranscriptionError("transcription_unavailable") from exc
         except groq.GroqError as exc:
             logger.error("Groq API error: %s", exc)
-            raise TranscriptionError(
-                "Не удалось распознать голосовое сообщение. Попробуй ещё раз."
-            ) from exc
+            raise TranscriptionError("transcription_failed") from exc

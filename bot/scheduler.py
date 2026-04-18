@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Config
+from bot.i18n import t
 from bot.models.item import Item
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
@@ -25,18 +26,23 @@ _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
 
 
-def _snooze_keyboard(reminder_id: str) -> InlineKeyboardMarkup:
+def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
     """Build the snooze/acknowledge keyboard for a reminder notification."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="⏰ +1ч", callback_data=f"remind_snooze:1h:{reminder_id}"
+                    text=t("reminder_btn_snooze_1h", lang),
+                    callback_data=f"remind_snooze:1h:{reminder_id}",
                 ),
                 InlineKeyboardButton(
-                    text="🌙 +1д", callback_data=f"remind_snooze:1d:{reminder_id}"
+                    text=t("reminder_btn_snooze_1d", lang),
+                    callback_data=f"remind_snooze:1d:{reminder_id}",
                 ),
-                InlineKeyboardButton(text="✅ Принято", callback_data=f"remind_ack:{reminder_id}"),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_ack", lang),
+                    callback_data=f"remind_ack:{reminder_id}",
+                ),
             ]
         ]
     )
@@ -60,11 +66,17 @@ async def _send_due_reminders(
                     await svc.mark_sent(reminder)
                     continue
                 user_tz = await settings_svc.get_timezone(item.user_id)
+                user_lang = await settings_svc.get_language(item.user_id)
                 formatted = format_remind_at(reminder.remind_at, user_tz)
                 await bot.send_message(
                     chat_id=item.user_id,
-                    text=f"🔔 Напомню {formatted}\n{item.content}",
-                    reply_markup=_snooze_keyboard(str(reminder.id)),
+                    text=t(
+                        "reminder_notification",
+                        user_lang,
+                        formatted=formatted,
+                        content=item.content,
+                    ),
+                    reply_markup=_snooze_keyboard(str(reminder.id), user_lang),
                 )
                 await svc.mark_sent_with_auto_resend(reminder, now + _AUTO_RESEND_DELAY)
             except Exception:
@@ -89,12 +101,18 @@ async def _auto_resend_reminders(
                     await svc.mark_acknowledged(reminder)
                     continue
 
+                user_lang = await settings_svc.get_language(item.user_id)
+
                 if reminder.snooze_count >= _MAX_AUTO_RESENDS:
                     # Too many auto-resends — notify the user that the reminder
                     # is being closed automatically, then acknowledge to stop spam.
                     await bot.send_message(
                         chat_id=item.user_id,
-                        text=f"🔔 Напоминание закрыто автоматически: {item.content}",
+                        text=t(
+                            "reminder_auto_closed",
+                            user_lang,
+                            content=item.content,
+                        ),
                     )
                     await svc.mark_acknowledged(reminder)
                     continue
@@ -104,8 +122,13 @@ async def _auto_resend_reminders(
                 formatted = format_remind_at(new_reminder.remind_at, user_tz)
                 await bot.send_message(
                     chat_id=item.user_id,
-                    text=f"🔔 Напомню {formatted}\n{item.content}",
-                    reply_markup=_snooze_keyboard(str(new_reminder.id)),
+                    text=t(
+                        "reminder_notification",
+                        user_lang,
+                        formatted=formatted,
+                        content=item.content,
+                    ),
+                    reply_markup=_snooze_keyboard(str(new_reminder.id), user_lang),
                 )
                 await svc.mark_sent_with_auto_resend(new_reminder, now + _AUTO_RESEND_DELAY)
             except Exception:
