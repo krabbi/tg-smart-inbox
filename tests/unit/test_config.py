@@ -46,7 +46,7 @@ def test_config_default_empty_user_ids() -> None:
 
 
 def test_config_default_embedding_dim(fake_config: Config) -> None:
-    assert fake_config.embedding_dim == 1536
+    assert fake_config.embedding_dim == 1024
 
 
 def test_config_embedding_dim_override() -> None:

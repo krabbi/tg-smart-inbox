@@ -120,7 +120,7 @@ The central table that stores every piece of content the user saves.
 | `content` | Text | The actual content (URL, text, file path, etc.) |
 | `description` | Text (nullable) | Optional description (used for media) |
 | `scraped_text` | Text (nullable) | Cached full page text for links (used to re-embed without re-scraping) |
-| `embedding` | `vector(1536)` (nullable) | pgvector embedding for semantic search; ivfflat/cosine index |
+| `embedding` | `vector(1024)` (nullable) | pgvector embedding for semantic search; ivfflat/cosine index |
 
 ### `reminders` table
 
@@ -148,22 +148,21 @@ Additional metadata for items with `type = idea`.
 | `tags` | JSON (list of str) | AI-extracted tags (max 5, max 30 chars each) |
 | `complexity` | Enum (nullable) | `simple`, `medium`, `complex` |
 | `effort` | Enum (nullable) | `quick` (<1h), `halfday` (1-4h), `day` (4-8h), `longterm` |
-| `embedding` | `vector(1536)` (nullable) | pgvector embedding for idea-level semantic search; ivfflat/cosine index |
+| `embedding` | `vector(1024)` (nullable) | pgvector embedding for idea-level semantic search; ivfflat/cosine index |
 
 ### pgvector extension
 
 Semantic search uses the [pgvector](https://github.com/pgvector/pgvector) PostgreSQL
-extension. The migration that introduces the `embedding` columns
-(`98444ad48da7_add_pgvector_embeddings_and_scraped_text.py`) runs
-`CREATE EXTENSION IF NOT EXISTS vector` on PostgreSQL, creates `embedding` columns of
-type `vector(1536)` on both `items` and `ideas`, and builds `ivfflat` indexes with
-`vector_cosine_ops` (100 lists) on each.
+extension. The initial migration (`98444ad48da7`) adds the `embedding` columns and
+indexes; migration `c3e7f2a1d8b4` resizes them from `vector(1536)` to `vector(1024)`
+to match the Voyage AI model output. Both `items` and `ideas` carry an `ivfflat` index
+with `vector_cosine_ops` (100 lists).
 
 On SQLite (used only in tests) the migration and ORM still create the columns, but
 the extension and the vector index are skipped because pgvector is PostgreSQL-only.
-The dimensionality is exposed via the `EMBEDDING_DIM` config field (default `1536`,
-matching OpenAI `text-embedding-3-small`); changing it requires a new Alembic
-migration since vector columns have a fixed size.
+The dimensionality is exposed via the `EMBEDDING_DIM` config field (default `1024`,
+matching `voyage-3.5`); changing it requires a new Alembic migration since vector
+columns have a fixed size.
 
 ### `user_settings` table
 
@@ -497,10 +496,10 @@ Each scheduler job opens its own DB session.
 
 ### Vector embeddings pipeline
 
-`EmbeddingService` (`bot/services/embedding_service.py`) calls the Anthropic Embeddings
-API via the SDK's low-level HTTP client. When the API is unreachable, returns a payload
-with an unexpected shape, or produces a vector whose length does not match
-`Config.embedding_dim`, the service logs and returns `None` — it never raises.
+`EmbeddingService` (`bot/services/embedding_service.py`) calls the Voyage AI Embeddings
+API (`voyage-3.5`, 1024 dimensions) via `httpx`. When `VOYAGE_API_KEY` is not set, the
+API is unreachable, or the response shape is unexpected, the service logs and returns
+`None` — it never raises.
 
 At save time:
 
@@ -579,7 +578,8 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `GROQ_API_KEY` | No | `""` | Groq API key (enables voice transcription) |
 | `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path to Drive service account JSON |
 | `GOOGLE_DRIVE_FOLDER_ID` | No | `""` | Drive folder ID (enables media upload) |
-| `EMBEDDING_DIM` | No | `1536` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |
+| `VOYAGE_API_KEY` | No | `""` | Voyage AI API key (enables semantic search / embeddings) |
+| `EMBEDDING_DIM` | No | `1024` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |
 
 ---
 
@@ -682,7 +682,7 @@ tg-smart-inbox/
 │   ├── services/
 │   │   ├── classifier.py     # Message type classification
 │   │   ├── claude_client.py  # Anthropic API wrapper
-│   │   ├── embedding_service.py  # Vector embeddings via Anthropic Embeddings API
+│   │   ├── embedding_service.py  # Vector embeddings via Voyage AI API (voyage-3.5)
 │   │   ├── link_service.py   # Link save + summarize
 │   │   ├── reminder_service.py # Reminder business logic
 │   │   ├── time_parser.py    # Natural-language time parsing
