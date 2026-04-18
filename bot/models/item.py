@@ -9,7 +9,7 @@ from bot.models.base import Base, TimestampMixin, UUIDMixin
 # Fixed DB-column dimensionality; the matching Config.embedding_dim setting is the
 # source of truth for services that generate embeddings. Changing this requires a
 # new Alembic migration.
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024
 
 
 class ItemType(enum.Enum):

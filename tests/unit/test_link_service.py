@@ -113,7 +113,7 @@ async def test_save_without_embedding_service_returns_not_indexed() -> None:
 
 
 async def test_save_indexes_item_when_embedding_succeeds() -> None:
-    svc, repo = make_link_service(embedding=[0.1] * 1536)
+    svc, repo = make_link_service(embedding=[0.1] * 1024)
     saved = await svc.save("https://example.com", user_id=1)
     assert saved.indexed is True
     repo.update_embedding.assert_awaited_once()  # type: ignore[attr-defined]
@@ -140,7 +140,7 @@ async def test_save_rolls_back_when_update_embedding_fails() -> None:
     mock_session = MagicMock(spec=AsyncSession)
     mock_session.commit = AsyncMock()
     mock_session.rollback = AsyncMock()
-    svc, repo = make_link_service(session=mock_session, embedding=[0.1] * 1536)
+    svc, repo = make_link_service(session=mock_session, embedding=[0.1] * 1024)
     repo.update_embedding = AsyncMock(side_effect=Exception("DB blew up"))  # type: ignore[attr-defined]
 
     saved = await svc.save("https://example.com", user_id=1)

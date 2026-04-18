@@ -54,7 +54,7 @@ async def test_get_missing_embedding_returns_only_unindexed(db_session: AsyncSes
     await db_session.commit()
 
     # Index only one of them.
-    await repo.update_embedding(a.id, [0.1] * 1536)
+    await repo.update_embedding(a.id, [0.1] * 1024)
     await db_session.commit()
 
     missing = await repo.get_missing_embedding(limit=10)
@@ -79,7 +79,7 @@ async def test_update_embedding_noop_for_missing_item(db_session: AsyncSession) 
 
     repo = ItemRepository(db_session)
     # Using a random UUID that doesn't match any row — must not raise.
-    await repo.update_embedding(uuid.uuid4(), [0.0] * 1536)
+    await repo.update_embedding(uuid.uuid4(), [0.0] * 1024)
 
 
 async def test_update_scraped_text_persists_value(db_session: AsyncSession) -> None:

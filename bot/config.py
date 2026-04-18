@@ -10,6 +10,9 @@ class Config(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/bot.db"
     allowed_user_ids: list[int] = []
 
+    # Voyage AI (optional — required only for semantic search / embeddings)
+    voyage_api_key: str = ""
+
     # Groq (optional — required only for voice transcription)
     groq_api_key: str = ""
 
@@ -18,8 +21,8 @@ class Config(BaseSettings):
     google_drive_folder_id: str = ""
 
     # Vector search — dimensionality of embeddings stored in pgvector columns.
-    # Matches the default OpenAI text-embedding-3-small output size.
-    embedding_dim: int = 1536
+    # Matches the voyage-3.5 output size (Voyage AI).
+    embedding_dim: int = 1024
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod

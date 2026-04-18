@@ -226,4 +226,4 @@ async def test_idea_with_embedding(db_session: AsyncSession) -> None:
 
 
 def test_embedding_dim_constant() -> None:
-    assert EMBEDDING_DIM == 1536
+    assert EMBEDDING_DIM == 1024

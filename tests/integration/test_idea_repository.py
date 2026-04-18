@@ -134,7 +134,7 @@ async def test_update_embedding_sets_vector_on_idea(db_session: AsyncSession) ->
     idea = await idea_repo.save(item_id=item.id, tags=[])
     await db_session.commit()
 
-    vector = [0.1] * 1536
+    vector = [0.1] * 1024
     await idea_repo.update_embedding(idea.id, vector)
     await db_session.commit()
 

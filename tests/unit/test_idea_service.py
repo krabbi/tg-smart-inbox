@@ -97,7 +97,7 @@ async def test_save_idea_commits_session() -> None:
 
 
 async def test_save_idea_marks_indexed_when_both_vectors_succeed() -> None:
-    svc, item_repo, idea_repo, _ = make_service(embedding=[0.1] * 1536)
+    svc, item_repo, idea_repo, _ = make_service(embedding=[0.1] * 1024)
     saved = await svc.save_idea("idea", user_id=1)
     assert saved.indexed is True
     item_repo.update_embedding.assert_awaited_once()
@@ -147,7 +147,7 @@ async def test_save_idea_not_indexed_without_embedding_service() -> None:
 
 
 async def test_save_idea_rolls_back_on_update_embedding_error() -> None:
-    svc, item_repo, _, _ = make_service(embedding=[0.1] * 1536)
+    svc, item_repo, _, _ = make_service(embedding=[0.1] * 1024)
     item_repo.update_embedding = AsyncMock(side_effect=Exception("DB blew up"))
 
     saved = await svc.save_idea("idea", user_id=1)
