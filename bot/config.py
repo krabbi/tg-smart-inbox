@@ -21,7 +21,7 @@ class Config(BaseSettings):
     google_drive_folder_id: str = ""
 
     # Vector search — dimensionality of embeddings stored in pgvector columns.
-    # Matches the default OpenAI text-embedding-3-small output size.
+    # Matches the voyage-3.5 output size (Voyage AI).
     embedding_dim: int = 1024
 
     @field_validator("allowed_user_ids", mode="before")

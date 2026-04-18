@@ -48,12 +48,14 @@ class EmbeddingService:
         return self._parse_vector(data)
 
     async def generate_for_item(self, item: Item) -> list[float] | None:
+        """Build the searchable text for an Item and return its embedding, or ``None``."""
         text = self._item_text(item)
         if not text:
             return None
         return await self.generate(text)
 
     async def generate_for_idea(self, idea: Idea) -> list[float] | None:
+        """Build the searchable text for an Idea (content + tags) and return its embedding."""
         text = self._idea_text(idea)
         if not text:
             return None
@@ -61,6 +63,7 @@ class EmbeddingService:
 
     @staticmethod
     def _item_text(item: Item) -> str:
+        """Concatenate the item's searchable fields: content, description, scraped_text."""
         parts: list[str] = []
         if item.content:
             parts.append(item.content)
@@ -72,7 +75,9 @@ class EmbeddingService:
 
     @staticmethod
     def _idea_text(idea: Idea) -> str:
+        """Blend the parent item's content with the idea's tags for idea-level search."""
         parts: list[str] = []
+        # Idea.item is a SQLAlchemy relationship — may be None in tests with bare mocks.
         item = getattr(idea, "item", None)
         if item is not None and getattr(item, "content", None):
             parts.append(item.content)
@@ -81,6 +86,7 @@ class EmbeddingService:
         return "\n\n".join(parts).strip()
 
     def _parse_vector(self, response: object) -> list[float] | None:
+        """Extract a float vector from the API response; return ``None`` on shape mismatch."""
         try:
             if isinstance(response, dict):
                 data = response.get("data")
