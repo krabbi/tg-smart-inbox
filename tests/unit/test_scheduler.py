@@ -513,6 +513,109 @@ async def test_reindex_missing_embeddings_skips_failed_record_and_continues() ->
         session.rollback.assert_awaited()
 
 
+async def test_reindex_missing_embeddings_throttles_between_successful_calls() -> None:
+    """Reindex sleeps after each successful embedding to stay below Voyage AI rate limits."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.idea import Idea
+    from bot.models.item import Item
+    from bot.scheduler import _REINDEX_THROTTLE_SECONDS, _reindex_missing_embeddings
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "content"
+    item.description = None
+    item.scraped_text = None
+
+    idea = MagicMock(spec=Idea)
+    idea.id = uuid.uuid4()
+    idea.tags = ["tag1"]
+    parent = MagicMock(spec=Item)
+    parent.content = "parent content"
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.IdeaRepository") as mock_idea_repo_cls,
+        patch("bot.scheduler.EmbeddingService") as mock_svc_cls,
+        patch("bot.scheduler.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_embedding = AsyncMock(return_value=[item])
+        mock_item_repo.update_embedding = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_idea_repo = MagicMock()
+        mock_idea_repo.get_missing_embedding = AsyncMock(return_value=[(parent, idea)])
+        mock_idea_repo.update_embedding = AsyncMock()
+        mock_idea_repo_cls.return_value = mock_idea_repo
+
+        mock_svc = MagicMock()
+        mock_svc.generate_for_item = AsyncMock(return_value=[0.1, 0.2])
+        mock_svc.generate_for_idea = AsyncMock(return_value=[0.3, 0.4])
+        mock_svc_cls.return_value = mock_svc
+
+        factory = make_session_factory(session)
+
+        await _reindex_missing_embeddings(factory, config)
+
+    # One throttle per successful record (item + idea = 2 sleeps).
+    assert mock_sleep.await_count == 2
+    mock_sleep.assert_any_await(_REINDEX_THROTTLE_SECONDS)
+
+
+async def test_reindex_missing_embeddings_does_not_throttle_on_none_vector() -> None:
+    """When ``generate_for_*`` returns ``None``, no throttle sleep is applied."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _reindex_missing_embeddings
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "content"
+    item.description = None
+    item.scraped_text = None
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.IdeaRepository") as mock_idea_repo_cls,
+        patch("bot.scheduler.EmbeddingService") as mock_svc_cls,
+        patch("bot.scheduler.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_embedding = AsyncMock(return_value=[item])
+        mock_item_repo.update_embedding = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_idea_repo = MagicMock()
+        mock_idea_repo.get_missing_embedding = AsyncMock(return_value=[])
+        mock_idea_repo_cls.return_value = mock_idea_repo
+
+        mock_svc = MagicMock()
+        mock_svc.generate_for_item = AsyncMock(return_value=None)
+        mock_svc_cls.return_value = mock_svc
+
+        factory = make_session_factory(session)
+
+        await _reindex_missing_embeddings(factory, config)
+
+    mock_sleep.assert_not_awaited()
+
+
 async def test_reindex_missing_embeddings_skips_none_vectors() -> None:
     """When the API returns None, the record is left untouched and no update happens."""
     import uuid
