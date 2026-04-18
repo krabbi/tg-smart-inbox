@@ -316,11 +316,37 @@ the model from `Config`. Returns the text content of the first response block.
 | `LinkService` | Summarize a web page | Plain text — line 1 = title, lines 3+ = prose body |
 | `IdeaService._extract_tags` | Extract 1-5 keyword tags | `["tag1", "tag2"]` |
 | `IdeaService._classify_complexity` | Estimate complexity and effort | `{"complexity": ..., "effort": ...}` |
-| `IdeaService.suggest` | Suggest ideas from backlog | Free text (language matches query) |
+| `IdeaService.suggest` | Suggest ideas from backlog | Free text (in the user's language) |
+| `VisionService.analyze` | Categorize + describe an image | `{"category": ..., "description": ...}` |
 | `TimeParser` | Parse natural-language time expressions | ISO timestamp or structured time |
 
 All Claude prompts that return JSON also handle markdown code-fence stripping because
 Claude sometimes wraps JSON in ` ```json ``` ` blocks.
+
+### Prompt localization
+
+Every user-facing Claude prompt carries the user's interface language so the
+generated content (link summary, idea tags, suggestions, image descriptions) is
+produced in the right language. The language code (`"ru"` / `"en"`) comes from
+`UserSettings.language` and is resolved once per update by `DependencyMiddleware`
+(injected as the `lang` handler argument). Handlers forward it into the service
+call; services interpolate the human-readable name via
+`bot.i18n.language_name(lang)` (e.g. `"Russian"`, `"English"`) into a
+`{language}` placeholder in the prompt template. Unknown codes fall back to the
+default language (English) so prompts never contain an empty placeholder.
+
+Public service signatures that accept `lang` (keyword-only or default
+`"en"`):
+
+- `ClassifierService.classify(text, *, has_media, lang)`
+- `LinkService.summarize(url, item_id, lang)`
+- `IdeaService.save_idea(text, user_id, lang)` and `suggest(user_id, query, lang)`
+- `VisionService.analyze(image_bytes, media_type, lang)`
+- `MediaService.process(file_bytes, filename, user_id, media_type, lang)`
+
+`NoteService` and `TaskService` do not call Claude and therefore don't take
+`lang`. The hardcoded "Force Russian" instructions previously added in PR #100
+have been replaced with the dynamic placeholder.
 
 ---
 

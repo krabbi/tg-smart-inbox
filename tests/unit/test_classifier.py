@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.services.classifier import ClassifierService, MessageType
+from bot.services.classifier import _CLASSIFY_PROMPT, ClassifierService, MessageType
 from bot.services.claude_client import ClaudeClient
 
 
@@ -156,3 +156,64 @@ async def test_russian_notes(text: str) -> None:
     svc = ClassifierService(make_claude('{"type": "note"}'))
     result = await svc.classify(text)
     assert result == MessageType.NOTE
+
+
+# ── Language propagation ─────────────────────────────────────────────────────
+
+
+async def test_classify_prompt_template_is_language_neutral() -> None:
+    """The prompt template must reference ``{language}`` and not hardcode Russian."""
+    assert "{language}" in _CLASSIFY_PROMPT
+    assert "Russian" not in _CLASSIFY_PROMPT
+
+
+async def test_classify_passes_russian_into_prompt_when_lang_ru() -> None:
+    """lang='ru' must surface as 'Russian' in the prompt sent to Claude."""
+    client = MagicMock(spec=ClaudeClient)
+    client.complete = AsyncMock(return_value='{"type": "task"}')
+    svc = ClassifierService(client)
+
+    await svc.classify("купить молоко", lang="ru")
+
+    sent_prompt = client.complete.await_args.args[0]
+    assert "Russian" in sent_prompt
+    assert "English" not in sent_prompt
+
+
+async def test_classify_passes_english_into_prompt_when_lang_en() -> None:
+    """lang='en' must surface as 'English' in the prompt sent to Claude."""
+    client = MagicMock(spec=ClaudeClient)
+    client.complete = AsyncMock(return_value='{"type": "note"}')
+    svc = ClassifierService(client)
+
+    await svc.classify("some note text", lang="en")
+
+    sent_prompt = client.complete.await_args.args[0]
+    assert "English" in sent_prompt
+    assert "Russian" not in sent_prompt
+
+
+async def test_classify_default_lang_is_english() -> None:
+    """Omitting lang should default to English, not Russian."""
+    client = MagicMock(spec=ClaudeClient)
+    client.complete = AsyncMock(return_value='{"type": "note"}')
+    svc = ClassifierService(client)
+
+    await svc.classify("some text")
+
+    sent_prompt = client.complete.await_args.args[0]
+    assert "English" in sent_prompt
+    assert "Russian" not in sent_prompt
+
+
+async def test_classify_unknown_lang_falls_back_to_english() -> None:
+    """An unsupported language code must not crash and must fall back to English."""
+    client = MagicMock(spec=ClaudeClient)
+    client.complete = AsyncMock(return_value='{"type": "note"}')
+    svc = ClassifierService(client)
+
+    result = await svc.classify("some text", lang="fr")
+
+    assert result == MessageType.NOTE
+    sent_prompt = client.complete.await_args.args[0]
+    assert "English" in sent_prompt

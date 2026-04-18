@@ -69,6 +69,7 @@ async def handle_photo(
             filename=f"photo_{photo.file_id}.jpg",
             user_id=user_id,
             media_type="image/jpeg",
+            lang=lang,
         )
         await message.answer(MediaService.format_reply(result, lang))
     except Exception:
@@ -100,6 +101,7 @@ async def handle_document(
             filename=doc.file_name or f"file_{doc.file_id}",
             user_id=user_id,
             media_type=mime,
+            lang=lang,
         )
         await message.answer(MediaService.format_reply(result, lang))
     except Exception:
@@ -191,18 +193,18 @@ async def handle_text(
 
     # Fast path: suggestion queries bypass the classifier
     if _is_suggestion_query(text) and idea_service is not None:
-        suggestion = await idea_service.suggest(user_id, text)
+        suggestion = await idea_service.suggest(user_id, text, lang=lang)
         await message.answer(suggestion)
         return
 
-    msg_type = await classifier.classify(text, has_media=False)
+    msg_type = await classifier.classify(text, has_media=False, lang=lang)
 
     if msg_type == MessageType.LINK and link_service is not None:
         url = extract_url(text) or text
         await handle_link_message(message, url, link_service, lang)
     elif msg_type == MessageType.IDEA and idea_service is not None:
         try:
-            saved = await idea_service.save_idea(text, user_id)
+            saved = await idea_service.save_idea(text, user_id, lang=lang)
         except Exception:
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer(t("idea_save_failed", lang))

@@ -71,14 +71,14 @@ async def handle_voice(
         return
 
     user_id = message.from_user.id if message.from_user else 0
-    msg_type = await classifier.classify(transcript, has_media=False)
+    msg_type = await classifier.classify(transcript, has_media=False, lang=lang)
 
     if msg_type == MessageType.LINK and link_service is not None:
         url = extract_url(transcript) or transcript
         await handle_link_message(message, url, link_service, lang)
     elif msg_type == MessageType.IDEA and idea_service is not None:
         try:
-            saved = await idea_service.save_idea(transcript, user_id)
+            saved = await idea_service.save_idea(transcript, user_id, lang=lang)
         except Exception:
             logger.exception("Idea save failed for user %s", user_id)
             await message.answer(t("idea_save_failed", lang))

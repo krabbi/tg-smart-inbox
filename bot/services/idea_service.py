@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.i18n import DEFAULT_LANGUAGE, language_name
 from bot.models.idea import Idea, IdeaComplexity, IdeaEffort
 from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
@@ -15,7 +16,9 @@ from bot.services.embedding_service import EmbeddingService
 logger = logging.getLogger(__name__)
 
 _TAG_PROMPT = """\
-Extract 1-5 short tags (keywords) from the following idea.
+Extract 1-5 short tags (keywords) from the following idea. The user's language \
+is {language} — write the tags in {language} when the idea itself is in that \
+language, otherwise translate them into {language}.
 Respond with a JSON array of lowercase strings only. No explanation.
 
 Example: ["mobile", "app", "startup"]
@@ -23,7 +26,8 @@ Example: ["mobile", "app", "startup"]
 Idea: """
 
 _CLASSIFY_PROMPT = """\
-Estimate the complexity and effort required to execute the following idea.
+Estimate the complexity and effort required to execute the following idea. The \
+user's language is {language} — interpret the idea text in that language.
 
 Complexity options: simple, medium, complex
 Effort options:
@@ -33,7 +37,7 @@ Effort options:
   longterm = days or more
 
 Respond with JSON only, no explanation:
-{"complexity": "simple|medium|complex", "effort": "quick|halfday|day|longterm"}
+{{"complexity": "simple|medium|complex", "effort": "quick|halfday|day|longterm"}}
 
 Idea: """
 
@@ -58,8 +62,8 @@ The user has the following saved ideas:
 User query: "{query}"
 
 Suggest 1-3 ideas from the list that would be worth working on. Explain briefly \
-why each is a good choice. Respond in the same language as the user query. \
-If the list is empty, say so politely.
+why each is a good choice. Write the entire response in {language} — that is \
+the user's interface language. If the list is empty, say so politely.
 """
 
 
@@ -111,9 +115,14 @@ class IdeaService:
         self._claude = claude
         self._embedding = embedding_service
 
-    async def save_idea(self, text: str, user_id: int) -> SavedIdea:
-        """Extract tags and classify complexity/effort with Claude, persist Item + Idea."""
-        tags, complexity, effort = await self._analyse(text)
+    async def save_idea(self, text: str, user_id: int, lang: str = DEFAULT_LANGUAGE) -> SavedIdea:
+        """Extract tags and classify complexity/effort with Claude, persist Item + Idea.
+
+        ``lang`` is the user's interface language; it is forwarded into the
+        tag-extraction and complexity-classification prompts so Claude responds
+        in the right language.
+        """
+        tags, complexity, effort = await self._analyse(text, lang)
         item = await self._item_repo.create(user_id=user_id, type=ItemType.idea, content=text)
         idea = await self._idea_repo.save(
             item_id=item.id, tags=tags, complexity=complexity, effort=effort
@@ -151,8 +160,12 @@ class IdeaService:
             return False
         return True
 
-    async def suggest(self, user_id: int, query: str) -> str:
-        """Return Claude suggestions based on saved ideas; user-friendly fallback on error."""
+    async def suggest(self, user_id: int, query: str, lang: str = DEFAULT_LANGUAGE) -> str:
+        """Return Claude suggestions based on saved ideas; user-friendly fallback on error.
+
+        ``lang`` is interpolated into the prompt so Claude responds in the user's
+        interface language even when the raw query is in a different one.
+        """
         rows = await self._idea_repo.get_all(user_id)
         if not rows:
             return "У тебя пока нет сохранённых идей. Поделись идеей — просто напиши её!"
@@ -161,7 +174,7 @@ class IdeaService:
             f"- {item.content} [теги: {', '.join(idea.tags)}]" if idea.tags else f"- {item.content}"
             for item, idea in rows
         )
-        prompt = _SUGGEST_PROMPT.format(ideas=ideas_text, query=query)
+        prompt = _SUGGEST_PROMPT.format(ideas=ideas_text, query=query, language=language_name(lang))
         try:
             return await self._claude.complete(prompt, max_tokens=512)
         except Exception:
@@ -181,18 +194,19 @@ class IdeaService:
         return IdeasPage(rows=rows, page=page, total=total)
 
     async def _analyse(
-        self, text: str
+        self, text: str, lang: str = DEFAULT_LANGUAGE
     ) -> tuple[list[str], IdeaComplexity | None, IdeaEffort | None]:
         """Extract tags and estimate complexity/effort concurrently; return defaults on failure."""
-        tags_coro = self._extract_tags(text)
-        classify_coro = self._classify_complexity(text)
+        tags_coro = self._extract_tags(text, lang)
+        classify_coro = self._classify_complexity(text, lang)
         tags, (complexity, effort) = await asyncio.gather(tags_coro, classify_coro)
         return tags, complexity, effort
 
-    async def _extract_tags(self, text: str) -> list[str]:
+    async def _extract_tags(self, text: str, lang: str = DEFAULT_LANGUAGE) -> list[str]:
         """Call Claude to extract tags from idea text; return empty list on failure."""
+        prompt = _TAG_PROMPT.format(language=language_name(lang)) + text
         try:
-            response = await self._claude.complete(_TAG_PROMPT + text)
+            response = await self._claude.complete(prompt)
             cleaned = response.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("```")[1]
@@ -207,11 +221,12 @@ class IdeaService:
         return []
 
     async def _classify_complexity(
-        self, text: str
+        self, text: str, lang: str = DEFAULT_LANGUAGE
     ) -> tuple[IdeaComplexity | None, IdeaEffort | None]:
         """Call Claude to estimate complexity and effort; return (None, None) on failure."""
+        prompt = _CLASSIFY_PROMPT.format(language=language_name(lang)) + text
         try:
-            response = await self._claude.complete(_CLASSIFY_PROMPT + text)
+            response = await self._claude.complete(prompt)
             cleaned = response.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("```")[1]
