@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import httpx
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 _VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
 _EMBEDDING_MODEL = "voyage-3.5"
 _MAX_INPUT_CHARS = 8000
+_RETRY_DELAYS = (2.0, 8.0)  # seconds to wait before 1st and 2nd retry on 429
 
 
 class EmbeddingService:
@@ -37,15 +39,33 @@ class EmbeddingService:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(_VOYAGE_URL, json=payload, headers=headers)
+        delays = list(_RETRY_DELAYS)
+        for attempt in range(len(delays) + 1):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(_VOYAGE_URL, json=payload, headers=headers)
+            except Exception:
+                logger.exception("Embedding API call failed")
+                return None
+            if response.status_code == 429:
+                if attempt < len(delays):
+                    wait = delays[attempt]
+                    logger.warning(
+                        "Voyage AI rate limited (attempt %d), retrying in %.0fs",
+                        attempt + 1,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("Embedding API rate limited after %d attempts, skipping", attempt + 1)
+                return None
+            try:
                 response.raise_for_status()
-                data = response.json()
-        except Exception:
-            logger.exception("Embedding API call failed")
-            return None
-        return self._parse_vector(data)
+                return self._parse_vector(response.json())
+            except Exception:
+                logger.exception("Embedding API call failed")
+                return None
+        return None
 
     async def generate_for_item(self, item: Item) -> list[float] | None:
         """Build the searchable text for an Item and return its embedding, or ``None``."""

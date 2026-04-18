@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -24,6 +25,7 @@ _AUTO_RESEND_DELAY = timedelta(minutes=5)
 _MAX_AUTO_RESENDS = 5
 _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
+_REINDEX_THROTTLE_SECONDS = 0.3
 
 
 def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
@@ -153,6 +155,8 @@ async def _reindex_missing_embeddings(
                     continue
                 await item_repo.update_embedding(item.id, vector)
                 await session.commit()
+                # Throttle to ~3 req/sec to stay below Voyage AI rate limits.
+                await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
             except Exception:
                 logger.exception("Reindex failed for item %s", item.id)
                 await session.rollback()
@@ -166,6 +170,8 @@ async def _reindex_missing_embeddings(
                     continue
                 await idea_repo.update_embedding(idea.id, vector)
                 await session.commit()
+                # Throttle to ~3 req/sec to stay below Voyage AI rate limits.
+                await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
             except Exception:
                 logger.exception("Reindex failed for idea %s", idea.id)
                 await session.rollback()

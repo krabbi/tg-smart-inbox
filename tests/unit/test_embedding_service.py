@@ -1,6 +1,8 @@
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
 from bot.config import Config
 from bot.models.idea import Idea
 from bot.models.item import Item, ItemType
@@ -19,6 +21,7 @@ def make_config(embedding_dim: int = 4) -> Config:
 def make_voyage_response(vector: list[float]) -> MagicMock:
     body = {"data": [{"embedding": vector, "index": 0}], "model": "voyage-3.5"}
     resp = MagicMock()
+    resp.status_code = 200
     resp.raise_for_status = MagicMock()
     resp.json = MagicMock(return_value=body)
     return resp
@@ -59,6 +62,28 @@ def _patch_httpx(response: MagicMock) -> AsyncMock:
     mock_client.__aexit__ = AsyncMock(return_value=None)
     mock_client.post = AsyncMock(return_value=response)
     return mock_client
+
+
+def _patch_httpx_sequence(responses: list[MagicMock]) -> AsyncMock:
+    """Return a client whose ``.post`` yields each response in turn."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(side_effect=responses)
+    return mock_client
+
+
+def _make_status_response(status_code: int) -> MagicMock:
+    """Build a response mock whose ``raise_for_status`` raises for non-2xx codes."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    request = httpx.Request("POST", "https://example.com")
+    http_response = httpx.Response(status_code, request=request)
+    resp.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError(f"{status_code}", request=request, response=http_response)
+    )
+    resp.json = MagicMock(return_value={})
+    return resp
 
 
 # ─── generate ────────────────────────────────────────────────────────────────
@@ -113,6 +138,7 @@ async def test_generate_returns_none_when_no_api_key() -> None:
 async def test_generate_returns_none_when_response_missing_vector() -> None:
     svc = EmbeddingService(make_config())
     resp = MagicMock()
+    resp.status_code = 200
     resp.raise_for_status = MagicMock()
     resp.json = MagicMock(return_value={"data": [], "model": "voyage-3.5"})
     mock_client = _patch_httpx(resp)
@@ -143,6 +169,59 @@ async def test_generate_truncates_long_input_via_payload() -> None:
 
     sent_input = mock_client.post.await_args.kwargs["json"]["input"][0]
     assert len(sent_input) <= 8000
+
+
+async def test_generate_retries_after_429_then_returns_vector() -> None:
+    """After a single 429 the service waits and retries, returning the vector on success."""
+    svc = EmbeddingService(make_config(embedding_dim=4))
+    rate_limited = _make_status_response(429)
+    success = make_voyage_response([0.1, 0.2, 0.3, 0.4])
+    mock_client = _patch_httpx_sequence([rate_limited, success])
+
+    with (
+        patch("bot.services.embedding_service.httpx.AsyncClient", return_value=mock_client),
+        patch("bot.services.embedding_service.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        vector = await svc.generate("hello")
+
+    assert vector == [0.1, 0.2, 0.3, 0.4]
+    assert mock_client.post.await_count == 2
+    mock_sleep.assert_awaited_once()
+
+
+async def test_generate_returns_none_after_all_429_retries_exhausted() -> None:
+    """Three consecutive 429 responses exhaust the retry budget and yield ``None``."""
+    svc = EmbeddingService(make_config(embedding_dim=4))
+    responses = [_make_status_response(429) for _ in range(3)]
+    mock_client = _patch_httpx_sequence(responses)
+
+    with (
+        patch("bot.services.embedding_service.httpx.AsyncClient", return_value=mock_client),
+        patch("bot.services.embedding_service.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        result = await svc.generate("hello")
+
+    assert result is None
+    assert mock_client.post.await_count == 3
+    # Two retries means exactly two sleeps before the final failing attempt.
+    assert mock_sleep.await_count == 2
+
+
+async def test_generate_returns_none_on_non_429_http_error() -> None:
+    """A 401 (bad key) must not trigger retries; the service logs and returns ``None``."""
+    svc = EmbeddingService(make_config(embedding_dim=4))
+    mock_client = _patch_httpx(_make_status_response(401))
+
+    with (
+        patch("bot.services.embedding_service.httpx.AsyncClient", return_value=mock_client),
+        patch("bot.services.embedding_service.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        result = await svc.generate("hello")
+
+    assert result is None
+    # No retry path — only a single request, no sleeps.
+    assert mock_client.post.await_count == 1
+    mock_sleep.assert_not_awaited()
 
 
 # ─── generate_for_item ───────────────────────────────────────────────────────

@@ -490,7 +490,7 @@ This is a whitelist, not a blocklist — it fails closed by default.
 |-----|----------|----------|-------------|
 | Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_resend_at = now + 5min`. |
 | Auto-resend | 60 seconds | `_auto_resend_reminders` | Finds reminders where `auto_resend_at <= now`. If `snooze_count < 5`, creates new reminder and re-notifies. If `>= 5`, silently acknowledges. |
-| Reindex embeddings | 10 minutes + at startup | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
+| Reindex embeddings | 10 minutes + at startup | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Sleeps 0.3 s after every successful embedding to stay under Voyage AI's rate limit (~3 req/s). Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
 
 Each scheduler job opens its own DB session.
 
@@ -499,7 +499,9 @@ Each scheduler job opens its own DB session.
 `EmbeddingService` (`bot/services/embedding_service.py`) calls the Voyage AI Embeddings
 API (`voyage-3.5`, 1024 dimensions) via `httpx`. When `VOYAGE_API_KEY` is not set, the
 API is unreachable, or the response shape is unexpected, the service logs and returns
-`None` — it never raises.
+`None` — it never raises. On a `429 Too Many Requests` response the service retries the
+request with exponential backoff (waits 2 s, then 8 s) before giving up and returning
+`None`; other HTTP errors short-circuit immediately without retry.
 
 At save time:
 
