@@ -45,6 +45,7 @@ async def test_send_due_reminders_sends_notifications() -> None:
         mock_repo_cls.return_value = MagicMock()
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="Europe/Moscow")
+        mock_settings.get_language = AsyncMock(return_value="ru")
         mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
@@ -61,7 +62,104 @@ async def test_send_due_reminders_sends_notifications() -> None:
     assert "13:00 MSK" in call_kwargs["text"]
     assert call_kwargs["reply_markup"] is not None
     mock_settings.get_timezone.assert_awaited_once_with(123)
+    mock_settings.get_language.assert_awaited_once_with(123)
     mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
+
+
+async def test_send_due_reminders_uses_user_language_for_notification() -> None:
+    """The notification text must be localized to the user's stored language."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 77
+    item.content = "buy milk"
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_repo_cls.return_value = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _send_due_reminders(bot, factory)
+
+    call_kwargs = bot.send_message.call_args[1]
+    # English notification template begins with "🔔 Reminder …" — verifies i18n path.
+    assert "Reminder" in call_kwargs["text"]
+    # Snooze keyboard buttons also must be localized.
+    rows = call_kwargs["reply_markup"].inline_keyboard
+    texts = [b.text for row in rows for b in row]
+    assert any("+1h" in t for t in texts)
+    assert any("Done" in t for t in texts)
+
+
+async def test_auto_resend_max_uses_user_language() -> None:
+    """Auto-close notification text must be localized to the user's stored language."""
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+    from bot.scheduler import _MAX_AUTO_RESENDS
+
+    item = MagicMock(spec=Item)
+    item.user_id = 55
+    item.content = "buy milk"
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.item_id = "item-id"
+    original.snooze_count = _MAX_AUTO_RESENDS
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_repo_cls.return_value = MagicMock()
+
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.mark_acknowledged = AsyncMock()
+        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+
+        mock_settings = MagicMock()
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    call_kwargs = bot.send_message.call_args[1]
+    # English auto-close template uses "auto-closed".
+    assert "auto-closed" in call_kwargs["text"]
 
 
 async def test_send_due_reminders_no_item_marks_sent() -> None:
@@ -121,6 +219,7 @@ async def test_send_due_reminders_handles_send_error() -> None:
         mock_svc_cls.return_value = mock_svc
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="en")
         mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
@@ -168,6 +267,7 @@ async def test_auto_resend_reminders_creates_followup() -> None:
         mock_repo_cls.return_value = MagicMock()
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="ru")
         mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
@@ -184,6 +284,7 @@ async def test_auto_resend_reminders_creates_followup() -> None:
     assert "задача" in call_kwargs["text"]
     assert "10:00 UTC" in call_kwargs["text"]
     mock_settings.get_timezone.assert_awaited_once_with(42)
+    mock_settings.get_language.assert_awaited_once_with(42)
     mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
 
 
@@ -207,6 +308,7 @@ async def test_auto_resend_stops_after_max_resends() -> None:
     with (
         patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_repo_cls.return_value = MagicMock()
 
@@ -215,6 +317,10 @@ async def test_auto_resend_stops_after_max_resends() -> None:
         mock_svc.mark_acknowledged = AsyncMock()
         mock_svc.prepare_auto_resend = AsyncMock()
         mock_svc_cls.return_value = mock_svc
+
+        mock_settings = MagicMock()
+        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
         bot.send_message = AsyncMock()

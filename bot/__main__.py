@@ -6,16 +6,20 @@ from aiogram.types import BotCommand
 from bot.bot import create_bot, create_dispatcher
 from bot.config import get_config
 from bot.db import get_session_factory, init_db
+from bot.i18n import t
 from bot.middleware import DependencyMiddleware
 from bot.scheduler import start_scheduler
 
-_BOT_COMMANDS = [
-    BotCommand(command="start", description="Начать работу"),
-    BotCommand(command="list", description="Последние записи"),
-    BotCommand(command="search", description="Поиск по записям"),
-    BotCommand(command="reminders", description="Предстоящие напоминания"),
-    BotCommand(command="ideas", description="Мои идеи"),
-]
+
+def _bot_commands_for(lang: str) -> list[BotCommand]:
+    """Build the Telegram commands menu localized to ``lang``."""
+    return [
+        BotCommand(command="start", description=t("botcmd_start", lang)),
+        BotCommand(command="list", description=t("botcmd_list", lang)),
+        BotCommand(command="search", description=t("botcmd_search", lang)),
+        BotCommand(command="reminders", description=t("botcmd_reminders", lang)),
+        BotCommand(command="ideas", description=t("botcmd_ideas", lang)),
+    ]
 
 
 async def main() -> None:
@@ -28,7 +32,9 @@ async def main() -> None:
     factory = get_session_factory()
     dp.update.middleware(DependencyMiddleware(factory, config))
     start_scheduler(bot, factory, config)
-    await bot.set_my_commands(_BOT_COMMANDS)
+    # Telegram supports per-language command descriptions; we register both.
+    await bot.set_my_commands(_bot_commands_for("ru"), language_code="ru")
+    await bot.set_my_commands(_bot_commands_for("en"))
     await dp.start_polling(bot)
 
 

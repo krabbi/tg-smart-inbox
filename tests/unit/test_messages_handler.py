@@ -124,7 +124,7 @@ async def test_handle_text_task_without_time_shows_remind_button() -> None:
     task_svc = MagicMock(spec=TaskService)
     task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
 
-    await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
+    await handle_text(msg, state=state, classifier=classifier, task_service=task_svc, lang="ru")
 
     # Should NOT enter FSM
     state.set_state.assert_not_awaited()
@@ -162,6 +162,7 @@ async def test_handle_text_task_with_time_auto_creates_reminder() -> None:
         task_service=task_svc,
         time_parser=time_parser,
         reminder_service=reminder_svc,
+        lang="ru",
     )
 
     # Should auto-create reminder
@@ -234,6 +235,7 @@ async def test_handle_text_task_with_time_parse_error_enters_fsm() -> None:
         task_service=task_svc,
         time_parser=time_parser,
         reminder_service=reminder_svc,
+        lang="ru",
     )
 
     from bot.handlers.reminders import ReminderStates
@@ -261,6 +263,7 @@ async def test_handle_text_task_with_time_no_services_shows_button() -> None:
         task_service=task_svc,
         time_parser=None,
         reminder_service=None,
+        lang="ru",
     )
 
     msg.answer.assert_awaited_once()
@@ -294,6 +297,7 @@ async def test_handle_text_task_with_time_reminder_create_error_shows_button() -
         task_service=task_svc,
         time_parser=time_parser,
         reminder_service=reminder_svc,
+        lang="ru",
     )
 
     reply = msg.answer.call_args[0][0]
@@ -308,7 +312,9 @@ async def test_handle_text_task_save_error_sends_error_reply() -> None:
     task_svc = MagicMock(spec=TaskService)
     task_svc.save = AsyncMock(side_effect=Exception("DB error"))
 
-    await handle_text(msg, state=make_state(), classifier=classifier, task_service=task_svc)
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, task_service=task_svc, lang="ru"
+    )
     assert "Не удалось" in msg.answer.call_args[0][0]
 
 
@@ -338,7 +344,9 @@ async def test_handle_text_note_save_error_sends_error_reply() -> None:
     note_svc = MagicMock(spec=NoteService)
     note_svc.save = AsyncMock(side_effect=Exception("DB error"))
 
-    await handle_text(msg, state=make_state(), classifier=classifier, note_service=note_svc)
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, note_service=note_svc, lang="ru"
+    )
     assert "Не удалось" in msg.answer.call_args[0][0]
 
 
@@ -378,7 +386,9 @@ async def test_handle_text_idea_shows_complexity_labels() -> None:
     mock_idea.effort = IdeaEffort.longterm
     idea_svc.save_idea = AsyncMock(return_value=MagicMock(spec=SavedIdea, idea=mock_idea))
 
-    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, idea_service=idea_svc, lang="ru"
+    )
     reply = msg.answer.call_args[0][0]
     assert "сложная" in reply
     assert "долгосрочно" in reply
@@ -397,7 +407,9 @@ async def test_handle_text_idea_save_error_sends_error_reply() -> None:
     idea_svc = MagicMock(spec=IdeaService)
     idea_svc.save_idea = AsyncMock(side_effect=Exception("DB error"))
 
-    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, idea_service=idea_svc, lang="ru"
+    )
     msg.answer.assert_awaited_once()
     assert "Не удалось" in msg.answer.call_args[0][0]
 
@@ -417,7 +429,9 @@ async def test_handle_text_idea_not_indexed_warns_user() -> None:
     saved.indexed = False
     idea_svc.save_idea = AsyncMock(return_value=saved)
 
-    await handle_text(msg, state=make_state(), classifier=classifier, idea_service=idea_svc)
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, idea_service=idea_svc, lang="ru"
+    )
 
     replies = [c[0][0] for c in msg.answer.call_args_list]
     assert any("Идея сохранена" in r for r in replies)
@@ -479,7 +493,7 @@ async def test_handle_task_with_time_auto_creates_reminder() -> None:
     rs = MagicMock(spec=ReminderService)
     rs.create = AsyncMock()
 
-    await _handle_task_with_time(msg, "завтра в 10", item_id, state, tp, rs)
+    await _handle_task_with_time(msg, "завтра в 10", item_id, state, tp, rs, lang="ru")
 
     rs.create.assert_awaited_once()
     state.set_state.assert_not_awaited()
@@ -496,7 +510,7 @@ async def test_handle_task_with_time_parse_error_enters_fsm() -> None:
     tp.parse = AsyncMock(side_effect=TimeParseError("fail"))
     rs = MagicMock(spec=ReminderService)
 
-    await _handle_task_with_time(msg, "завтра", item_id, state, tp, rs)
+    await _handle_task_with_time(msg, "завтра", item_id, state, tp, rs, lang="ru")
 
     from bot.handlers.reminders import ReminderStates
 
@@ -509,7 +523,7 @@ async def test_handle_task_with_time_no_services_shows_button() -> None:
     state = make_state()
     item_id = "some-id"
 
-    await _handle_task_with_time(msg, "завтра", item_id, state, None, None)
+    await _handle_task_with_time(msg, "завтра", item_id, state, None, None, lang="ru")
 
     msg.answer.assert_awaited_once()
     assert "Задача сохранена" in msg.answer.call_args[0][0]
@@ -532,7 +546,7 @@ async def test_multiple_tasks_without_time_no_fsm_blocking() -> None:
         task_svc = MagicMock(spec=TaskService)
         task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
 
-        await handle_text(msg, state=state, classifier=classifier, task_service=task_svc)
+        await handle_text(msg, state=state, classifier=classifier, task_service=task_svc, lang="ru")
         msg.answer.assert_awaited_once()
         assert "Задача сохранена" in msg.answer.call_args[0][0]
 

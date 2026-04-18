@@ -60,7 +60,8 @@ async def test_transcribe_auth_error_raises_with_key_message(fake_config) -> Non
     ):
         await svc.transcribe(b"audio-bytes")
 
-    assert "GROQ_API_KEY" in str(exc_info.value)
+    # Exception now carries an i18n key — handlers translate it via ``t()``.
+    assert str(exc_info.value) == "transcription_bad_key"
 
 
 async def test_transcribe_connection_error_raises_with_unavailable_message(fake_config) -> None:
@@ -76,7 +77,7 @@ async def test_transcribe_connection_error_raises_with_unavailable_message(fake_
     ):
         await svc.transcribe(b"audio-bytes")
 
-    assert "недоступен" in str(exc_info.value)
+    assert str(exc_info.value) == "transcription_unavailable"
 
 
 async def test_transcribe_generic_groq_error_raises_transcription_error(fake_config) -> None:

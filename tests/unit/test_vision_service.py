@@ -56,7 +56,8 @@ async def test_analyze_api_error_falls_back_to_other() -> None:
     svc._client.messages.create = AsyncMock(side_effect=Exception("API error"))
     result = await svc.analyze(b"fake bytes")
     assert result.category == "other"
-    assert "Не удалось" in result.description
+    # The fallback description is taken from the i18n table (default language).
+    assert "Failed to analyze" in result.description
 
 
 def test_parse_response_all_categories() -> None:
@@ -76,7 +77,8 @@ async def test_analyze_unsupported_media_type_falls_back_to_other() -> None:
     svc._client = MagicMock()
     result = await svc.analyze(b"pdf bytes", media_type="application/pdf")
     assert result.category == "other"
-    assert "не поддерживается" in result.description
+    # Fallback description is taken from the i18n table (default language, EN).
+    assert "not supported" in result.description
     svc._client.messages.create.assert_not_called()
 
 

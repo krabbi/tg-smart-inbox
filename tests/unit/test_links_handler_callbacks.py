@@ -44,7 +44,7 @@ async def test_cb_link_summary_shows_loading_state_immediately() -> None:
         return_value=LinkSummary(title="T", body="B", url="https://example.com")
     )
 
-    await cb_link_summary(cb, link_service=svc)
+    await cb_link_summary(cb, link_service=svc, lang="ru")
 
     # First edit_text call is loading state
     first_call = cb.message.edit_text.call_args_list[0]
@@ -98,7 +98,7 @@ async def test_cb_link_summary_shows_save_button_after_summary() -> None:
         return_value=LinkSummary(title="T", body="B", url="https://example.com")
     )
 
-    await cb_link_summary(cb, link_service=svc)
+    await cb_link_summary(cb, link_service=svc, lang="ru")
 
     final_call = cb.message.edit_text.call_args_list[1]
     keyboard = final_call[1].get("reply_markup")
@@ -115,7 +115,7 @@ async def test_cb_link_summary_shows_all_three_action_buttons() -> None:
         return_value=LinkSummary(title="T", body="B", url="https://example.com")
     )
 
-    await cb_link_summary(cb, link_service=svc)
+    await cb_link_summary(cb, link_service=svc, lang="ru")
 
     final_call = cb.message.edit_text.call_args_list[1]
     keyboard = final_call[1].get("reply_markup")
@@ -144,7 +144,7 @@ async def test_cb_link_summary_scraping_error_shows_retry_button() -> None:
     svc = MagicMock(spec=LinkService)
     svc.summarize = AsyncMock(side_effect=ScrapingError("failed"))
 
-    await cb_link_summary(cb, link_service=svc)
+    await cb_link_summary(cb, link_service=svc, lang="ru")
 
     # Second edit_text call is the error state
     error_call = cb.message.edit_text.call_args_list[1]
@@ -174,7 +174,7 @@ async def test_cb_link_summary_unexpected_error_shows_retry_button() -> None:
     svc = MagicMock(spec=LinkService)
     svc.summarize = AsyncMock(side_effect=Exception("Claude API exploded"))
 
-    await cb_link_summary(cb, link_service=svc)
+    await cb_link_summary(cb, link_service=svc, lang="ru")
 
     error_call = cb.message.edit_text.call_args_list[1]
     text = error_call[0][0]
@@ -229,7 +229,7 @@ async def test_cb_link_retry_error_shows_retry_again() -> None:
     svc = MagicMock(spec=LinkService)
     svc.summarize = AsyncMock(side_effect=ScrapingError("still failing"))
 
-    await cb_link_retry(cb, link_service=svc)
+    await cb_link_retry(cb, link_service=svc, lang="ru")
 
     error_call = cb.message.edit_text.call_args_list[1]
     keyboard = error_call[1].get("reply_markup")
@@ -262,7 +262,7 @@ async def test_cb_link_save_appends_confirmation_and_removes_keyboard() -> None:
     cb = make_callback("link:save:uuid")
     cb.message.html_text = "🔗 Ссылка сохранена:\nhttps://example.com"
 
-    await cb_link_save(cb)
+    await cb_link_save(cb, lang="ru")
 
     cb.answer.assert_awaited_once()
     cb.message.edit_text.assert_awaited_once()
@@ -350,7 +350,7 @@ async def test_cb_link_remind_goes_directly_to_time_input() -> None:
     state.update_data = AsyncMock()
     state.set_state = AsyncMock()
 
-    await cb_link_remind(cb, state=state)
+    await cb_link_remind(cb, state=state, lang="ru")
 
     from bot.handlers.reminders import ReminderStates
 

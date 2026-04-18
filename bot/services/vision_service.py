@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import anthropic
 
 from bot.config import Config
+from bot.i18n import DEFAULT_LANGUAGE, t
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,8 @@ class VisionService:
                 "Unsupported media type for vision analysis: %s, defaulting to 'other'", media_type
             )
             return MediaAnalysis(
-                category="other", description="Формат файла не поддерживается для анализа."
+                category="other",
+                description=t("vision_unsupported_format", DEFAULT_LANGUAGE),
             )
         b64 = base64.standard_b64encode(image_bytes).decode()
         try:
@@ -83,17 +85,21 @@ class VisionService:
             return self._parse_response(response.content[0].text)  # type: ignore[union-attr]
         except Exception:
             logger.exception("Vision analysis failed, falling back to 'other'")
-            return MediaAnalysis(category="other", description="Не удалось проанализировать файл.")
+            return MediaAnalysis(
+                category="other",
+                description=t("vision_analyze_failed", DEFAULT_LANGUAGE),
+            )
 
     @staticmethod
     def _parse_response(raw: str) -> MediaAnalysis:
         """Parse Claude's JSON response into MediaAnalysis, defaulting to 'other'."""
+        default_description = t("vision_media_default", DEFAULT_LANGUAGE)
         try:
             data = json.loads(raw.strip())
             category = str(data.get("category", "other")).lower()
             if category not in _VALID_CATEGORIES:
                 category = "other"
-            description = str(data.get("description", "Медиафайл"))
+            description = str(data.get("description", default_description))
             return MediaAnalysis(category=category, description=description)
         except (json.JSONDecodeError, AttributeError):
-            return MediaAnalysis(category="other", description="Медиафайл")
+            return MediaAnalysis(category="other", description=default_description)

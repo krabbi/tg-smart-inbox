@@ -86,7 +86,7 @@ def make_tz_service() -> MagicMock:
 
 
 def test_continent_keyboard_has_four_options() -> None:
-    kb = _continent_keyboard()
+    kb = _continent_keyboard("ru")
     flat = [b.text for row in kb.inline_keyboard for b in row]
     assert "Европа" in flat
     assert "Азия" in flat
@@ -94,8 +94,17 @@ def test_continent_keyboard_has_four_options() -> None:
     assert "Другое" in flat
 
 
+def test_continent_keyboard_localizes_labels_en() -> None:
+    kb = _continent_keyboard("en")
+    flat = [b.text for row in kb.inline_keyboard for b in row]
+    assert "Europe" in flat
+    assert "Asia" in flat
+    assert "America" in flat
+    assert "Other" in flat
+
+
 def test_country_keyboard_has_back_button() -> None:
-    kb, pairs = _country_keyboard(CONTINENT_EUROPE)
+    kb, pairs = _country_keyboard(CONTINENT_EUROPE, "ru")
     assert len(pairs) > 0
     # last row has a single back button
     last_row = kb.inline_keyboard[-1]
@@ -105,14 +114,14 @@ def test_country_keyboard_has_back_button() -> None:
 
 
 def test_country_keyboard_labels_match_pairs() -> None:
-    kb, pairs = _country_keyboard(CONTINENT_OTHER)
+    kb, pairs = _country_keyboard(CONTINENT_OTHER, "ru")
     country_names = {name for name, _ in pairs}
     labels = {b.text for row in kb.inline_keyboard[:-1] for b in row}
     assert labels == country_names
 
 
 def test_zone_keyboard_has_back_button() -> None:
-    kb = _zone_keyboard(["Europe/Moscow", "Asia/Yekaterinburg"])
+    kb = _zone_keyboard(["Europe/Moscow", "Asia/Yekaterinburg"], "ru")
     last_row = kb.inline_keyboard[-1]
     assert last_row[0].callback_data == _CB_BACK_COUNTRY
 
@@ -157,14 +166,14 @@ async def test_start_timezone_setup_sets_state_and_sends_keyboard() -> None:
     msg = make_message()
     state = make_state()
 
-    await start_timezone_setup(msg, state)
+    await start_timezone_setup(msg, state, "ru")
 
     state.set_state.assert_awaited_once_with(TimezoneSetupStates.waiting_for_continent)
     msg.answer.assert_awaited_once()
     text = msg.answer.call_args[0][0]
     assert "часовой пояс" in text.lower()
     kb = msg.answer.call_args.kwargs["reply_markup"]
-    assert kb is _continent_keyboard() or kb.inline_keyboard  # keyboard was passed
+    assert kb is _continent_keyboard("ru") or kb.inline_keyboard  # keyboard was passed
 
 
 # ── cb_pick_continent ────────────────────────────────────────────────────────

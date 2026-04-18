@@ -13,6 +13,7 @@ from aiogram.types import (
 )
 
 from bot.exceptions import TimeParseError
+from bot.i18n import t
 from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
@@ -35,13 +36,13 @@ _ATTEMPTS_KEY = "reminder_attempts"
 _MAX_ATTEMPTS = 3
 
 
-def task_remind_keyboard(item_id: str) -> InlineKeyboardMarkup:
+def task_remind_keyboard(item_id: str, lang: str) -> InlineKeyboardMarkup:
     """Build inline keyboard with a single 'Remind' button carrying item_id."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="\u23f0 Напомнить",
+                    text=t("task_btn_remind", lang),
                     callback_data=f"task_remind:{item_id}",
                 ),
             ]
@@ -50,7 +51,7 @@ def task_remind_keyboard(item_id: str) -> InlineKeyboardMarkup:
 
 
 @router.callback_query(F.data.startswith("task_remind:"))
-async def cb_task_remind(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_task_remind(callback: CallbackQuery, state: FSMContext, lang: str = "en") -> None:
     """Handle 'Remind' button on a saved task — enter time input FSM."""
     await callback.answer()
     if callback.message is None:
@@ -62,10 +63,7 @@ async def cb_task_remind(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data({_ITEM_ID_KEY: item_id, _ATTEMPTS_KEY: 0})
     await state.set_state(ReminderStates.waiting_for_time)
-    await callback.message.answer(
-        "Когда напомнить? (например: «завтра в 10», «через 2 часа», «в пятницу в 15:00»)\n"
-        "Для отмены — /cancel"
-    )
+    await callback.message.answer(t("reminder_prompt_when", lang))
 
 
 @router.message(ReminderStates.waiting_for_time)
@@ -76,6 +74,7 @@ async def receive_reminder_time(
     reminder_service: ReminderService | None = None,
     link_service: LinkService | None = None,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Parse the user's time expression and create the reminder."""
     # Local import avoids the reminders ↔ links circular import at module level.
@@ -88,13 +87,13 @@ async def receive_reminder_time(
     if url is not None:
         await state.clear()
         if link_service is None:
-            await message.answer("Сервис ссылок временно недоступен.")
+            await message.answer(t("link_service_unavailable", lang))
             return
-        await handle_link_message(message, url, link_service)
+        await handle_link_message(message, url, link_service, lang)
         return
 
     if time_parser is None or reminder_service is None:
-        await message.answer("Сервис напоминаний временно недоступен.")
+        await message.answer(t("reminder_service_unavailable", lang))
         await state.clear()
         return
 
@@ -115,15 +114,16 @@ async def receive_reminder_time(
         attempts = data.get(_ATTEMPTS_KEY, 0) + 1
         if attempts >= _MAX_ATTEMPTS:
             await state.clear()
-            await message.answer(
-                "Не удалось разобрать время после нескольких попыток. Напоминание не создано."
-            )
+            await message.answer(t("reminder_time_parse_failed_final", lang))
             return
         await state.update_data({_ATTEMPTS_KEY: attempts})
         await message.answer(
-            f"Не смог понять время ({attempts}/{_MAX_ATTEMPTS}). "
-            "Попробуй: «завтра в 10», «через 2 часа», «в пятницу в 15:00»\n"
-            "Для отмены — /cancel"
+            t(
+                "reminder_time_parse_retry",
+                lang,
+                attempts=attempts,
+                max_attempts=_MAX_ATTEMPTS,
+            )
         )
         return
 
@@ -132,13 +132,13 @@ async def receive_reminder_time(
         await reminder_service.create(item_id=item_id, remind_at=remind_at)
     except Exception:
         logger.exception("Failed to save reminder for item %s", item_id_str)
-        await message.answer("Не удалось сохранить напоминание.")
+        await message.answer(t("reminder_save_failed", lang))
         await state.clear()
         return
 
     await state.clear()
     formatted = format_remind_at(remind_at, user_tz)
-    await message.answer(f"\U0001f514 Напомню {formatted}!")
+    await message.answer(t("reminder_created", lang, formatted=formatted))
 
 
 @router.callback_query(F.data.startswith("remind_snooze:"))
@@ -146,6 +146,7 @@ async def cb_remind_snooze(
     callback: CallbackQuery,
     reminder_service: ReminderService | None = None,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Snooze a reminder by 1 hour or 1 day."""
     await callback.answer()
@@ -160,13 +161,13 @@ async def cb_remind_snooze(
 
     if period == "1h":
         delta = timedelta(hours=1)
-        label = "1 час"
+        label = t("reminder_snooze_1h_label", lang)
     else:
         delta = timedelta(days=1)
-        label = "1 день"
+        label = t("reminder_snooze_1d_label", lang)
 
     if reminder_service is None:
-        await callback.message.answer("Сервис напоминаний временно недоступен.")
+        await callback.message.answer(t("reminder_service_unavailable", lang))
         return
 
     try:
@@ -179,7 +180,7 @@ async def cb_remind_snooze(
         )
     except Exception:
         logger.exception("Failed to snooze reminder %s", reminder_id_str)
-        await callback.message.answer("Не удалось отложить напоминание.")
+        await callback.message.answer(t("reminder_snooze_failed", lang))
         return
 
     await callback.message.edit_reply_markup(reply_markup=None)
@@ -188,15 +189,18 @@ async def cb_remind_snooze(
         if user_settings_service is not None:
             user_tz = await user_settings_service.get_timezone(callback.from_user.id)
         formatted = format_remind_at(remind_at, user_tz)
-        await callback.message.answer(f"\u23f0 Напомню через {label} ({formatted}).")
+        await callback.message.answer(
+            t("reminder_snoozed", lang, period=label, formatted=formatted)
+        )
     else:
-        await callback.message.answer("Напоминание не найдено или уже неактивно.")
+        await callback.message.answer(t("reminder_not_found_or_inactive", lang))
 
 
 @router.callback_query(F.data.startswith("remind_ack:"))
 async def cb_remind_ack(
     callback: CallbackQuery,
     reminder_service: ReminderService | None = None,
+    lang: str = "en",
 ) -> None:
     """Acknowledge a reminder — user has seen and processed it."""
     await callback.answer()
@@ -206,7 +210,7 @@ async def cb_remind_ack(
     reminder_id_str = (callback.data or "").removeprefix("remind_ack:")
 
     if reminder_service is None:
-        await callback.message.answer("Сервис напоминаний временно недоступен.")
+        await callback.message.answer(t("reminder_service_unavailable", lang))
         return
 
     try:
@@ -217,12 +221,12 @@ async def cb_remind_ack(
         )
     except Exception:
         logger.exception("Failed to acknowledge reminder %s", reminder_id_str)
-        await callback.message.answer("Не удалось подтвердить напоминание.")
+        await callback.message.answer(t("reminder_ack_failed", lang))
         return
 
     existing_text = callback.message.html_text or callback.message.text or ""
     await callback.message.edit_text(
-        existing_text + "\n\n\u2705 <i>Выполнено</i>",
+        existing_text + f"\n\n{t('reminder_ack_done', lang)}",
         parse_mode="HTML",
         reply_markup=None,
     )

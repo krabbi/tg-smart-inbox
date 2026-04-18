@@ -18,6 +18,7 @@ from aiogram.types import (
 )
 
 from bot.exceptions import InvalidTimezoneError
+from bot.i18n import t
 from bot.services.user_settings_service import UserSettingsService
 
 router = Router(name="timezone_setup")
@@ -41,12 +42,18 @@ CONTINENT_ASIA = "asia"
 CONTINENT_AMERICA = "america"
 CONTINENT_OTHER = "other"
 
-_CONTINENT_LABEL = {
-    CONTINENT_EUROPE: "Европа",
-    CONTINENT_ASIA: "Азия",
-    CONTINENT_AMERICA: "Америка",
-    CONTINENT_OTHER: "Другое",
+_CONTINENT_LABEL_KEY = {
+    CONTINENT_EUROPE: "tz_continent_europe",
+    CONTINENT_ASIA: "tz_continent_asia",
+    CONTINENT_AMERICA: "tz_continent_america",
+    CONTINENT_OTHER: "tz_continent_other",
 }
+
+
+def _continent_label(continent: str, lang: str) -> str:
+    """Return the localized label for a continent key."""
+    return t(_CONTINENT_LABEL_KEY[continent], lang)
+
 
 # Each country maps to the list of IANA zones that belong to it.
 # Order inside each list is preserved when rendering the zone picker.
@@ -230,16 +237,18 @@ def _chunk(items: list, width: int) -> list[list]:
     return [items[i : i + width] for i in range(0, len(items), width)]
 
 
-def _continent_keyboard() -> InlineKeyboardMarkup:
+def _continent_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Build the step-1 keyboard with the four continent choices."""
     buttons = [
-        InlineKeyboardButton(text=_CONTINENT_LABEL[c], callback_data=f"{_CB_CONTINENT}{c}")
+        InlineKeyboardButton(text=_continent_label(c, lang), callback_data=f"{_CB_CONTINENT}{c}")
         for c in (CONTINENT_EUROPE, CONTINENT_ASIA, CONTINENT_AMERICA, CONTINENT_OTHER)
     ]
     return InlineKeyboardMarkup(inline_keyboard=_chunk(buttons, _ROW_WIDTH))
 
 
-def _country_keyboard(continent: str) -> tuple[InlineKeyboardMarkup, list[tuple[str, list[str]]]]:
+def _country_keyboard(
+    continent: str, lang: str
+) -> tuple[InlineKeyboardMarkup, list[tuple[str, list[str]]]]:
     """Build the step-2 keyboard; return (keyboard, ordered [country, zones] pairs)."""
     pairs = _countries_with_zones(continent)
     buttons = [
@@ -247,18 +256,22 @@ def _country_keyboard(continent: str) -> tuple[InlineKeyboardMarkup, list[tuple[
         for idx, (country, _) in enumerate(pairs)
     ]
     rows = _chunk(buttons, _ROW_WIDTH)
-    rows.append([InlineKeyboardButton(text="← Назад", callback_data=_CB_BACK_CONTINENT)])
+    rows.append(
+        [InlineKeyboardButton(text=t("pagination_prev", lang), callback_data=_CB_BACK_CONTINENT)]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows), pairs
 
 
-def _zone_keyboard(zones: list[str]) -> InlineKeyboardMarkup:
+def _zone_keyboard(zones: list[str], lang: str) -> InlineKeyboardMarkup:
     """Build the step-3 keyboard listing each IANA zone for the country."""
     buttons = [
         InlineKeyboardButton(text=_zone_label(z), callback_data=f"{_CB_ZONE}{idx}")
         for idx, z in enumerate(zones)
     ]
     rows = _chunk(buttons, _ROW_WIDTH)
-    rows.append([InlineKeyboardButton(text="← Назад", callback_data=_CB_BACK_COUNTRY)])
+    rows.append(
+        [InlineKeyboardButton(text=t("pagination_prev", lang), callback_data=_CB_BACK_COUNTRY)]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -288,20 +301,20 @@ def _format_utc_offset(zone: str, now: datetime | None = None) -> str:
     return f"UTC{sign}{hours:02d}:{minutes:02d}"
 
 
-async def start_timezone_setup(message: Message, state: FSMContext) -> None:
+async def start_timezone_setup(message: Message, state: FSMContext, lang: str = "en") -> None:
     """Entry point: show the continent picker and enter the FSM.
 
     Reusable by /start (on first run) and by /config timezone (issue #65).
     """
     await state.set_state(TimezoneSetupStates.waiting_for_continent)
     await message.answer(
-        "Давай настроим твой часовой пояс. Выбери континент:",
-        reply_markup=_continent_keyboard(),
+        t("tz_choose_continent", lang),
+        reply_markup=_continent_keyboard(lang),
     )
 
 
 @router.callback_query(TimezoneSetupStates.waiting_for_continent, F.data.startswith(_CB_CONTINENT))
-async def cb_pick_continent(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_pick_continent(callback: CallbackQuery, state: FSMContext, lang: str = "en") -> None:
     """Handle continent selection — advance to the country picker."""
     await callback.answer()
     if callback.message is None or callback.data is None:
@@ -311,33 +324,35 @@ async def cb_pick_continent(callback: CallbackQuery, state: FSMContext) -> None:
     if continent not in _CONTINENT_COUNTRIES:
         return
 
-    keyboard, pairs = _country_keyboard(continent)
+    keyboard, pairs = _country_keyboard(continent, lang)
     if not pairs:
         # Should never happen with the curated mapping, but fail gracefully.
         await callback.message.edit_text(
-            "Для этого континента нет доступных зон. Попробуй другой.",
-            reply_markup=_continent_keyboard(),
+            t("tz_no_zones_on_continent", lang),
+            reply_markup=_continent_keyboard(lang),
         )
         return
 
     await state.update_data({_STATE_CONTINENT_KEY: continent})
     await state.set_state(TimezoneSetupStates.waiting_for_country)
     await callback.message.edit_text(
-        f"Континент: <b>{_CONTINENT_LABEL[continent]}</b>\nТеперь выбери страну:",
+        t("tz_choose_country", lang, continent=_continent_label(continent, lang)),
         reply_markup=keyboard,
     )
 
 
 @router.callback_query(TimezoneSetupStates.waiting_for_country, F.data == _CB_BACK_CONTINENT)
-async def cb_back_to_continent(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_back_to_continent(
+    callback: CallbackQuery, state: FSMContext, lang: str = "en"
+) -> None:
     """Step back from the country picker to the continent picker."""
     await callback.answer()
     if callback.message is None:
         return
     await state.set_state(TimezoneSetupStates.waiting_for_continent)
     await callback.message.edit_text(
-        "Давай настроим твой часовой пояс. Выбери континент:",
-        reply_markup=_continent_keyboard(),
+        t("tz_choose_continent", lang),
+        reply_markup=_continent_keyboard(lang),
     )
 
 
@@ -346,6 +361,7 @@ async def cb_pick_country(
     callback: CallbackQuery,
     state: FSMContext,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle country selection — advance to the zone picker, or finish if only one zone."""
     await callback.answer()
@@ -369,19 +385,19 @@ async def cb_pick_country(
     country, zones = pairs[idx]
 
     if len(zones) == 1:
-        await _finalize_zone(callback, state, zones[0], user_settings_service)
+        await _finalize_zone(callback, state, zones[0], user_settings_service, lang)
         return
 
     await state.update_data({_STATE_COUNTRY_KEY: country})
     await state.set_state(TimezoneSetupStates.waiting_for_zone)
     await callback.message.edit_text(
-        f"Страна: <b>{country}</b>\nВыбери город / часовой пояс:",
-        reply_markup=_zone_keyboard(zones),
+        t("tz_choose_city", lang, country=country),
+        reply_markup=_zone_keyboard(zones, lang),
     )
 
 
 @router.callback_query(TimezoneSetupStates.waiting_for_zone, F.data == _CB_BACK_COUNTRY)
-async def cb_back_to_country(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_back_to_country(callback: CallbackQuery, state: FSMContext, lang: str = "en") -> None:
     """Step back from the zone picker to the country picker."""
     await callback.answer()
     if callback.message is None:
@@ -391,14 +407,14 @@ async def cb_back_to_country(callback: CallbackQuery, state: FSMContext) -> None
     if continent not in _CONTINENT_COUNTRIES:
         await state.set_state(TimezoneSetupStates.waiting_for_continent)
         await callback.message.edit_text(
-            "Давай настроим твой часовой пояс. Выбери континент:",
-            reply_markup=_continent_keyboard(),
+            t("tz_choose_continent", lang),
+            reply_markup=_continent_keyboard(lang),
         )
         return
-    keyboard, _ = _country_keyboard(continent)
+    keyboard, _ = _country_keyboard(continent, lang)
     await state.set_state(TimezoneSetupStates.waiting_for_country)
     await callback.message.edit_text(
-        f"Континент: <b>{_CONTINENT_LABEL[continent]}</b>\nТеперь выбери страну:",
+        t("tz_choose_country", lang, continent=_continent_label(continent, lang)),
         reply_markup=keyboard,
     )
 
@@ -408,6 +424,7 @@ async def cb_pick_zone(
     callback: CallbackQuery,
     state: FSMContext,
     user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle zone selection — persist the timezone and send the confirmation."""
     await callback.answer()
@@ -429,7 +446,7 @@ async def cb_pick_zone(
     if idx < 0 or idx >= len(zones):
         return
 
-    await _finalize_zone(callback, state, zones[idx], user_settings_service)
+    await _finalize_zone(callback, state, zones[idx], user_settings_service, lang)
 
 
 async def _finalize_zone(
@@ -437,13 +454,14 @@ async def _finalize_zone(
     state: FSMContext,
     zone: str,
     user_settings_service: UserSettingsService | None,
+    lang: str,
 ) -> None:
     """Save the selected IANA zone and reply with confirmation; clears FSM state."""
     if callback.message is None or callback.from_user is None:
         return
     if user_settings_service is None:
         await callback.message.edit_text(
-            "Сервис настроек временно недоступен. Попробуй позже.",
+            t("tz_settings_service_unavailable", lang),
             reply_markup=None,
         )
         await state.clear()
@@ -453,8 +471,8 @@ async def _finalize_zone(
         await user_settings_service.set_timezone(callback.from_user.id, zone)
     except InvalidTimezoneError:
         await callback.message.edit_text(
-            "Не удалось сохранить выбранный часовой пояс. Попробуй ещё раз.",
-            reply_markup=_continent_keyboard(),
+            t("tz_save_failed", lang),
+            reply_markup=_continent_keyboard(lang),
         )
         await state.set_state(TimezoneSetupStates.waiting_for_continent)
         return
@@ -462,6 +480,6 @@ async def _finalize_zone(
     await state.clear()
     offset = _format_utc_offset(zone)
     await callback.message.edit_text(
-        f"✅ Часовой пояс установлен: <b>{zone}</b> ({offset})",
+        t("tz_saved", lang, zone=zone, offset=offset),
         reply_markup=None,
     )

@@ -24,6 +24,7 @@ from aiogram.types import (
 )
 
 from bot.exceptions import SemanticSearchUnavailableError
+from bot.i18n import t
 from bot.models.item import Item, ItemType
 from bot.services.list_service import ListService
 from bot.services.semantic_search_service import SearchResult, SemanticSearchService
@@ -55,11 +56,6 @@ _MODE_SMART = "smart"
 
 _PAGE_SIZE = 5
 
-# User-facing messages reused across happy/failure paths.
-_SERVICE_UNAVAILABLE_MSG = "Поиск временно недоступен. Попробуйте позже."
-_SEMANTIC_UNAVAILABLE_MSG = "Умный поиск временно недоступен. Попробуйте обычный поиск."
-_NO_RESULTS_MSG = "Ничего не найдено. Попробуйте перефразировать запрос."
-
 # Emoji per Item type, mirrored from bot/handlers/commands.py so the two
 # listings look the same.
 _TYPE_EMOJI = {
@@ -70,14 +66,14 @@ _TYPE_EMOJI = {
     ItemType.idea: "💡",
 }
 
-# Human-readable labels for semantic results. Items of type ``media`` do not
+# i18n keys for semantic-result type labels. Items of type ``media`` do not
 # participate in semantic search but are kept here for completeness.
-_TYPE_LABEL = {
-    ItemType.link: "ссылка",
-    ItemType.note: "заметка",
-    ItemType.task: "задача",
-    ItemType.media: "медиа",
-    ItemType.idea: "идея",
+_TYPE_LABEL_KEY = {
+    ItemType.link: "search_label_link",
+    ItemType.note: "search_label_note",
+    ItemType.task: "search_label_task",
+    ItemType.media: "search_label_media",
+    ItemType.idea: "search_label_idea",
 }
 
 _PREVIEW_CHARS = 100
@@ -93,14 +89,18 @@ class _SearchOutcome:
     error_message: str | None
 
 
-def _mode_keyboard() -> InlineKeyboardMarkup:
+def _mode_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Build the step-1 keyboard offering the two search modes."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔍 Обычный", callback_data=f"{_CB_MODE}{_MODE_PLAIN}"),
                 InlineKeyboardButton(
-                    text="🧠 Умный (AI)", callback_data=f"{_CB_MODE}{_MODE_SMART}"
+                    text=t("search_btn_plain", lang),
+                    callback_data=f"{_CB_MODE}{_MODE_PLAIN}",
+                ),
+                InlineKeyboardButton(
+                    text=t("search_btn_smart", lang),
+                    callback_data=f"{_CB_MODE}{_MODE_SMART}",
                 ),
             ]
         ]
@@ -133,22 +133,30 @@ def _has_prev(page: int) -> bool:
     return page > 0
 
 
-def _pagination_keyboard(page: int, has_next: bool) -> InlineKeyboardMarkup | None:
+def _pagination_keyboard(page: int, has_next: bool, lang: str) -> InlineKeyboardMarkup | None:
     """Build prev/next pagination keyboard; return ``None`` when both disabled."""
     buttons: list[InlineKeyboardButton] = []
     if _has_prev(page):
-        buttons.append(InlineKeyboardButton(text="← Назад", callback_data=f"{_CB_PAGE}{page - 1}"))
+        buttons.append(
+            InlineKeyboardButton(
+                text=t("pagination_prev", lang), callback_data=f"{_CB_PAGE}{page - 1}"
+            )
+        )
     if has_next:
-        buttons.append(InlineKeyboardButton(text="Вперёд →", callback_data=f"{_CB_PAGE}{page + 1}"))
+        buttons.append(
+            InlineKeyboardButton(
+                text=t("pagination_next", lang), callback_data=f"{_CB_PAGE}{page + 1}"
+            )
+        )
     if not buttons:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
-def _format_plain_results(items: list[Item], query: str, page: int) -> str:
+def _format_plain_results(items: list[Item], query: str, page: int, lang: str) -> str:
     """Format a page of plain full-text search results."""
     safe_query = html.escape(query)
-    lines = [f"🔍 <b>Результаты по «{safe_query}»</b> (стр. {page + 1}):\n"]
+    lines = [t("search_header_plain", lang, query=safe_query, page=page + 1)]
     for item in items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
         snippet = html.escape(_truncate(item.content, 80))
@@ -157,47 +165,46 @@ def _format_plain_results(items: list[Item], query: str, page: int) -> str:
     return "\n".join(lines)
 
 
-def _format_semantic_results(results: list[SearchResult], query: str, page: int) -> str:
+def _format_semantic_results(results: list[SearchResult], query: str, page: int, lang: str) -> str:
     """Format a page of semantic search results with relevance bars."""
     safe_query = html.escape(query)
-    lines = [f"🧠 <b>Умный поиск по «{safe_query}»</b> (стр. {page + 1}):\n"]
+    lines = [t("search_header_smart", lang, query=safe_query, page=page + 1)]
     for result in results:
-        label, emoji = _semantic_header_parts(result)
+        label, emoji = _semantic_header_parts(result, lang)
         title = html.escape(_truncate(result.title, _PREVIEW_CHARS))
         preview = html.escape(_truncate(result.preview_text, _PREVIEW_CHARS))
         bar = _relevance_bar(result.score)
-        entry = f"{emoji} <b>[{label}]</b> {title}\nРелевантность: {bar}"
+        relevance = t("search_entry_relevance", lang, bar=bar)
+        entry = f"{emoji} <b>[{label}]</b> {title}\n{relevance}"
         if preview and preview != title:
-            entry += f"\nТекст: {preview}"
+            entry += "\n" + t("search_entry_preview", lang, preview=preview)
         lines.append(entry)
     return "\n\n".join(lines)
 
 
-def _semantic_header_parts(result: SearchResult) -> tuple[str, str]:
+def _semantic_header_parts(result: SearchResult, lang: str) -> tuple[str, str]:
     """Map a ``SearchResult`` to the (label, emoji) used in its header."""
     if result.type == "idea":
-        return _TYPE_LABEL[ItemType.idea], _TYPE_EMOJI[ItemType.idea]
+        return t(_TYPE_LABEL_KEY[ItemType.idea], lang), _TYPE_EMOJI[ItemType.idea]
     # ``SearchResult`` does not carry the ItemType for non-idea items, so we
     # fall back to a generic record label. In practice the emoji/label distinguish
     # ideas from other items, which is the most important visual cue.
-    return "запись", "📄"
+    return t("search_label_record", lang), "📄"
 
 
 @router.message(Command("search"))
-async def cmd_search(message: Message, state: FSMContext) -> None:
+async def cmd_search(message: Message, state: FSMContext, lang: str = "en") -> None:
     """Enter the /search FSM by asking the user to pick a search mode."""
     await state.clear()
     await state.set_state(SearchStates.choosing_mode)
     await message.answer(
-        "Какой поиск запустить?\n\n"
-        "<b>🔍 Обычный</b> — ищет по точному вхождению текста.\n"
-        "<b>🧠 Умный (AI)</b> — понимает смысл запроса, а не только слова.",
-        reply_markup=_mode_keyboard(),
+        t("search_choose_mode", lang),
+        reply_markup=_mode_keyboard(lang),
     )
 
 
 @router.callback_query(SearchStates.choosing_mode, F.data.startswith(_CB_MODE))
-async def cb_pick_mode(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_pick_mode(callback: CallbackQuery, state: FSMContext, lang: str = "en") -> None:
     """Handle mode selection — remember the choice and ask for the query."""
     await callback.answer()
     if callback.message is None or callback.data is None:
@@ -211,7 +218,9 @@ async def cb_pick_mode(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data({_MODE_KEY: mode})
     await state.set_state(SearchStates.waiting_query)
-    prompt = "Введите запрос для умного поиска:" if mode == _MODE_SMART else "Введите запрос:"
+    prompt = (
+        t("search_prompt_smart", lang) if mode == _MODE_SMART else t("search_prompt_plain", lang)
+    )
     try:
         await callback.message.edit_text(prompt, reply_markup=None)
     except Exception:
@@ -226,11 +235,12 @@ async def receive_search_query(
     state: FSMContext,
     list_service: ListService | None = None,
     semantic_search_service: SemanticSearchService | None = None,
+    lang: str = "en",
 ) -> None:
     """Run the chosen search against ``message.text`` and reply with results."""
     query = (message.text or "").strip()
     if not query:
-        await message.answer("Пустой запрос. Введите текст или /cancel.")
+        await message.answer(t("search_empty_query", lang))
         return
 
     data = await state.get_data()
@@ -244,6 +254,7 @@ async def receive_search_query(
         page=0,
         list_service=list_service,
         semantic_search_service=semantic_search_service,
+        lang=lang,
     )
 
     if outcome.reply is None:
@@ -263,6 +274,7 @@ async def cb_search_page(
     state: FSMContext,
     list_service: ListService | None = None,
     semantic_search_service: SemanticSearchService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle pagination for the current search — re-run the stored query."""
     await callback.answer()
@@ -293,6 +305,7 @@ async def cb_search_page(
         page=page,
         list_service=list_service,
         semantic_search_service=semantic_search_service,
+        lang=lang,
     )
 
     text = outcome.reply if outcome.reply is not None else outcome.error_message
@@ -314,13 +327,20 @@ async def _run_search(
     page: int,
     list_service: ListService | None,
     semantic_search_service: SemanticSearchService | None,
+    lang: str,
 ) -> _SearchOutcome:
     """Run the search for ``mode`` and return a structured outcome."""
     if mode == _MODE_SMART:
         return await _run_semantic_search(
-            query=query, user_id=user_id, page=page, service=semantic_search_service
+            query=query,
+            user_id=user_id,
+            page=page,
+            service=semantic_search_service,
+            lang=lang,
         )
-    return await _run_plain_search(query=query, user_id=user_id, page=page, service=list_service)
+    return await _run_plain_search(
+        query=query, user_id=user_id, page=page, service=list_service, lang=lang
+    )
 
 
 async def _run_plain_search(
@@ -329,17 +349,20 @@ async def _run_plain_search(
     user_id: int,
     page: int,
     service: ListService | None,
+    lang: str,
 ) -> _SearchOutcome:
     """Run the plain full-text search and build the reply for ``page``."""
     if service is None:
         logger.warning("list_service not injected — DI misconfiguration")
-        return _SearchOutcome(reply=None, keyboard=None, error_message=_SERVICE_UNAVAILABLE_MSG)
+        return _SearchOutcome(
+            reply=None, keyboard=None, error_message=t("search_service_unavailable", lang)
+        )
 
     # ``ListService.search`` currently returns a flat capped list, so we page
     # client-side. This keeps behaviour consistent with the pre-FSM search.
     all_items = await service.search(user_id, query)
     if not all_items:
-        return _SearchOutcome(reply=None, keyboard=None, error_message=_NO_RESULTS_MSG)
+        return _SearchOutcome(reply=None, keyboard=None, error_message=t("search_no_results", lang))
 
     start = page * _PAGE_SIZE
     page_items = all_items[start : start + _PAGE_SIZE]
@@ -350,8 +373,8 @@ async def _run_plain_search(
         page_items = all_items[:_PAGE_SIZE]
 
     has_next = len(all_items) > (page + 1) * _PAGE_SIZE
-    text = _format_plain_results(page_items, query, page)
-    keyboard = _pagination_keyboard(page, has_next)
+    text = _format_plain_results(page_items, query, page, lang)
+    keyboard = _pagination_keyboard(page, has_next, lang)
     return _SearchOutcome(reply=text, keyboard=keyboard, error_message=None)
 
 
@@ -361,24 +384,29 @@ async def _run_semantic_search(
     user_id: int,
     page: int,
     service: SemanticSearchService | None,
+    lang: str,
 ) -> _SearchOutcome:
     """Run the AI semantic search and build the reply for ``page``."""
     if service is None:
         logger.warning("semantic_search_service not injected — DI misconfiguration")
-        return _SearchOutcome(reply=None, keyboard=None, error_message=_SEMANTIC_UNAVAILABLE_MSG)
+        return _SearchOutcome(
+            reply=None, keyboard=None, error_message=t("search_semantic_unavailable", lang)
+        )
 
     try:
         results = await service.search(user_id, query, limit=_PAGE_SIZE, offset=page * _PAGE_SIZE)
     except SemanticSearchUnavailableError:
-        return _SearchOutcome(reply=None, keyboard=None, error_message=_SEMANTIC_UNAVAILABLE_MSG)
+        return _SearchOutcome(
+            reply=None, keyboard=None, error_message=t("search_semantic_unavailable", lang)
+        )
 
     if not results:
-        return _SearchOutcome(reply=None, keyboard=None, error_message=_NO_RESULTS_MSG)
+        return _SearchOutcome(reply=None, keyboard=None, error_message=t("search_no_results", lang))
 
     # The service returns up to ``limit`` rows; a full page implies there may
     # be a next page available. Semantic scores are monotonic per page, so
     # this is the best hint we have without an extra count query.
     has_next = len(results) >= _PAGE_SIZE
-    text = _format_semantic_results(results, query, page)
-    keyboard = _pagination_keyboard(page, has_next)
+    text = _format_semantic_results(results, query, page, lang)
+    keyboard = _pagination_keyboard(page, has_next, lang)
     return _SearchOutcome(reply=text, keyboard=keyboard, error_message=None)

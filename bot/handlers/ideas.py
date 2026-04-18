@@ -9,9 +9,27 @@ from aiogram.types import (
     Message,
 )
 
+from bot.i18n import t
 from bot.models.idea import IdeaComplexity, IdeaEffort
 from bot.services.idea_service import IdeaService, IdeasPage
 
+_COMPLEXITY_KEY = {
+    IdeaComplexity.simple: "idea_complexity_simple",
+    IdeaComplexity.medium: "idea_complexity_medium",
+    IdeaComplexity.complex: "idea_complexity_complex",
+}
+
+_EFFORT_KEY = {
+    IdeaEffort.quick: "idea_effort_quick",
+    IdeaEffort.halfday: "idea_effort_halfday",
+    IdeaEffort.day: "idea_effort_day",
+    IdeaEffort.longterm: "idea_effort_longterm",
+}
+
+
+# Legacy RU-only labels kept for backwards-compatible imports (tests + voice handler
+# fall back to them when no language is in scope). Prefer ``complexity_label()``
+# and ``effort_label()`` in new code.
 _COMPLEXITY_LABEL = {
     IdeaComplexity.simple: "простая",
     IdeaComplexity.medium: "средняя",
@@ -25,25 +43,36 @@ _EFFORT_LABEL = {
     IdeaEffort.longterm: "долгосрочно",
 }
 
+
+def complexity_label(complexity: IdeaComplexity, lang: str) -> str:
+    """Return the localized complexity label for an idea."""
+    return t(_COMPLEXITY_KEY[complexity], lang)
+
+
+def effort_label(effort: IdeaEffort, lang: str) -> str:
+    """Return the localized effort label for an idea."""
+    return t(_EFFORT_KEY[effort], lang)
+
+
 logger = logging.getLogger(__name__)
 
 router = Router(name="ideas")
 
 
-def _format_ideas_page(ideas_page: IdeasPage) -> str:
+def _format_ideas_page(ideas_page: IdeasPage, lang: str) -> str:
     """Format a page of ideas as a text message."""
-    lines = [f"💡 <b>Твои идеи</b> (стр. {ideas_page.page + 1}):\n"]
+    lines = [t("ideas_header", lang, page=ideas_page.page + 1)]
     start_num = ideas_page.page * 10 + 1
     for i, (item, idea) in enumerate(ideas_page.rows, start_num):
         snippet = item.content[:80] + ("…" if len(item.content) > 80 else "")
-        tags_str = " ".join(f"#{t}" for t in idea.tags) if idea.tags else ""
+        tags_str = " ".join(f"#{tag}" for tag in idea.tags) if idea.tags else ""
         date_str = item.created_at.strftime("%d.%m.%Y")
         entry = f"{i}. {snippet}"
         meta_parts = []
         if idea.complexity:
-            meta_parts.append(_COMPLEXITY_LABEL[idea.complexity])
+            meta_parts.append(complexity_label(idea.complexity, lang))
         if idea.effort:
-            meta_parts.append(_EFFORT_LABEL[idea.effort])
+            meta_parts.append(effort_label(idea.effort, lang))
         if meta_parts:
             entry += f" <i>({', '.join(meta_parts)})</i>"
         if tags_str:
@@ -51,22 +80,28 @@ def _format_ideas_page(ideas_page: IdeasPage) -> str:
         entry += f"  <i>{date_str}</i>"
         lines.append(entry)
 
-    lines.append(f"\n<i>Всего: {ideas_page.total}</i>")
+    lines.append(t("ideas_total", lang, total=ideas_page.total))
     return "\n\n".join(lines)
 
 
-def _ideas_keyboard(ideas_page: IdeasPage) -> InlineKeyboardMarkup | None:
+def _ideas_keyboard(ideas_page: IdeasPage, lang: str) -> InlineKeyboardMarkup | None:
     """Build prev/next pagination keyboard; return None if only one page."""
     if not ideas_page.has_prev and not ideas_page.has_next:
         return None
     buttons = []
     if ideas_page.has_prev:
         buttons.append(
-            InlineKeyboardButton(text="← Назад", callback_data=f"ideas_page:{ideas_page.page - 1}")
+            InlineKeyboardButton(
+                text=t("pagination_prev", lang),
+                callback_data=f"ideas_page:{ideas_page.page - 1}",
+            )
         )
     if ideas_page.has_next:
         buttons.append(
-            InlineKeyboardButton(text="Вперёд →", callback_data=f"ideas_page:{ideas_page.page + 1}")
+            InlineKeyboardButton(
+                text=t("pagination_next", lang),
+                callback_data=f"ideas_page:{ideas_page.page + 1}",
+            )
         )
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
@@ -75,22 +110,23 @@ def _ideas_keyboard(ideas_page: IdeasPage) -> InlineKeyboardMarkup | None:
 async def handle_ideas_command(
     message: Message,
     idea_service: IdeaService | None = None,
+    lang: str = "en",
 ) -> None:
     """Show the user's saved ideas list with pagination."""
     if idea_service is None:
         logger.warning("idea_service not injected — DI misconfiguration")
-        await message.answer("Команда /ideas скоро будет доступна.")
+        await message.answer(t("ideas_command_unavailable", lang))
         return
 
     user_id = message.from_user.id if message.from_user else 0
     ideas_page = await idea_service.get_page(user_id, page=0)
 
     if ideas_page.total == 0:
-        await message.answer("У тебя пока нет идей. Поделись — просто напиши идею!")
+        await message.answer(t("ideas_empty", lang))
         return
 
-    reply = _format_ideas_page(ideas_page)
-    kb = _ideas_keyboard(ideas_page)
+    reply = _format_ideas_page(ideas_page, lang)
+    kb = _ideas_keyboard(ideas_page, lang)
     await message.answer(reply, reply_markup=kb)
 
 
@@ -98,6 +134,7 @@ async def handle_ideas_command(
 async def cb_ideas_page(
     callback: CallbackQuery,
     idea_service: IdeaService | None = None,
+    lang: str = "en",
 ) -> None:
     """Handle pagination for /ideas."""
     await callback.answer()
@@ -112,8 +149,8 @@ async def cb_ideas_page(
 
     user_id = callback.from_user.id
     ideas_page = await idea_service.get_page(user_id, page=page)
-    reply = _format_ideas_page(ideas_page)
-    kb = _ideas_keyboard(ideas_page)
+    reply = _format_ideas_page(ideas_page, lang)
+    kb = _ideas_keyboard(ideas_page, lang)
     try:
         await callback.message.edit_text(reply, reply_markup=kb)
     except Exception:
