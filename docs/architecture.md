@@ -582,6 +582,8 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `GOOGLE_DRIVE_FOLDER_ID` | No | `""` | Drive folder ID (enables media upload) |
 | `VOYAGE_API_KEY` | No | `""` | Voyage AI API key (enables semantic search / embeddings) |
 | `EMBEDDING_DIM` | No | `1024` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |
+| `GHCR_USER` | Prod only | — | GitHub username used by Watchtower to authenticate against `ghcr.io` and pull the bot image. Required when running the `prod` profile in `docker-compose.yml`. |
+| `GHCR_TOKEN` | Prod only | — | GitHub Personal Access Token with the `read:packages` scope. Used by Watchtower to pull `ghcr.io/krabbi/tg-smart-inbox:latest`. Required when running the `prod` profile. |
 
 ---
 
@@ -633,15 +635,29 @@ make run
 ## Running with Docker
 
 ```bash
-# Production (PostgreSQL + bot)
-POSTGRES_PASSWORD=secret docker compose --profile prod up -d
+# Production (PostgreSQL + bot pulled from GHCR + Watchtower auto-updater)
+POSTGRES_PASSWORD=secret GHCR_USER=... GHCR_TOKEN=... docker compose --profile prod up -d
 
 # Development (hot-reload, source mounted)
 POSTGRES_PASSWORD=secret docker compose --profile dev up
 ```
 
 The dev profile mounts `./bot` as a volume and uses `watchfiles` to restart on
-any Python file change.
+any Python file change. It still builds the image locally from the `dev` stage
+of the `Dockerfile`.
+
+The prod profile does **not** build locally — it pulls the pre-built image
+`ghcr.io/krabbi/tg-smart-inbox:latest` published by the GitHub Actions workflow
+(see [CI/CD](#cicd) above). Alongside `bot`, the profile starts a `watchtower`
+service (`containrrr/watchtower`) that polls GHCR every 5 minutes and
+automatically pulls + restarts the `bot` container when a new image digest is
+available. Watchtower is scoped via `WATCHTOWER_LABEL_ENABLE=true` to update
+only containers that carry the `com.centurylinklabs.watchtower.enable=true`
+label, so the `db` service (and any future containers without the label) is
+left untouched. Watchtower authenticates against GHCR using `GHCR_USER` and
+`GHCR_TOKEN` (a Personal Access Token with the `read:packages` scope) and runs
+with `WATCHTOWER_CLEANUP=true` so old image layers are removed after each
+update.
 
 ---
 

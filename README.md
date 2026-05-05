@@ -133,6 +133,11 @@ VOYAGE_API_KEY=your_voyage_key_here
 # Optional: dimensionality of embeddings (default 1024, matches voyage-3.5).
 # Must match the size of the pgvector columns — changing it requires an Alembic migration.
 EMBEDDING_DIM=1024
+
+# Required for the `prod` docker-compose profile only — used by Watchtower to
+# pull ghcr.io/krabbi/tg-smart-inbox:latest. GHCR_TOKEN must have read:packages.
+GHCR_USER=your_github_username_here
+GHCR_TOKEN=your_github_pat_with_read_packages_scope_here
 ```
 
 ## Contributing
