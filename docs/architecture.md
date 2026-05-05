@@ -595,7 +595,7 @@ only if the previous one succeeded.
 | Job | Needs | What it does |
 |-----|-------|-------------|
 | `lint` | — | Checks out the repo, sets up Python 3.11, installs `pip install ".[dev]"`, runs `ruff check .`. Fails fast on style or static-analysis violations. |
-| `test` | `lint` | Boots a PostgreSQL service container (`pgvector/pgvector:pg16`, port `5432`, db/user/password `inbox`), installs the project with dev extras, exports a `DATABASE_URL` pointing at `localhost:5432` plus fake values for `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, and `ALLOWED_USER_IDS`, and runs `pytest --tb=short`. External APIs (Claude, Voyage, Groq, Drive) are mocked in unit tests, so no real keys are needed. |
+| `test` | `lint` | Installs the project with dev extras (`pip install ".[dev]"`), exports three fake env values (`TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `ALLOWED_USER_IDS`) so config validation passes, and runs `pytest --tb=short` against an in-memory SQLite database. External APIs (Claude, Voyage, Groq, Drive) are mocked in unit tests, so no real keys or PostgreSQL service container are needed. |
 | `build-push` | `test` | Sets up Buildx (`docker/setup-buildx-action`), logs in to GitHub Container Registry via `docker/login-action` using the built-in `GITHUB_TOKEN`, then builds the `base` stage of `Dockerfile` with `docker/build-push-action` and pushes it as `ghcr.io/krabbi/tg-smart-inbox:latest`. GHA layer cache (`type=gha`) keeps subsequent builds fast. |
 
 The published image is available at:
