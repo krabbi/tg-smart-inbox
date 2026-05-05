@@ -585,6 +585,35 @@ All configuration is via environment variables (or `.env` file). Managed by
 
 ---
 
+## CI/CD
+
+Continuous integration and image publishing run on GitHub Actions. The workflow is
+defined in [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) and
+triggers on every push to `main`. It runs three sequential jobs — each one starts
+only if the previous one succeeded.
+
+| Job | Needs | What it does |
+|-----|-------|-------------|
+| `lint` | — | Checks out the repo, sets up Python 3.11, installs `pip install ".[dev]"`, runs `ruff check .`. Fails fast on style or static-analysis violations. |
+| `test` | `lint` | Boots a PostgreSQL service container (`pgvector/pgvector:pg16`, port `5432`, db/user/password `inbox`), installs the project with dev extras, exports a `DATABASE_URL` pointing at `localhost:5432` plus fake values for `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, and `ALLOWED_USER_IDS`, and runs `pytest --tb=short`. External APIs (Claude, Voyage, Groq, Drive) are mocked in unit tests, so no real keys are needed. |
+| `build-push` | `test` | Sets up Buildx (`docker/setup-buildx-action`), logs in to GitHub Container Registry via `docker/login-action` using the built-in `GITHUB_TOKEN`, then builds the `base` stage of `Dockerfile` with `docker/build-push-action` and pushes it as `ghcr.io/krabbi/tg-smart-inbox:latest`. GHA layer cache (`type=gha`) keeps subsequent builds fast. |
+
+The published image is available at:
+
+```
+ghcr.io/krabbi/tg-smart-inbox:latest
+```
+
+For the `build-push` job to publish packages, the repository must allow workflow
+write access to packages: **Settings → Actions → General → Workflow permissions →
+Read and write permissions**. The `GITHUB_TOKEN` used in the workflow is provided
+automatically by GitHub Actions; no manual secret is required.
+
+A failure in `lint` skips both `test` and `build-push`; a failure in `test` skips
+`build-push`. So a green `main` always corresponds to a published image.
+
+---
+
 ## Running Locally
 
 ```bash
