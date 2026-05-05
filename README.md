@@ -103,6 +103,106 @@ docker compose --profile dev up
 docker compose --profile prod up -d
 ```
 
+## Deploying on a home server
+
+This is the end-to-end recipe for running the bot 24/7 on your own machine
+(e.g. a home server, NAS, or VPS) using the pre-built image from GitHub
+Container Registry. Watchtower keeps the container up to date automatically
+whenever a new `latest` tag is published by the CI workflow.
+
+### 1. Prerequisites
+
+- A Linux server with **Docker Engine** and the **Docker Compose plugin**
+  installed (`docker compose version` should succeed).
+- The repository cloned on the server:
+
+  ```bash
+  git clone https://github.com/krabbi/tg-smart-inbox.git
+  cd tg-smart-inbox
+  ```
+
+  Only `docker-compose.yml` and `.env` are strictly needed at runtime — the
+  bot itself runs from the GHCR image, not from the local source tree.
+
+### 2. Prepare `.env`
+
+Copy the example and fill in your credentials:
+
+```bash
+cp .env.example .env
+```
+
+The following variables are **required** for the `prod` profile:
+
+| Variable | Why it's needed |
+|---|---|
+| `POSTGRES_PASSWORD` | Password for the local Postgres container; must be set or `docker compose` refuses to start |
+| `TELEGRAM_BOT_TOKEN` | Bot API token from [@BotFather](https://t.me/BotFather) |
+| `ANTHROPIC_API_KEY` | Claude API key — used for classification, summarization, idea tagging |
+| `ALLOWED_USER_IDS` | Comma-separated Telegram user IDs allowed to use the bot (whitelist) |
+| `VOYAGE_API_KEY` | Voyage AI key — required for semantic search and embedding indexing |
+| `GHCR_USER` | Your GitHub username — used by Watchtower to authenticate against `ghcr.io` |
+| `GHCR_TOKEN` | GitHub Personal Access Token with the **`read:packages`** scope |
+
+To generate `GHCR_TOKEN`: GitHub → **Settings → Developer settings →
+Personal access tokens → Tokens (classic) → Generate new token (classic)**,
+tick **`read:packages`**, copy the value into `.env`. No other scopes are
+required for pulling the public bot image.
+
+Optional integrations (`GROQ_API_KEY` for voice transcription,
+`GOOGLE_DRIVE_*` for media upload) can be left at their placeholder values if
+you don't use them — the bot starts without them and the corresponding
+features stay disabled.
+
+### 3. First start
+
+Pull the published image and start the stack in the background:
+
+```bash
+docker compose --profile prod pull
+docker compose --profile prod up -d
+```
+
+The `prod` profile starts three containers:
+
+- `db` — Postgres with the `pgvector` extension
+- `bot` — the bot itself (`ghcr.io/krabbi/tg-smart-inbox:latest`)
+- `watchtower` — auto-updater (see below)
+
+### 4. Auto-updates with Watchtower
+
+Watchtower polls GHCR every **300 seconds** (5 minutes) by default. When the
+CI workflow publishes a new `latest` digest, Watchtower pulls it, gracefully
+stops the running container, and starts the new one — no manual `pull` /
+`up -d` is needed on the server.
+
+Only containers with the
+`com.centurylinklabs.watchtower.enable=true` label are touched, so the `db`
+container is left alone.
+
+To change the polling interval, edit `WATCHTOWER_POLL_INTERVAL` in
+`docker-compose.yml` (value is seconds). Old image layers are removed
+automatically after each update (`WATCHTOWER_CLEANUP=true`).
+
+### 5. Viewing logs
+
+```bash
+docker compose --profile prod logs -f bot
+```
+
+Use the same command with `db` or `watchtower` to inspect those containers.
+
+### 6. One-time GitHub repo setup (publishing side)
+
+For the CI workflow to publish images to GHCR, the repository must allow
+Actions to write packages: **Settings → Actions → General → Workflow
+permissions → Read and write permissions**. After enabling this, the
+built-in `GITHUB_TOKEN` is enough to push to `ghcr.io/<owner>/<repo>` and no
+additional repo secret is required.
+
+This is a one-time switch; once flipped, every push to `main` triggers a
+new image build and Watchtower picks it up on its next poll cycle.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in:
