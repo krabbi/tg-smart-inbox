@@ -7,7 +7,7 @@ name = "tg-smart-inbox"
 version = "0.1.0"
 description = "A Telegram bot that turns your saved messages chaos into organized, actionable knowledge"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "aiogram>=3.7",
@@ -39,6 +39,9 @@ dev = [
     "ruff>=0.4",
     "pre-commit>=3.7",
 ]
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
 
 [tool.ruff]
 line-length = 100
