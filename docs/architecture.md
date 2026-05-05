@@ -594,6 +594,12 @@ defined in [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) and
 triggers on every push to `main`. It runs three sequential jobs — each one starts
 only if the previous one succeeded.
 
+> **Operator-facing deployment guide:** see the
+> [Deploying on a home server](../README.md#deploying-on-a-home-server) section
+> in `README.md` for the end-to-end recipe (Docker prerequisites, `.env` setup,
+> first start, Watchtower auto-updates, and the one-time GitHub workflow
+> permissions toggle required for publishing).
+
 | Job | Needs | What it does |
 |-----|-------|-------------|
 | `lint` | — | Checks out the repo, sets up Python 3.11, installs `pip install ".[dev]"`, runs `ruff check .`. Fails fast on style or static-analysis violations. |
