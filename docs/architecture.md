@@ -578,7 +578,8 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///data/bot.db` | SQLAlchemy async DB URL |
 | `ALLOWED_USER_IDS` | No | `[]` (open) | Comma-separated Telegram user IDs |
 | `GROQ_API_KEY` | No | `""` | Groq API key (enables voice transcription) |
-| `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path to Drive service account JSON |
+| `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path to **OAuth 2.0 client secrets JSON** (downloaded from Google Cloud Console → "OAuth 2.0 Client IDs", Desktop app). Used once on first run to obtain user credentials via browser consent. |
+| `GOOGLE_DRIVE_TOKEN_FILE` | No | `token.json` | Path where the obtained user token (with refresh token) is persisted between runs. Auto-refreshed on subsequent runs. Must persist across container restarts (mount as a volume in Docker). |
 | `GOOGLE_DRIVE_FOLDER_ID` | No | `""` | Drive folder ID (enables media upload) |
 | `VOYAGE_API_KEY` | No | `""` | Voyage AI API key (enables semantic search / embeddings) |
 | `EMBEDDING_DIM` | No | `1024` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |

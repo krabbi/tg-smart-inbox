@@ -17,7 +17,12 @@ class Config(BaseSettings):
     groq_api_key: str = ""
 
     # Google Drive (optional — required only for media handling)
+    # OAuth 2.0 client secrets JSON (downloaded from Google Cloud Console
+    # "OAuth 2.0 Client IDs"). Used once on first run to obtain user credentials.
     google_drive_credentials_file: str = "credentials.json"
+    # Path where the obtained OAuth user token (with refresh token) is persisted
+    # between runs. Must survive container restarts (mounted volume in Docker).
+    google_drive_token_file: str = "token.json"
     google_drive_folder_id: str = ""
 
     # Vector search — dimensionality of embeddings stored in pgvector columns.

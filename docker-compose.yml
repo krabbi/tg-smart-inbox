@@ -24,6 +24,7 @@ services:
       VOYAGE_API_KEY:
       GROQ_API_KEY:
       GOOGLE_DRIVE_CREDENTIALS_FILE:
+      GOOGLE_DRIVE_TOKEN_FILE:
       GOOGLE_DRIVE_FOLDER_ID:
     depends_on:
       db:
@@ -60,6 +61,7 @@ services:
       VOYAGE_API_KEY:
       GROQ_API_KEY:
       GOOGLE_DRIVE_CREDENTIALS_FILE:
+      GOOGLE_DRIVE_TOKEN_FILE:
       GOOGLE_DRIVE_FOLDER_ID:
     depends_on:
       db:

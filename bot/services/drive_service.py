@@ -1,9 +1,12 @@
 import io
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -39,13 +42,37 @@ class DriveService:
     def __init__(self, config: Config) -> None:
         self._root_folder_id = config.google_drive_folder_id
         self._credentials_file = config.google_drive_credentials_file
+        self._token_file = config.google_drive_token_file
         self._service = self._build_service()
+
+    def _load_credentials(self) -> Credentials:
+        """Load OAuth user credentials, refreshing or running the auth flow as needed.
+
+        On first run (no token file): runs the InstalledAppFlow to obtain credentials,
+        which requires a browser-based user consent. The resulting token (with refresh
+        token) is persisted to ``google_drive_token_file`` for reuse.
+
+        On subsequent runs: loads the token from disk and refreshes it automatically
+        when expired, using the stored refresh token.
+        """
+        creds: Credentials | None = None
+        if os.path.exists(self._token_file):
+            creds = Credentials.from_authorized_user_file(self._token_file, _SCOPES)
+
+        if creds is None or not creds.valid:
+            if creds is not None and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(self._credentials_file, _SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open(self._token_file, "w", encoding="utf-8") as token_fp:
+                token_fp.write(creds.to_json())
+
+        return creds
 
     def _build_service(self) -> Any:
         """Build an authenticated Google Drive API service."""
-        credentials = service_account.Credentials.from_service_account_file(
-            self._credentials_file, scopes=_SCOPES
-        )
+        credentials = self._load_credentials()
         return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
     def get_or_create_folder(self, name: str, parent_id: str | None = None) -> str:
