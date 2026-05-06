@@ -578,8 +578,8 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///data/bot.db` | SQLAlchemy async DB URL |
 | `ALLOWED_USER_IDS` | No | `[]` (open) | Comma-separated Telegram user IDs |
 | `GROQ_API_KEY` | No | `""` | Groq API key (enables voice transcription) |
-| `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path to **OAuth 2.0 client secrets JSON** (downloaded from Google Cloud Console → "OAuth 2.0 Client IDs", Desktop app). Used once on first run to obtain user credentials via browser consent. |
-| `GOOGLE_DRIVE_TOKEN_FILE` | No | `token.json` | Path where the obtained user token (with refresh token) is persisted between runs. Auto-refreshed on subsequent runs. Must persist across container restarts (mount as a volume in Docker). |
+| `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path (inside the container) to **OAuth 2.0 client secrets JSON** (downloaded from Google Cloud Console → "OAuth 2.0 Client IDs", Desktop app). Used once on first run to obtain user credentials via browser consent. The `prod` docker-compose profile mounts the host file of the same name (placed next to `docker-compose.yml`) read-only at `/app/credentials.json`. |
+| `GOOGLE_DRIVE_TOKEN_FILE` | No | `token.json` | Path (inside the container) where the obtained user token (with refresh token) is persisted between runs. Auto-refreshed on subsequent runs. The `prod` docker-compose profile mounts the host file of the same name (placed next to `docker-compose.yml`) read-write at `/app/token.json` so the token survives container restarts and the Google OAuth library can rewrite it after a refresh. |
 | `GOOGLE_DRIVE_FOLDER_ID` | No | `""` | Drive folder ID (enables media upload) |
 | `VOYAGE_API_KEY` | No | `""` | Voyage AI API key (enables semantic search / embeddings) |
 | `EMBEDDING_DIM` | No | `1024` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |
@@ -665,6 +665,22 @@ left untouched. Watchtower authenticates against GHCR using `GHCR_USER` and
 `GHCR_TOKEN` (a Personal Access Token with the `read:packages` scope) and runs
 with `WATCHTOWER_CLEANUP=true` so old image layers are removed after each
 update.
+
+The prod `bot` service mounts two Google Drive OAuth files from the host
+directory that contains `docker-compose.yml`:
+
+- `./credentials.json:/app/credentials.json:ro` — OAuth 2.0 client secrets,
+  read-only.
+- `./token.json:/app/token.json` — user token persisted between runs,
+  read-write so the Google OAuth library can rewrite it after a refresh.
+
+Both mounts are bind mounts, so the host files must exist before `docker
+compose --profile prod up -d` (otherwise Docker creates an empty directory at
+the source path and the container sees a directory in place of the JSON file).
+For deployments that do not use Drive, create empty placeholder files
+(`touch credentials.json token.json`) — the bot ignores them as long as
+`GOOGLE_DRIVE_FOLDER_ID` is empty, because `DriveService` is only constructed
+when the folder ID is set.
 
 ---
 

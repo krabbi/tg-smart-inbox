@@ -154,6 +154,16 @@ Optional integrations (`GROQ_API_KEY` for voice transcription,
 you don't use them — the bot starts without them and the corresponding
 features stay disabled.
 
+If you enable Google Drive, place the OAuth files next to `docker-compose.yml`
+on the host: `credentials.json` (downloaded from Google Cloud Console as a
+**Desktop app** OAuth 2.0 Client ID) and `token.json` (auto-created on first
+run after the one-time browser consent — start with an empty file:
+`touch token.json`). The prod profile mounts both into the container
+automatically (`/app/credentials.json` read-only, `/app/token.json`
+read-write). If you don't use Drive, create empty placeholders so Docker
+doesn't substitute directories for the missing files:
+`touch credentials.json token.json`.
+
 ### 3. First start
 
 Pull the published image and start the stack in the background:
