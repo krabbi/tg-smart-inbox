@@ -7,7 +7,6 @@ from typing import Any
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -62,7 +61,7 @@ class DriveService:
         no browser available, missing credentials file, etc.).
         """
         creds: Credentials | None = None
-        if os.path.exists(self._token_file):
+        if os.path.exists(self._token_file) and os.path.getsize(self._token_file) > 0:
             creds = Credentials.from_authorized_user_file(self._token_file, _SCOPES)
 
         if creds is None or not creds.valid:
@@ -75,14 +74,11 @@ class DriveService:
                         f"Failed to refresh Google Drive credentials: {exc}"
                     ) from exc
             else:
-                try:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self._credentials_file, _SCOPES
-                    )
-                    creds = flow.run_local_server(port=0)
-                except Exception as exc:
-                    logger.exception("Google Drive OAuth flow failed")
-                    raise DriveUploadError(f"Google Drive OAuth flow failed: {exc}") from exc
+                raise DriveUploadError(
+                    f"Google Drive token missing or invalid: {self._token_file}. "
+                    "Run the one-time auth command on the server: "
+                    "docker compose run --rm -it bot python scripts/drive_auth.py"
+                )
             with open(self._token_file, "w", encoding="utf-8") as token_fp:
                 token_fp.write(creds.to_json())
 

@@ -34,14 +34,12 @@ def test_init_does_not_load_credentials_or_build_service() -> None:
     with (
         patch("bot.services.drive_service.os.path.exists") as mock_exists,
         patch("bot.services.drive_service.Credentials.from_authorized_user_file") as mock_load,
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow,
         patch("bot.services.drive_service.build") as mock_build,
     ):
         svc = DriveService(make_config())
 
         mock_exists.assert_not_called()
         mock_load.assert_not_called()
-        mock_flow.from_client_secrets_file.assert_not_called()
         mock_build.assert_not_called()
         assert svc._service is None
 
@@ -54,11 +52,11 @@ async def test_credentials_loaded_lazily_from_existing_valid_token() -> None:
 
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=100),
         patch(
             "bot.services.drive_service.Credentials.from_authorized_user_file",
             return_value=valid_creds,
         ) as mock_load,
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow,
         patch("bot.services.drive_service.build") as mock_build,
         patch("builtins.open", mock_open()) as mock_file,
     ):
@@ -68,7 +66,6 @@ async def test_credentials_loaded_lazily_from_existing_valid_token() -> None:
         mock_load.assert_called_once_with(
             "token.json", ["https://www.googleapis.com/auth/drive.file"]
         )
-        mock_flow.from_client_secrets_file.assert_not_called()
         mock_file.assert_not_called()  # no rewrite when creds are already valid
         mock_build.assert_called_once()
 
@@ -83,11 +80,11 @@ async def test_credentials_refreshed_when_expired() -> None:
 
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=100),
         patch(
             "bot.services.drive_service.Credentials.from_authorized_user_file",
             return_value=expired_creds,
         ),
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow,
         patch("bot.services.drive_service.Request") as mock_request,
         patch("bot.services.drive_service.build"),
         patch("builtins.open", mock_open()) as mock_file,
@@ -96,68 +93,60 @@ async def test_credentials_refreshed_when_expired() -> None:
         await svc._ensure_service()
 
         expired_creds.refresh.assert_called_once_with(mock_request.return_value)
-        mock_flow.from_client_secrets_file.assert_not_called()
         mock_file.assert_called_once_with("token.json", "w", encoding="utf-8")
         mock_file().write.assert_called_once_with('{"refreshed": true}')
 
 
-async def test_oauth_flow_runs_when_token_file_missing() -> None:
-    """No token file on disk → run InstalledAppFlow and save the resulting token."""
-    new_creds = MagicMock()
-    new_creds.to_json.return_value = '{"new": true}'
-    flow_instance = MagicMock()
-    flow_instance.run_local_server.return_value = new_creds
-
+async def test_raises_error_when_token_file_missing() -> None:
+    """No token file on disk → DriveUploadError with hint to run drive_auth.py."""
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=False),
         patch("bot.services.drive_service.Credentials.from_authorized_user_file") as mock_load,
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow_cls,
         patch("bot.services.drive_service.build"),
-        patch("builtins.open", mock_open()) as mock_file,
     ):
-        mock_flow_cls.from_client_secrets_file.return_value = flow_instance
-
         svc = DriveService(make_config())
-        await svc._ensure_service()
+        with pytest.raises(DriveUploadError, match="drive_auth.py"):
+            await svc._ensure_service()
 
         mock_load.assert_not_called()
-        mock_flow_cls.from_client_secrets_file.assert_called_once_with(
-            "credentials.json", ["https://www.googleapis.com/auth/drive.file"]
-        )
-        flow_instance.run_local_server.assert_called_once_with(port=0)
-        mock_file.assert_called_once_with("token.json", "w", encoding="utf-8")
-        mock_file().write.assert_called_once_with('{"new": true}')
 
 
-async def test_oauth_flow_runs_when_token_invalid_and_no_refresh_token() -> None:
-    """Token file exists but creds are invalid with no refresh token → run flow."""
+async def test_raises_error_when_token_file_empty() -> None:
+    """token.json exists but is empty (e.g. created with touch) → DriveUploadError."""
+    with (
+        patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=0),
+        patch("bot.services.drive_service.Credentials.from_authorized_user_file") as mock_load,
+        patch("bot.services.drive_service.build"),
+    ):
+        svc = DriveService(make_config())
+        with pytest.raises(DriveUploadError, match="drive_auth.py"):
+            await svc._ensure_service()
+
+        mock_load.assert_not_called()
+
+
+async def test_raises_error_when_token_invalid_and_no_refresh_token() -> None:
+    """Token file exists but creds are invalid with no refresh token → DriveUploadError."""
     bad_creds = MagicMock()
     bad_creds.valid = False
     bad_creds.expired = True
     bad_creds.refresh_token = None
-    new_creds = MagicMock()
-    new_creds.to_json.return_value = '{"new": true}'
-    flow_instance = MagicMock()
-    flow_instance.run_local_server.return_value = new_creds
 
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=100),
         patch(
             "bot.services.drive_service.Credentials.from_authorized_user_file",
             return_value=bad_creds,
         ),
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow_cls,
         patch("bot.services.drive_service.build"),
-        patch("builtins.open", mock_open()),
     ):
-        mock_flow_cls.from_client_secrets_file.return_value = flow_instance
-
         svc = DriveService(make_config())
-        await svc._ensure_service()
+        with pytest.raises(DriveUploadError, match="drive_auth.py"):
+            await svc._ensure_service()
 
         bad_creds.refresh.assert_not_called()
-        mock_flow_cls.from_client_secrets_file.assert_called_once()
-        flow_instance.run_local_server.assert_called_once_with(port=0)
 
 
 async def test_ensure_service_caches_built_service() -> None:
@@ -168,6 +157,7 @@ async def test_ensure_service_caches_built_service() -> None:
 
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=100),
         patch(
             "bot.services.drive_service.Credentials.from_authorized_user_file",
             return_value=valid_creds,
@@ -183,23 +173,6 @@ async def test_ensure_service_caches_built_service() -> None:
         mock_build.assert_called_once()
 
 
-async def test_ensure_service_raises_drive_upload_error_on_oauth_failure() -> None:
-    """OAuth flow failures (network/no browser) are wrapped as DriveUploadError."""
-    flow_instance = MagicMock()
-    flow_instance.run_local_server.side_effect = RuntimeError("no display")
-
-    with (
-        patch("bot.services.drive_service.os.path.exists", return_value=False),
-        patch("bot.services.drive_service.InstalledAppFlow") as mock_flow_cls,
-        patch("bot.services.drive_service.build"),
-    ):
-        mock_flow_cls.from_client_secrets_file.return_value = flow_instance
-
-        svc = DriveService(make_config())
-        with pytest.raises(DriveUploadError, match="OAuth flow failed"):
-            await svc._ensure_service()
-
-
 async def test_ensure_service_raises_drive_upload_error_on_refresh_failure() -> None:
     """Refresh failures (network) are wrapped as DriveUploadError."""
     expired_creds = MagicMock()
@@ -210,6 +183,7 @@ async def test_ensure_service_raises_drive_upload_error_on_refresh_failure() -> 
 
     with (
         patch("bot.services.drive_service.os.path.exists", return_value=True),
+        patch("bot.services.drive_service.os.path.getsize", return_value=100),
         patch(
             "bot.services.drive_service.Credentials.from_authorized_user_file",
             return_value=expired_creds,
