@@ -75,7 +75,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `classifier.py` | Classify incoming messages: LINK / TASK / NOTE / IDEA / MEDIA |
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error |
-| `link_service.py` | Save links to DB (with cached page text), reuse the cache when generating Claude summaries |
+| `link_service.py` | Save links to DB (with cached page text and extracted page title), reuse the cache when generating Claude summaries |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge reminders |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
@@ -85,7 +85,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `semantic_search_service.py` | Cosine-similarity search over Item and Idea embeddings via pgvector |
 | `media_service.py` | Process photos/files: vision categorization + Drive upload |
 | `drive_service.py` | Google Drive API wrapper |
-| `scraper.py` | HTTP page fetcher for link summarization |
+| `scraper.py` | HTTP page fetcher for link summarization; extracts `og:title` / `<title>` alongside the body text |
 | `transcription_service.py` | Groq Whisper API wrapper for voice messages |
 | `vision_service.py` | Claude Vision API for image description |
 | `user_settings_service.py` | Read/write per-user preferences (timezone, language) with IANA / supported-language validation |
@@ -119,6 +119,7 @@ The central table that stores every piece of content the user saves.
 | `type` | Enum | `link`, `note`, `task`, `media`, `idea` |
 | `content` | Text | The actual content (URL, text, file path, etc.) |
 | `description` | Text (nullable) | Optional description (used for media) |
+| `title` | Text (nullable) | Article title for links (`og:title` → `<title>` → `None`); used by `/list`, `/search`, `/reminders` and reminder push notifications to render `{title} ({url})` instead of the bare URL |
 | `scraped_text` | Text (nullable) | Cached full page text for links (used to re-embed without re-scraping) |
 | `embedding` | `vector(1024)` (nullable) | pgvector embedding for semantic search; ivfflat/cosine index |
 
@@ -155,8 +156,9 @@ Additional metadata for items with `type = idea`.
 Semantic search uses the [pgvector](https://github.com/pgvector/pgvector) PostgreSQL
 extension. The initial migration (`98444ad48da7`) adds the `embedding` columns and
 indexes; migration `c3e7f2a1d8b4` resizes them from `vector(1536)` to `vector(1024)`
-to match the Voyage AI model output. Both `items` and `ideas` carry an `ivfflat` index
-with `vector_cosine_ops` (100 lists).
+to match the Voyage AI model output. Migration `e9a4d2b6c815` adds the nullable
+`items.title` column used to display article headlines instead of bare URLs.
+Both `items` and `ideas` carry an `ivfflat` index with `vector_cosine_ops` (100 lists).
 
 On SQLite (used only in tests) the migration and ORM still create the columns, but
 the extension and the vector index are skipped because pgvector is PostgreSQL-only.

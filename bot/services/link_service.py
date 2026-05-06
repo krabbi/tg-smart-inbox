@@ -10,7 +10,7 @@ from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
 from bot.services.embedding_service import EmbeddingService
-from bot.services.scraper import Scraper
+from bot.services.scraper import ScrapedPage, Scraper
 
 logger = logging.getLogger(__name__)
 
@@ -72,26 +72,29 @@ class LinkService:
         self._embedding = embedding_service
 
     async def save(self, url: str, user_id: int) -> SavedLink:
-        """Save a link as an Item, cache the page text, and attempt to index it.
+        """Save a link as an Item, cache the page text/title, and attempt to index it.
 
         The save itself always succeeds. Scraping is best-effort: if the page cannot
-        be fetched, the link is still persisted without ``scraped_text`` and the user
-        is not notified.
+        be fetched, the link is still persisted without ``scraped_text``/``title``
+        and the user is not notified.
         """
         item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
-        # Populate the cache before the first commit so both fields land in one write.
-        scraped_text = await self._try_scrape(url)
-        if scraped_text:
-            item.scraped_text = scraped_text
+        # Populate the cache before the first commit so all fields land in one write.
+        page = await self._try_scrape(url)
+        if page is not None:
+            if page.text:
+                item.scraped_text = page.text
+            if page.title:
+                item.title = page.title
         await self._session.commit()
 
         indexed = await self._try_index(item)
         return SavedLink(item=item, indexed=indexed)
 
-    async def _try_scrape(self, url: str) -> str | None:
-        """Fetch the page text for caching; return ``None`` on any failure."""
+    async def _try_scrape(self, url: str) -> ScrapedPage | None:
+        """Fetch the page text and title for caching; return ``None`` on any failure."""
         try:
-            return await self._scraper.fetch_text(url)
+            return await self._scraper.fetch(url)
         except ScrapingError as exc:
             logger.warning("Scraping failed for %s: %s", url, exc)
             return None

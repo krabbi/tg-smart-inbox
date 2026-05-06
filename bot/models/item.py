@@ -27,6 +27,10 @@ class Item(UUIDMixin, TimestampMixin, Base):
     type: Mapped[ItemType] = mapped_column(Enum(ItemType), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Article title for links — extracted from <og:title> or <title> at save time.
+    # Used in /list, /search, /reminders and reminder push notifications instead of
+    # the bare URL when present. Always None for non-link items.
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Full extracted page text for links — cached so we don't re-scrape for re-embedding.
     scraped_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Vector embedding for semantic search; populated lazily by a background job.

@@ -10,7 +10,7 @@ from bot.repositories.item_repository import ItemRepository
 from bot.services.claude_client import ClaudeClient
 from bot.services.embedding_service import EmbeddingService
 from bot.services.link_service import _SUMMARIZE_PROMPT, LinkService, LinkSummary, SavedLink
-from bot.services.scraper import Scraper
+from bot.services.scraper import ScrapedPage, Scraper
 
 _PLAIN_RESPONSE = (
     "Как печь хлеб\n\nВыпечка хлеба — это просто. Используй сильную муку."
@@ -21,6 +21,7 @@ _PLAIN_RESPONSE = (
 def make_link_service(
     *,
     scraper_text: str = "page text",
+    scraper_title: str | None = None,
     claude_response: str = _PLAIN_RESPONSE,
     session: AsyncSession | None = None,
     embedding: list[float] | None = None,
@@ -35,6 +36,7 @@ def make_link_service(
     mock_item.type = ItemType.link
     mock_item.content = "https://example.com"
     mock_item.scraped_text = None
+    mock_item.title = None
 
     mock_repo = MagicMock(spec=ItemRepository)
     mock_repo.create = AsyncMock(return_value=mock_item)
@@ -44,6 +46,7 @@ def make_link_service(
 
     mock_scraper = MagicMock(spec=Scraper)
     mock_scraper.fetch_text = AsyncMock(return_value=scraper_text)
+    mock_scraper.fetch = AsyncMock(return_value=ScrapedPage(text=scraper_text, title=scraper_title))
 
     mock_claude = MagicMock(spec=ClaudeClient)
     mock_claude.complete = AsyncMock(return_value=claude_response)
@@ -96,10 +99,11 @@ async def test_save_without_embedding_service_returns_not_indexed() -> None:
     mock_item.id = uuid.uuid4()
     mock_item.type = ItemType.link
     mock_item.scraped_text = None
+    mock_item.title = None
     mock_repo.create = AsyncMock(return_value=mock_item)
 
     mock_scraper = MagicMock(spec=Scraper)
-    mock_scraper.fetch_text = AsyncMock(return_value="page body")
+    mock_scraper.fetch = AsyncMock(return_value=ScrapedPage(text="page body", title=None))
 
     svc = LinkService(
         session=mock_session,
@@ -287,14 +291,14 @@ async def test_save_caches_scraped_text_on_item() -> None:
     svc, repo = make_link_service(scraper_text="cached page body")
     saved = await svc.save("https://example.com", user_id=1)
 
-    svc._scraper.fetch_text.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
+    svc._scraper.fetch.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
     assert saved.item.scraped_text == "cached page body"
 
 
 async def test_save_still_succeeds_when_scraper_raises() -> None:
     """Scraper failure must not break save — item is persisted without scraped_text."""
     svc, _ = make_link_service()
-    svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
+    svc._scraper.fetch = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
 
     saved = await svc.save("https://example.com", user_id=1)
 
@@ -306,7 +310,7 @@ async def test_save_still_succeeds_when_scraper_raises() -> None:
 async def test_save_survives_unexpected_scraper_exception() -> None:
     """Any non-ScrapingError from the scraper is swallowed and logged."""
     svc, _ = make_link_service()
-    svc._scraper.fetch_text = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[attr-defined]
+    svc._scraper.fetch = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[attr-defined]
 
     saved = await svc.save("https://example.com", user_id=1)
 
@@ -318,6 +322,46 @@ async def test_save_skips_setting_scraped_text_when_page_is_empty() -> None:
     svc, _ = make_link_service(scraper_text="")
     saved = await svc.save("https://example.com", user_id=1)
     # MagicMock.scraped_text remains the default (None) set in the factory.
+    assert saved.item.scraped_text is None
+
+
+# ── title extraction during save ─────────────────────────────────────────────
+
+
+async def test_save_persists_extracted_title_on_item() -> None:
+    """Title from the scraper is written to Item.title in the same commit."""
+    svc, _ = make_link_service(scraper_text="body", scraper_title="Cool Article")
+    saved = await svc.save("https://example.com", user_id=1)
+
+    svc._scraper.fetch.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
+    assert saved.item.title == "Cool Article"
+
+
+async def test_save_leaves_title_none_when_scraper_returns_no_title() -> None:
+    """No og:title and no <title> in the page → Item.title stays None."""
+    svc, _ = make_link_service(scraper_text="body", scraper_title=None)
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.title is None
+
+
+async def test_save_leaves_title_none_when_scraper_fails() -> None:
+    """Scraping failure leaves title None and still commits the item."""
+    svc, _ = make_link_service()
+    svc._scraper.fetch = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.title is None
+    svc._session.commit.assert_awaited()  # type: ignore[attr-defined]
+
+
+async def test_save_survives_when_only_title_is_present() -> None:
+    """Scraper returning a title with empty body still records the title."""
+    svc, _ = make_link_service(scraper_text="", scraper_title="Just a Title")
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.title == "Just a Title"
     assert saved.item.scraped_text is None
 
 

@@ -172,6 +172,35 @@ async def test_item_embedding_and_scraped_text_default_none(db_session: AsyncSes
 
     assert item.embedding is None
     assert item.scraped_text is None
+    # Title is also nullable and starts empty until the scraper backfills it.
+    assert item.title is None
+
+
+async def test_item_with_title(db_session: AsyncSession) -> None:
+    """The ``title`` column round-trips through SQLite and remains nullable."""
+    item = Item(
+        user_id=42,
+        type=ItemType.link,
+        content="https://example.com/article",
+        title="Cool Article",
+    )
+    db_session.add(item)
+    await db_session.commit()
+    await db_session.refresh(item)
+
+    result = await db_session.execute(select(Item).where(Item.id == item.id))
+    stored = result.scalar_one()
+    assert stored.title == "Cool Article"
+
+
+async def test_item_title_default_none_for_other_types(db_session: AsyncSession) -> None:
+    """Non-link items typically leave ``title`` as None — the column allows it."""
+    item = Item(user_id=1, type=ItemType.note, content="just a note")
+    db_session.add(item)
+    await db_session.commit()
+    await db_session.refresh(item)
+
+    assert item.title is None
 
 
 async def test_item_with_embedding_and_scraped_text(db_session: AsyncSession) -> None:

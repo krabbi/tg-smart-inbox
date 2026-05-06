@@ -18,6 +18,7 @@ from bot.services.embedding_service import EmbeddingService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
+from bot.utils.text import format_item_display
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ async def _send_due_reminders(
                         "reminder_notification",
                         user_lang,
                         formatted=formatted,
-                        content=item.content,
+                        content=format_item_display(item),
                     ),
                     reply_markup=_snooze_keyboard(str(reminder.id), user_lang),
                 )
@@ -113,7 +114,7 @@ async def _auto_resend_reminders(
                         text=t(
                             "reminder_auto_closed",
                             user_lang,
-                            content=item.content,
+                            content=format_item_display(item),
                         ),
                     )
                     await svc.mark_acknowledged(reminder)
@@ -128,7 +129,7 @@ async def _auto_resend_reminders(
                         "reminder_notification",
                         user_lang,
                         formatted=formatted,
-                        content=item.content,
+                        content=format_item_display(item),
                     ),
                     reply_markup=_snooze_keyboard(str(new_reminder.id), user_lang),
                 )

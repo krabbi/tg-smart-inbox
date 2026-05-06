@@ -79,6 +79,8 @@ def make_search_result(
     result_type: str = "item",
     title: str = "Title",
     preview_text: str = "Preview",
+    item_type: str = "note",
+    url: str | None = None,
 ) -> SearchResult:
     return SearchResult(
         id=uuid.uuid4(),
@@ -87,6 +89,8 @@ def make_search_result(
         preview_text=preview_text,
         score=score,
         created_at=datetime(2026, 1, 2, tzinfo=UTC),
+        item_type=item_type,
+        url=url,
     )
 
 
@@ -192,16 +196,119 @@ def test_format_semantic_results_shows_relevance_bar_and_type_label() -> None:
     assert "текст" in text
 
 
-def test_format_semantic_results_item_uses_generic_label() -> None:
+def test_format_semantic_results_item_uses_specific_label_for_known_type() -> None:
+    """Non-idea hits show their concrete ItemType label (note/link/task) and matching emoji."""
     results = [
         make_search_result(
-            score=0.5, result_type="item", title="Some note", preview_text="note body"
+            score=0.5,
+            result_type="item",
+            title="Some note",
+            preview_text="note body",
+            item_type="note",
+        )
+    ]
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
+
+    assert "[заметка]" in text
+    assert "📝" in text
+    assert "●●○○○" in text
+
+
+def test_format_semantic_results_item_falls_back_to_record_label_for_unknown_type() -> None:
+    """An unknown item_type — defensive fallback — uses the generic 'запись' label."""
+    results = [
+        make_search_result(
+            score=0.5,
+            result_type="item",
+            title="Some thing",
+            preview_text="body",
+            item_type="not_a_real_type",
         )
     ]
     text = _format_semantic_results(results, query="q", page=0, lang="ru")
 
     assert "[запись]" in text
-    assert "●●○○○" in text
+    assert "📄" in text
+
+
+def test_format_semantic_results_link_shows_title_and_url_in_parentheses() -> None:
+    """Smart-search link entries render as ``{title} ({url})`` when both are known."""
+    results = [
+        make_search_result(
+            score=0.7,
+            result_type="item",
+            title="Cool Article",
+            preview_text="The article body starts here…",
+            item_type="link",
+            url="https://example.com/article",
+        )
+    ]
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
+
+    assert "Cool Article (https://example.com/article)" in text
+    assert "[ссылка]" in text
+    assert "🔗" in text
+    # The preview line is shown because scraped_text differs from the title.
+    assert "The article body starts here" in text
+
+
+def test_format_semantic_results_link_without_title_shows_only_url() -> None:
+    """Smart-search link without a stored title falls back to the bare URL headline."""
+    results = [
+        make_search_result(
+            score=0.5,
+            result_type="item",
+            title="https://example.com/raw",
+            preview_text="",
+            item_type="link",
+            url="https://example.com/raw",
+        )
+    ]
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
+
+    # No "()" around a duplicated URL — the renderer skips the parenthetical
+    # when the title equals the URL.
+    assert "https://example.com/raw (https://example.com/raw)" not in text
+    assert "https://example.com/raw" in text
+    # No "Текст:" line because the link has no scraped_text preview.
+    assert "Текст:" not in text
+
+
+def test_format_semantic_results_link_with_no_scraped_text_omits_preview_line() -> None:
+    """Issue #124: when scraped_text is empty, the 'Текст:' line is hidden."""
+    results = [
+        make_search_result(
+            score=0.5,
+            result_type="item",
+            title="My Article",
+            preview_text="",
+            item_type="link",
+            url="https://example.com/page",
+        )
+    ]
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
+
+    assert "My Article (https://example.com/page)" in text
+    assert "Текст:" not in text
+
+
+def test_format_semantic_results_media_shows_description_and_drive_link() -> None:
+    """Smart-search media entries render the Vision description with the Drive link."""
+    drive_link = "https://drive.google.com/file/d/abc123"
+    results = [
+        make_search_result(
+            score=0.6,
+            result_type="item",
+            title="Receipt from supermarket",
+            preview_text="Receipt from supermarket",
+            item_type="media",
+            url=drive_link,
+        )
+    ]
+    text = _format_semantic_results(results, query="q", page=0, lang="ru")
+
+    assert f"Receipt from supermarket ({drive_link})" in text
+    assert "[медиа]" in text
 
 
 def test_format_semantic_results_skips_preview_when_equal_to_title() -> None:

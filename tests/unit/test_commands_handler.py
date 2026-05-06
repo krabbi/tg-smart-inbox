@@ -44,10 +44,18 @@ def make_callback(data: str, user_id: int = 1) -> MagicMock:
     return cb
 
 
-def make_item(content: str, item_type: ItemType = ItemType.note) -> MagicMock:
+def make_item(
+    content: str,
+    item_type: ItemType = ItemType.note,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+) -> MagicMock:
     item = MagicMock(spec=Item)
     item.content = content
     item.type = item_type
+    item.title = title
+    item.description = description
     item.created_at = MagicMock()
     item.created_at.strftime = MagicMock(return_value="01.01.2026")
     return item
@@ -57,11 +65,18 @@ def make_reminder(
     content: str,
     reminder_id: uuid.UUID | None = None,
     remind_at: datetime | None = None,
+    *,
+    item_type: ItemType = ItemType.task,
+    title: str | None = None,
+    description: str | None = None,
 ) -> MagicMock:
     r = MagicMock(spec=Reminder)
     r.id = reminder_id or uuid.uuid4()
-    r.item = MagicMock()
+    r.item = MagicMock(spec=Item)
     r.item.content = content
+    r.item.type = item_type
+    r.item.title = title
+    r.item.description = description
     r.remind_at = remind_at or datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
     return r
 
@@ -121,6 +136,61 @@ async def test_cmd_list_no_nav_buttons_for_single_page() -> None:
     # Filter buttons should be present
     texts = [b.text for b in kb.inline_keyboard[0]]
     assert any("Все" in t for t in texts)
+
+
+async def test_cmd_list_link_with_title_shows_title_and_url() -> None:
+    """A link with a saved title renders as ``{title} ({url})`` in /list."""
+    msg = make_message()
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=make_list_page(
+            [
+                make_item(
+                    "https://money.onliner.by/lunar",
+                    ItemType.link,
+                    title="Лунные участки",
+                )
+            ],
+            total=1,
+        )
+    )
+
+    await cmd_list(msg, list_service=svc, lang="ru")
+    reply = msg.answer.call_args[0][0]
+    assert "Лунные участки (https://money.onliner.by/lunar)" in reply
+
+
+async def test_cmd_list_link_without_title_shows_bare_url() -> None:
+    """Links without a stored title display the raw URL — graceful fallback."""
+    msg = make_message()
+    svc = MagicMock(spec=ListService)
+    svc.list_recent = AsyncMock(
+        return_value=make_list_page(
+            [make_item("https://example.com", ItemType.link, title=None)], total=1
+        )
+    )
+
+    await cmd_list(msg, list_service=svc, lang="ru")
+    reply = msg.answer.call_args[0][0]
+    assert "https://example.com" in reply
+    # No parentheses around a single URL — it's rendered alone.
+    assert "https://example.com (" not in reply
+
+
+async def test_cmd_list_media_with_description_shows_drive_link() -> None:
+    """Media items show ``{description} ({drive_link})`` so the user knows what's inside."""
+    msg = make_message()
+    svc = MagicMock(spec=ListService)
+    drive = "https://drive.google.com/file/d/abc"
+    svc.list_recent = AsyncMock(
+        return_value=make_list_page(
+            [make_item(drive, ItemType.media, description="Чек из магазина")], total=1
+        )
+    )
+
+    await cmd_list(msg, list_service=svc, lang="ru")
+    reply = msg.answer.call_args[0][0]
+    assert f"Чек из магазина ({drive})" in reply
 
 
 async def test_cmd_list_shows_next_button_when_more() -> None:
@@ -252,6 +322,46 @@ async def test_cmd_reminders_uses_user_timezone() -> None:
     text = msg.answer.call_args[0][0]
     # 10:00 UTC → 13:00 MSK
     assert "07.04.2026 13:00 MSK" in text
+
+
+async def test_cmd_reminders_link_with_title_shows_title_and_url() -> None:
+    """A reminder on a link Item renders the article title with the URL in parentheses."""
+    msg = make_message()
+    svc = MagicMock(spec=ReminderService)
+    svc.get_upcoming = AsyncMock(
+        return_value=[
+            make_reminder(
+                "https://example.com/news",
+                item_type=ItemType.link,
+                title="Important news",
+            )
+        ]
+    )
+
+    await cmd_reminders(msg, reminder_service=svc, lang="ru")
+    text = msg.answer.call_args[0][0]
+    assert "Important news (https://example.com/news)" in text
+
+
+async def test_cmd_reminders_link_without_title_shows_bare_url() -> None:
+    """A link reminder with no stored title falls back to displaying just the URL."""
+    msg = make_message()
+    svc = MagicMock(spec=ReminderService)
+    svc.get_upcoming = AsyncMock(
+        return_value=[
+            make_reminder(
+                "https://example.com",
+                item_type=ItemType.link,
+                title=None,
+            )
+        ]
+    )
+
+    await cmd_reminders(msg, reminder_service=svc, lang="ru")
+    text = msg.answer.call_args[0][0]
+    assert "https://example.com" in text
+    # Single-URL line — no "(...)" parenthetical.
+    assert "https://example.com (" not in text
 
 
 async def test_cmd_reminders_falls_back_to_utc_without_settings_service() -> None:

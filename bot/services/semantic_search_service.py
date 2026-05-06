@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 from bot.exceptions import SemanticSearchUnavailableError
+from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.embedding_service import EmbeddingService
@@ -26,6 +27,13 @@ class SearchResult:
     preview_text: str
     score: float
     created_at: datetime
+    # Underlying Item type (``link``/``note``/``task``/``media``/``idea``) — lets
+    # the renderer decide whether to append a URL/Drive-link in parentheses after
+    # the title. Always equals ``"idea"`` for hits that came from the ideas table.
+    item_type: str = "note"
+    # Original URL/Drive link when ``item_type`` is ``link`` or ``media``; the
+    # renderer prints it as ``{title} ({url})``. ``None`` for everything else.
+    url: str | None = None
 
 
 class SemanticSearchService:
@@ -61,10 +69,15 @@ class SemanticSearchService:
                 SearchResult(
                     id=item.id,
                     type="item",
-                    title=_make_title(item.content),
-                    preview_text=_make_preview(item.description, item.content),
+                    title=_make_title_for_item(item),
+                    preview_text=_make_preview_for_item(item),
                     score=score,
                     created_at=item.created_at,
+                    item_type=item.type.value,
+                    # Both link and media items keep their original URL/Drive link
+                    # in ``content`` — surface it so the formatter can render
+                    # ``{title} ({url})``. Other types have no URL.
+                    url=item.content if item.type in {ItemType.link, ItemType.media} else None,
                 )
             )
         for item, idea, score in idea_hits:
@@ -76,6 +89,8 @@ class SemanticSearchService:
                     preview_text=_make_preview_for_idea(idea.tags, item.content),
                     score=score,
                     created_at=item.created_at,
+                    item_type=ItemType.idea.value,
+                    url=None,
                 )
             )
 
@@ -90,6 +105,33 @@ def _make_title(content: str) -> str:
         if stripped:
             return stripped[:_PREVIEW_CHARS]
     return (content or "").strip()[:_PREVIEW_CHARS]
+
+
+def _make_title_for_item(item: Item) -> str:
+    """Pick the best display title: stored Item.title for links/media, else first line."""
+    # Links carry a scraped page title; media items carry a Vision-generated
+    # description in ``Item.description``. Both should win over the raw URL.
+    if item.type == ItemType.link and getattr(item, "title", None):
+        return _make_title(item.title or "")
+    if item.type == ItemType.media and item.description:
+        return _make_title(item.description)
+    return _make_title(item.content)
+
+
+def _make_preview_for_item(item: Item) -> str:
+    """Build the secondary preview line for a non-idea item.
+
+    For links the preview is the start of ``scraped_text`` so the user can tell
+    what the article is actually about; without scraped text we leave the
+    preview blank (the renderer hides the line when both halves are blank or
+    duplicate the title). For other types we keep the legacy
+    description-then-content fallback.
+    """
+    if item.type == ItemType.link:
+        if item.scraped_text:
+            return item.scraped_text.strip()[:_PREVIEW_CHARS]
+        return ""
+    return _make_preview(item.description, item.content)
 
 
 def _make_preview(description: str | None, content: str) -> str:

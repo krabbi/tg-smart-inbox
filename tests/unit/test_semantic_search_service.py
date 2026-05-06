@@ -6,7 +6,7 @@ import pytest
 
 from bot.exceptions import SemanticSearchUnavailableError
 from bot.models.idea import Idea
-from bot.models.item import Item
+from bot.models.item import Item, ItemType
 from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.services.embedding_service import EmbeddingService
@@ -17,6 +17,9 @@ def make_item(
     *,
     content: str = "Some content",
     description: str | None = None,
+    title: str | None = None,
+    item_type: ItemType | None = None,
+    scraped_text: str | None = None,
     created_at: datetime | None = None,
 ) -> Item:
     item = MagicMock(spec=Item)
@@ -24,6 +27,9 @@ def make_item(
     item.user_id = 1
     item.content = content
     item.description = description
+    item.title = title
+    item.scraped_text = scraped_text
+    item.type = item_type or ItemType.note
     item.created_at = created_at or datetime.now(UTC)
     return item
 
@@ -257,6 +263,107 @@ async def test_search_offset_beyond_results_returns_empty_list() -> None:
     results = await svc.search(user_id=1, query="q", limit=10, offset=5)
 
     assert results == []
+
+
+async def test_search_link_uses_stored_title_for_search_result() -> None:
+    """A link Item with ``title`` set surfaces it as the SearchResult title."""
+    item = make_item(
+        content="https://example.com/article",
+        title="My Headline",
+        scraped_text="The article body…",
+        item_type=ItemType.link,
+    )
+    svc, _, _, _ = make_service(query_vector=[0.1] * 4, item_hits=[(item, 0.6)])
+
+    results = await svc.search(user_id=1, query="q")
+
+    assert results[0].title == "My Headline"
+    assert results[0].url == "https://example.com/article"
+    assert results[0].item_type == "link"
+    # Preview comes from scraped_text for links so users see the article body.
+    assert results[0].preview_text.startswith("The article body")
+
+
+async def test_search_link_without_title_falls_back_to_url_as_title() -> None:
+    """A link without a stored title displays the URL as the SearchResult title."""
+    item = make_item(
+        content="https://example.com/raw",
+        title=None,
+        scraped_text=None,
+        item_type=ItemType.link,
+    )
+    svc, _, _, _ = make_service(query_vector=[0.1] * 4, item_hits=[(item, 0.4)])
+
+    results = await svc.search(user_id=1, query="q")
+
+    assert results[0].title == "https://example.com/raw"
+    # Empty preview when there is no scraped_text — the renderer hides the
+    # "Текст:" line in this case.
+    assert results[0].preview_text == ""
+
+
+async def test_search_link_preview_uses_scraped_text_not_description() -> None:
+    """For links, the preview line is built from ``scraped_text`` only."""
+    item = make_item(
+        content="https://example.com/x",
+        title="Hdr",
+        description="Should be ignored for links",
+        scraped_text="Real body of the article goes here.",
+        item_type=ItemType.link,
+    )
+    svc, _, _, _ = make_service(query_vector=[0.1] * 4, item_hits=[(item, 0.5)])
+
+    results = await svc.search(user_id=1, query="q")
+
+    assert "Real body of the article" in results[0].preview_text
+    assert "ignored" not in results[0].preview_text
+
+
+async def test_search_media_uses_description_as_title() -> None:
+    """A media Item exposes its Vision description as the SearchResult title."""
+    drive_link = "https://drive.google.com/file/d/abc"
+    item = make_item(
+        content=drive_link,
+        description="Receipt from supermarket",
+        item_type=ItemType.media,
+    )
+    svc, _, _, _ = make_service(query_vector=[0.1] * 4, item_hits=[(item, 0.7)])
+
+    results = await svc.search(user_id=1, query="q")
+
+    assert results[0].title == "Receipt from supermarket"
+    assert results[0].url == drive_link
+    assert results[0].item_type == "media"
+
+
+async def test_search_carries_item_type_for_non_link_items() -> None:
+    """``item_type`` round-trips so the formatter can pick the right emoji/label."""
+    note_item = make_item(content="just a note", item_type=ItemType.note)
+    task_item = make_item(content="buy milk", item_type=ItemType.task)
+    svc, _, _, _ = make_service(
+        query_vector=[0.1] * 4, item_hits=[(note_item, 0.8), (task_item, 0.7)]
+    )
+
+    results = await svc.search(user_id=1, query="q")
+
+    by_id = {r.id: r for r in results}
+    assert by_id[note_item.id].item_type == "note"
+    assert by_id[note_item.id].url is None
+    assert by_id[task_item.id].item_type == "task"
+    assert by_id[task_item.id].url is None
+
+
+async def test_search_idea_does_not_carry_url() -> None:
+    """Idea hits never carry a URL — they're rendered through the [идея] label only."""
+    parent = make_item(content="some idea text")
+    idea = make_idea(tags=["tag"])
+    svc, _, _, _ = make_service(query_vector=[0.1] * 4, idea_hits=[(parent, idea, 0.5)])
+
+    results = await svc.search(user_id=1, query="q")
+
+    assert results[0].type == "idea"
+    assert results[0].item_type == "idea"
+    assert results[0].url is None
 
 
 async def test_search_passes_user_id_through() -> None:
