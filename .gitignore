@@ -208,3 +208,7 @@ __marimo__/
 .claude/settings.json
 .claude/settings.local.json
 data/
+
+# Google API credentials
+credentials.json
+token.json
