@@ -32,6 +32,13 @@ services:
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    # Mount Google Drive OAuth files from the host next to docker-compose.yml.
+    # credentials.json — OAuth 2.0 client secrets (read-only).
+    # token.json — user token persisted between runs (read-write so the Google
+    # OAuth library can rewrite it after a refresh).
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
+      - ./token.json:/app/token.json
     profiles: [prod]
 
   # Watchtower: auto-updates the bot when a new image is pushed to GHCR
