@@ -223,8 +223,15 @@ DATABASE_URL=postgresql+asyncpg://inbox:change_me@localhost/inbox
 # Optional: voice message transcription (free tier at console.groq.com)
 GROQ_API_KEY=your_groq_key_here
 
-# Optional: photo/file upload to Google Drive
+# Optional: photo/file upload to Google Drive (OAuth 2.0 — uses your personal Drive quota)
+# GOOGLE_DRIVE_CREDENTIALS_FILE points to OAuth 2.0 client secrets JSON
+# (Google Cloud Console → APIs & Services → Credentials → "OAuth 2.0 Client IDs",
+# Desktop app). On first run the bot opens a browser for one-time consent and
+# saves the resulting token to GOOGLE_DRIVE_TOKEN_FILE. The token is auto-refreshed
+# on subsequent runs and must persist across container restarts (mount the path
+# as a volume in Docker).
 GOOGLE_DRIVE_CREDENTIALS_FILE=credentials.json
+GOOGLE_DRIVE_TOKEN_FILE=token.json
 GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
 
 # Optional: semantic search (free tier at voyageai.com)
