@@ -2,6 +2,8 @@
 
 import re
 
+from bot.models.item import Item, ItemType
+
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # Matches common explicit time expressions in Russian and English.
@@ -30,3 +32,20 @@ def extract_url(text: str) -> str | None:
 def has_time_expression(text: str) -> bool:
     """Return True if text contains an explicit time or date reference."""
     return bool(_TIME_RE.search(text))
+
+
+def format_item_display(item: Item) -> str:
+    """Return the user-facing display string for an Item.
+
+    For links: ``{title} ({url})`` when ``Item.title`` is set, otherwise the bare URL.
+    For media: ``{description} ({drive_link})`` when ``Item.description`` is set,
+    otherwise the bare Drive link.
+    For everything else: ``Item.content`` unchanged.
+
+    Callers handle truncation; this helper only chooses what to render.
+    """
+    if item.type == ItemType.link and getattr(item, "title", None):
+        return f"{item.title} ({item.content})"
+    if item.type == ItemType.media and item.description:
+        return f"{item.description} ({item.content})"
+    return item.content

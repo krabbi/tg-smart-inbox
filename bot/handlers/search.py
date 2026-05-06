@@ -28,6 +28,7 @@ from bot.i18n import t
 from bot.models.item import Item, ItemType
 from bot.services.list_service import ListService
 from bot.services.semantic_search_service import SearchResult, SemanticSearchService
+from bot.utils.text import format_item_display
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def _format_plain_results(items: list[Item], query: str, page: int, lang: str) -
     lines = [t("search_header_plain", lang, query=safe_query, page=page + 1)]
     for item in items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
-        snippet = html.escape(_truncate(item.content, 80))
+        snippet = html.escape(_truncate(format_item_display(item), 80))
         date_str = item.created_at.strftime("%d.%m.%Y")
         lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
     return "\n".join(lines)
@@ -171,7 +172,8 @@ def _format_semantic_results(results: list[SearchResult], query: str, page: int,
     lines = [t("search_header_smart", lang, query=safe_query, page=page + 1)]
     for result in results:
         label, emoji = _semantic_header_parts(result, lang)
-        title = html.escape(_truncate(result.title, _PREVIEW_CHARS))
+        headline = _semantic_headline(result)
+        title = html.escape(_truncate(headline, _PREVIEW_CHARS))
         preview = html.escape(_truncate(result.preview_text, _PREVIEW_CHARS))
         bar = _relevance_bar(result.score)
         relevance = t("search_entry_relevance", lang, bar=bar)
@@ -182,14 +184,30 @@ def _format_semantic_results(results: list[SearchResult], query: str, page: int,
     return "\n\n".join(lines)
 
 
+def _semantic_headline(result: SearchResult) -> str:
+    """Return the headline shown after the type label.
+
+    For links and media items where the underlying ``Item`` carried both a
+    human title (or Vision description) and a URL, render them as
+    ``{title} ({url})``. Otherwise just use ``result.title`` as-is.
+    """
+    if result.url and result.title and result.title != result.url:
+        return f"{result.title} ({result.url})"
+    return result.title
+
+
 def _semantic_header_parts(result: SearchResult, lang: str) -> tuple[str, str]:
     """Map a ``SearchResult`` to the (label, emoji) used in its header."""
     if result.type == "idea":
         return t(_TYPE_LABEL_KEY[ItemType.idea], lang), _TYPE_EMOJI[ItemType.idea]
-    # ``SearchResult`` does not carry the ItemType for non-idea items, so we
-    # fall back to a generic record label. In practice the emoji/label distinguish
-    # ideas from other items, which is the most important visual cue.
-    return t("search_label_record", lang), "📄"
+    # When the underlying ItemType is known, use its specific label/emoji so
+    # the semantic results match the visual style of /list. We fall back to
+    # the generic "record" label when ``item_type`` is missing or unknown.
+    try:
+        item_type = ItemType(result.item_type)
+    except ValueError:
+        return t("search_label_record", lang), "📄"
+    return t(_TYPE_LABEL_KEY[item_type], lang), _TYPE_EMOJI[item_type]
 
 
 @router.message(Command("search"))

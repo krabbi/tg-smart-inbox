@@ -616,6 +616,196 @@ async def test_reindex_missing_embeddings_does_not_throttle_on_none_vector() -> 
     mock_sleep.assert_not_awaited()
 
 
+async def test_send_due_reminders_uses_link_title_in_notification() -> None:
+    """A reminder on a link with a stored title shows ``{title} ({url})`` in the push."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 7
+    item.content = "https://example.com/article"
+    item.type = ItemType.link
+    item.title = "Cool Article"
+    item.description = None
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _send_due_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "Cool Article (https://example.com/article)" in text
+
+
+async def test_send_due_reminders_link_without_title_shows_bare_url() -> None:
+    """A link reminder without a stored title sends the bare URL — graceful fallback."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 7
+    item.content = "https://example.com/raw"
+    item.type = ItemType.link
+    item.title = None
+    item.description = None
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _send_due_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "https://example.com/raw" in text
+    # Bare URL — no parenthesis wrapping a duplicate URL.
+    assert "https://example.com/raw (" not in text
+
+
+async def test_auto_resend_link_uses_title_in_notification() -> None:
+    """Auto-resent reminders for links keep using the title-aware display."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 8
+    item.content = "https://example.com/news"
+    item.type = ItemType.link
+    item.title = "Breaking News"
+    item.description = None
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.item_id = "item-id"
+    original.snooze_count = 0
+
+    new_reminder = MagicMock(spec=Reminder)
+    new_reminder.id = "new-id"
+    new_reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.prepare_auto_resend = AsyncMock(return_value=new_reminder)
+        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "Breaking News (https://example.com/news)" in text
+
+
+async def test_auto_resend_max_link_uses_title_in_close_notification() -> None:
+    """The 'auto-closed' final message also renders the title for links."""
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+    from bot.scheduler import _MAX_AUTO_RESENDS
+
+    item = MagicMock(spec=Item)
+    item.user_id = 9
+    item.content = "https://example.com/old-article"
+    item.type = ItemType.link
+    item.title = "Old Article"
+    item.description = None
+
+    original = MagicMock(spec=Reminder)
+    original.id = "orig-id"
+    original.item_id = "item-id"
+    original.snooze_count = _MAX_AUTO_RESENDS
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
+        mock_svc.mark_acknowledged = AsyncMock()
+        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_resend_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "Old Article (https://example.com/old-article)" in text
+
+
 async def test_reindex_missing_embeddings_skips_none_vectors() -> None:
     """When the API returns None, the record is left untouched and no update happens."""
     import uuid

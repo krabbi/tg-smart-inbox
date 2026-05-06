@@ -19,6 +19,7 @@ from bot.services.list_service import ListPage, ListService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
+from bot.utils.text import format_item_display
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,8 @@ def _format_list_page(list_page: ListPage, lang: str) -> str:
     lines = [header]
     for item in list_page.items:
         emoji = _TYPE_EMOJI.get(item.type, "📄")
-        snippet = item.content[:60] + ("…" if len(item.content) > 60 else "")
+        display = format_item_display(item)
+        snippet = display[:60] + ("…" if len(display) > 60 else "")
         date_str = item.created_at.strftime("%d.%m.%Y")
         lines.append(f"{emoji} {snippet}  <i>{date_str}</i>")
     lines.append(t("list_total", lang, total=list_page.total))
@@ -309,7 +311,8 @@ async def cmd_reminders(
     for reminder in reminders:
         item = reminder.item
         due = format_remind_at(reminder.remind_at, user_tz)
-        text = t("reminders_entry", lang, content=item.content[:100], due=due)
+        display = format_item_display(item)
+        text = t("reminders_entry", lang, content=display[:100], due=due)
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
