@@ -14,6 +14,7 @@ RUN chmod +x entrypoint.sh
 
 # Copy source (overridden by volume mount in dev profile)
 COPY bot/ bot/
+COPY scripts/ scripts/
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "-m", "bot"]
