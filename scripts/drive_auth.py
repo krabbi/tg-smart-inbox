@@ -25,6 +25,8 @@ import argparse
 import os
 import sys
 
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
 _SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
