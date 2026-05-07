@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 import anthropic
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_CATEGORIES = {"receipt", "document", "screenshot", "photo", "meme", "other"}
 _SUPPORTED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
 
 _ANALYZE_PROMPT = """\
 Analyze this image and return a JSON object with:
@@ -89,7 +91,9 @@ class VisionService:
                     }
                 ],
             )
-            return self._parse_response(response.content[0].text, lang)  # type: ignore[union-attr]
+            raw = response.content[0].text  # type: ignore[union-attr]
+            logger.debug("Vision raw response: %.500s", raw)
+            return self._parse_response(raw, lang)
         except Exception:
             logger.exception("Vision analysis failed, falling back to 'other'")
             return MediaAnalysis(
@@ -101,12 +105,21 @@ class VisionService:
     def _parse_response(raw: str, lang: str = DEFAULT_LANGUAGE) -> MediaAnalysis:
         """Parse Claude's JSON response into MediaAnalysis, defaulting to 'other'."""
         default_description = t("vision_media_default", lang)
+        cleaned = raw.strip()
+        m = _CODE_FENCE_RE.match(cleaned)
+        if m:
+            logger.debug("Stripped code fence from vision response")
+            cleaned = m.group(1).strip()
         try:
-            data = json.loads(raw.strip())
+            data = json.loads(cleaned)
             category = str(data.get("category", "other")).lower()
             if category not in _VALID_CATEGORIES:
+                logger.warning(
+                    "Vision returned unknown category %r, defaulting to 'other'", category
+                )
                 category = "other"
             description = str(data.get("description", default_description))
             return MediaAnalysis(category=category, description=description)
         except (json.JSONDecodeError, AttributeError):
+            logger.warning("Failed to parse vision response as JSON: %.200r", raw)
             return MediaAnalysis(category="other", description=default_description)
