@@ -61,13 +61,20 @@ class MediaService:
     ) -> MediaResult:
         """Analyze, upload, save, and return MediaResult.
 
-        ``lang`` is forwarded to :class:`VisionService` so the image description
-        is produced in the user's interface language.
+        ``user_id`` is the Telegram caller's id; it is forwarded to
+        :meth:`DriveService.upload_file` so the file lands in that user's
+        isolated Drive subfolder, and stored on the resulting :class:`Item`
+        so listings and search remain user-scoped.
+
+        ``lang`` is forwarded to :class:`VisionService` so the image
+        description is produced in the user's interface language.
 
         Raises VisionService fallback errors or DriveUploadError on failure.
         """
         analysis = await self._vision.analyze(file_bytes, media_type, lang=lang)
-        drive_file = await self._drive.upload_file(file_bytes, filename, analysis.category, user_id)
+        drive_file = await self._drive.upload_file(
+            file_bytes, filename, analysis.category, user_id=user_id
+        )
         item = await self._repo.create(
             user_id=user_id,
             type=ItemType.media,

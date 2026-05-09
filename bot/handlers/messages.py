@@ -58,7 +58,13 @@ async def handle_photo(
         await message.answer(t("photo_received_disabled", lang))
         return
 
-    user_id = message.from_user.id if message.from_user else 0
+    # AuthMiddleware drops anonymous messages, but guard explicitly so
+    # ``user_id`` is never silently coerced to a placeholder before reaching
+    # DriveService — that would mix Drive folders across users.
+    if message.from_user is None:
+        logger.warning("Photo received without from_user; dropping")
+        return
+    user_id = message.from_user.id
     photo = message.photo[-1]  # largest size
     file = await message.bot.get_file(photo.file_id)  # type: ignore[union-attr]
     file_bytes = await message.bot.download_file(file.file_path)  # type: ignore[union-attr]
@@ -89,7 +95,13 @@ async def handle_document(
         await message.answer(t("document_received_disabled", lang))
         return
 
-    user_id = message.from_user.id if message.from_user else 0
+    # AuthMiddleware drops anonymous messages, but guard explicitly so
+    # ``user_id`` is never silently coerced to a placeholder before reaching
+    # DriveService — that would mix Drive folders across users.
+    if message.from_user is None:
+        logger.warning("Document received without from_user; dropping")
+        return
+    user_id = message.from_user.id
     doc = message.document  # type: ignore[union-attr]
     file = await message.bot.get_file(doc.file_id)  # type: ignore[union-attr]
     file_bytes = await message.bot.download_file(file.file_path)  # type: ignore[union-attr]
