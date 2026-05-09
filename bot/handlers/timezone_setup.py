@@ -35,6 +35,12 @@ router = Router(name="timezone_setup")
 #
 # Coverage goal from issue #64: ≥ 95% of users. Russia, CIS, EU, Asian hubs,
 # North and South America are covered; less common regions fall under "Other".
+#
+# Country dict keys are ASCII slugs (e.g. ``"russia"``) — internal identifiers
+# that decouple data from UI. Localized country names live in `_COUNTRY_LABELS`
+# (issue #122). Adding a country without an entry in `_COUNTRY_LABELS` is safe:
+# `_country_label` falls back to the slug rendered in title case so the picker
+# stays usable until the translation is added.
 # ─────────────────────────────────────────────────────────────────────────────
 
 CONTINENT_EUROPE = "europe"
@@ -55,10 +61,10 @@ def _continent_label(continent: str, lang: str) -> str:
     return t(_CONTINENT_LABEL_KEY[continent], lang)
 
 
-# Each country maps to the list of IANA zones that belong to it.
+# Each country slug maps to the list of IANA zones that belong to it.
 # Order inside each list is preserved when rendering the zone picker.
 _EUROPE_COUNTRIES: dict[str, list[str]] = {
-    "Россия": [
+    "russia": [
         "Europe/Kaliningrad",
         "Europe/Moscow",
         "Europe/Samara",
@@ -84,64 +90,64 @@ _EUROPE_COUNTRIES: dict[str, list[str]] = {
         "Asia/Kamchatka",
         "Asia/Anadyr",
     ],
-    "Украина": ["Europe/Kyiv", "Europe/Simferopol"],
-    "Беларусь": ["Europe/Minsk"],
-    "Великобритания": ["Europe/London"],
-    "Германия": ["Europe/Berlin"],
-    "Франция": ["Europe/Paris"],
-    "Испания": ["Europe/Madrid"],
-    "Италия": ["Europe/Rome"],
-    "Нидерланды": ["Europe/Amsterdam"],
-    "Польша": ["Europe/Warsaw"],
-    "Чехия": ["Europe/Prague"],
-    "Австрия": ["Europe/Vienna"],
-    "Швейцария": ["Europe/Zurich"],
-    "Швеция": ["Europe/Stockholm"],
-    "Норвегия": ["Europe/Oslo"],
-    "Финляндия": ["Europe/Helsinki"],
-    "Дания": ["Europe/Copenhagen"],
-    "Португалия": ["Europe/Lisbon"],
-    "Греция": ["Europe/Athens"],
-    "Турция": ["Europe/Istanbul"],
-    "Румыния": ["Europe/Bucharest"],
-    "Болгария": ["Europe/Sofia"],
-    "Венгрия": ["Europe/Budapest"],
-    "Ирландия": ["Europe/Dublin"],
-    "Сербия": ["Europe/Belgrade"],
-    "Латвия": ["Europe/Riga"],
-    "Литва": ["Europe/Vilnius"],
-    "Эстония": ["Europe/Tallinn"],
-    "Молдова": ["Europe/Chisinau"],
+    "ukraine": ["Europe/Kyiv", "Europe/Simferopol"],
+    "belarus": ["Europe/Minsk"],
+    "uk": ["Europe/London"],
+    "germany": ["Europe/Berlin"],
+    "france": ["Europe/Paris"],
+    "spain": ["Europe/Madrid"],
+    "italy": ["Europe/Rome"],
+    "netherlands": ["Europe/Amsterdam"],
+    "poland": ["Europe/Warsaw"],
+    "czechia": ["Europe/Prague"],
+    "austria": ["Europe/Vienna"],
+    "switzerland": ["Europe/Zurich"],
+    "sweden": ["Europe/Stockholm"],
+    "norway": ["Europe/Oslo"],
+    "finland": ["Europe/Helsinki"],
+    "denmark": ["Europe/Copenhagen"],
+    "portugal": ["Europe/Lisbon"],
+    "greece": ["Europe/Athens"],
+    "turkey": ["Europe/Istanbul"],
+    "romania": ["Europe/Bucharest"],
+    "bulgaria": ["Europe/Sofia"],
+    "hungary": ["Europe/Budapest"],
+    "ireland": ["Europe/Dublin"],
+    "serbia": ["Europe/Belgrade"],
+    "latvia": ["Europe/Riga"],
+    "lithuania": ["Europe/Vilnius"],
+    "estonia": ["Europe/Tallinn"],
+    "moldova": ["Europe/Chisinau"],
 }
 
 _ASIA_COUNTRIES: dict[str, list[str]] = {
-    "Казахстан": ["Asia/Almaty", "Asia/Aqtau", "Asia/Aqtobe", "Asia/Atyrau", "Asia/Oral"],
-    "Узбекистан": ["Asia/Tashkent", "Asia/Samarkand"],
-    "Кыргызстан": ["Asia/Bishkek"],
-    "Таджикистан": ["Asia/Dushanbe"],
-    "Туркменистан": ["Asia/Ashgabat"],
-    "Армения": ["Asia/Yerevan"],
-    "Азербайджан": ["Asia/Baku"],
-    "Грузия": ["Asia/Tbilisi"],
-    "Израиль": ["Asia/Jerusalem"],
-    "ОАЭ": ["Asia/Dubai"],
-    "Саудовская Аравия": ["Asia/Riyadh"],
-    "Индия": ["Asia/Kolkata"],
-    "Пакистан": ["Asia/Karachi"],
-    "Китай": ["Asia/Shanghai"],
-    "Япония": ["Asia/Tokyo"],
-    "Южная Корея": ["Asia/Seoul"],
-    "Таиланд": ["Asia/Bangkok"],
-    "Вьетнам": ["Asia/Ho_Chi_Minh"],
-    "Сингапур": ["Asia/Singapore"],
-    "Индонезия": ["Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"],
-    "Филиппины": ["Asia/Manila"],
-    "Малайзия": ["Asia/Kuala_Lumpur"],
-    "Иран": ["Asia/Tehran"],
+    "kazakhstan": ["Asia/Almaty", "Asia/Aqtau", "Asia/Aqtobe", "Asia/Atyrau", "Asia/Oral"],
+    "uzbekistan": ["Asia/Tashkent", "Asia/Samarkand"],
+    "kyrgyzstan": ["Asia/Bishkek"],
+    "tajikistan": ["Asia/Dushanbe"],
+    "turkmenistan": ["Asia/Ashgabat"],
+    "armenia": ["Asia/Yerevan"],
+    "azerbaijan": ["Asia/Baku"],
+    "georgia": ["Asia/Tbilisi"],
+    "israel": ["Asia/Jerusalem"],
+    "uae": ["Asia/Dubai"],
+    "saudi_arabia": ["Asia/Riyadh"],
+    "india": ["Asia/Kolkata"],
+    "pakistan": ["Asia/Karachi"],
+    "china": ["Asia/Shanghai"],
+    "japan": ["Asia/Tokyo"],
+    "south_korea": ["Asia/Seoul"],
+    "thailand": ["Asia/Bangkok"],
+    "vietnam": ["Asia/Ho_Chi_Minh"],
+    "singapore": ["Asia/Singapore"],
+    "indonesia": ["Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"],
+    "philippines": ["Asia/Manila"],
+    "malaysia": ["Asia/Kuala_Lumpur"],
+    "iran": ["Asia/Tehran"],
 }
 
 _AMERICA_COUNTRIES: dict[str, list[str]] = {
-    "США": [
+    "usa": [
         "America/New_York",
         "America/Chicago",
         "America/Denver",
@@ -150,7 +156,7 @@ _AMERICA_COUNTRIES: dict[str, list[str]] = {
         "America/Anchorage",
         "Pacific/Honolulu",
     ],
-    "Канада": [
+    "canada": [
         "America/Toronto",
         "America/Winnipeg",
         "America/Edmonton",
@@ -158,23 +164,23 @@ _AMERICA_COUNTRIES: dict[str, list[str]] = {
         "America/Halifax",
         "America/St_Johns",
     ],
-    "Мексика": ["America/Mexico_City", "America/Cancun", "America/Tijuana"],
-    "Бразилия": ["America/Sao_Paulo", "America/Manaus", "America/Fortaleza"],
-    "Аргентина": ["America/Argentina/Buenos_Aires"],
-    "Чили": ["America/Santiago"],
-    "Колумбия": ["America/Bogota"],
-    "Перу": ["America/Lima"],
-    "Венесуэла": ["America/Caracas"],
-    "Куба": ["America/Havana"],
+    "mexico": ["America/Mexico_City", "America/Cancun", "America/Tijuana"],
+    "brazil": ["America/Sao_Paulo", "America/Manaus", "America/Fortaleza"],
+    "argentina": ["America/Argentina/Buenos_Aires"],
+    "chile": ["America/Santiago"],
+    "colombia": ["America/Bogota"],
+    "peru": ["America/Lima"],
+    "venezuela": ["America/Caracas"],
+    "cuba": ["America/Havana"],
 }
 
 _OTHER_COUNTRIES: dict[str, list[str]] = {
-    "ЮАР": ["Africa/Johannesburg"],
-    "Египет": ["Africa/Cairo"],
-    "Марокко": ["Africa/Casablanca"],
-    "Нигерия": ["Africa/Lagos"],
-    "Кения": ["Africa/Nairobi"],
-    "Австралия": [
+    "south_africa": ["Africa/Johannesburg"],
+    "egypt": ["Africa/Cairo"],
+    "morocco": ["Africa/Casablanca"],
+    "nigeria": ["Africa/Lagos"],
+    "kenya": ["Africa/Nairobi"],
+    "australia": [
         "Australia/Sydney",
         "Australia/Melbourne",
         "Australia/Brisbane",
@@ -183,8 +189,8 @@ _OTHER_COUNTRIES: dict[str, list[str]] = {
         "Australia/Hobart",
         "Australia/Darwin",
     ],
-    "Новая Зеландия": ["Pacific/Auckland"],
-    "UTC": ["UTC"],
+    "new_zealand": ["Pacific/Auckland"],
+    "utc": ["UTC"],
 }
 
 _CONTINENT_COUNTRIES: dict[str, dict[str, list[str]]] = {
@@ -193,6 +199,106 @@ _CONTINENT_COUNTRIES: dict[str, dict[str, list[str]]] = {
     CONTINENT_AMERICA: _AMERICA_COUNTRIES,
     CONTINENT_OTHER: _OTHER_COUNTRIES,
 }
+
+
+# Localized country names. Keyed by the same ASCII slug used in the country
+# dictionaries above; the inner mapping covers every supported language. New
+# countries that miss a translation gracefully fall back to a title-cased slug
+# in `_country_label` (e.g. ``"new_country" -> "New Country"``), so the picker
+# always renders something readable.
+_COUNTRY_LABELS: dict[str, dict[str, str]] = {
+    # Europe
+    "russia": {"ru": "Россия", "en": "Russia"},
+    "ukraine": {"ru": "Украина", "en": "Ukraine"},
+    "belarus": {"ru": "Беларусь", "en": "Belarus"},
+    "uk": {"ru": "Великобритания", "en": "United Kingdom"},
+    "germany": {"ru": "Германия", "en": "Germany"},
+    "france": {"ru": "Франция", "en": "France"},
+    "spain": {"ru": "Испания", "en": "Spain"},
+    "italy": {"ru": "Италия", "en": "Italy"},
+    "netherlands": {"ru": "Нидерланды", "en": "Netherlands"},
+    "poland": {"ru": "Польша", "en": "Poland"},
+    "czechia": {"ru": "Чехия", "en": "Czechia"},
+    "austria": {"ru": "Австрия", "en": "Austria"},
+    "switzerland": {"ru": "Швейцария", "en": "Switzerland"},
+    "sweden": {"ru": "Швеция", "en": "Sweden"},
+    "norway": {"ru": "Норвегия", "en": "Norway"},
+    "finland": {"ru": "Финляндия", "en": "Finland"},
+    "denmark": {"ru": "Дания", "en": "Denmark"},
+    "portugal": {"ru": "Португалия", "en": "Portugal"},
+    "greece": {"ru": "Греция", "en": "Greece"},
+    "turkey": {"ru": "Турция", "en": "Turkey"},
+    "romania": {"ru": "Румыния", "en": "Romania"},
+    "bulgaria": {"ru": "Болгария", "en": "Bulgaria"},
+    "hungary": {"ru": "Венгрия", "en": "Hungary"},
+    "ireland": {"ru": "Ирландия", "en": "Ireland"},
+    "serbia": {"ru": "Сербия", "en": "Serbia"},
+    "latvia": {"ru": "Латвия", "en": "Latvia"},
+    "lithuania": {"ru": "Литва", "en": "Lithuania"},
+    "estonia": {"ru": "Эстония", "en": "Estonia"},
+    "moldova": {"ru": "Молдова", "en": "Moldova"},
+    # Asia
+    "kazakhstan": {"ru": "Казахстан", "en": "Kazakhstan"},
+    "uzbekistan": {"ru": "Узбекистан", "en": "Uzbekistan"},
+    "kyrgyzstan": {"ru": "Кыргызстан", "en": "Kyrgyzstan"},
+    "tajikistan": {"ru": "Таджикистан", "en": "Tajikistan"},
+    "turkmenistan": {"ru": "Туркменистан", "en": "Turkmenistan"},
+    "armenia": {"ru": "Армения", "en": "Armenia"},
+    "azerbaijan": {"ru": "Азербайджан", "en": "Azerbaijan"},
+    "georgia": {"ru": "Грузия", "en": "Georgia"},
+    "israel": {"ru": "Израиль", "en": "Israel"},
+    "uae": {"ru": "ОАЭ", "en": "UAE"},
+    "saudi_arabia": {"ru": "Саудовская Аравия", "en": "Saudi Arabia"},
+    "india": {"ru": "Индия", "en": "India"},
+    "pakistan": {"ru": "Пакистан", "en": "Pakistan"},
+    "china": {"ru": "Китай", "en": "China"},
+    "japan": {"ru": "Япония", "en": "Japan"},
+    "south_korea": {"ru": "Южная Корея", "en": "South Korea"},
+    "thailand": {"ru": "Таиланд", "en": "Thailand"},
+    "vietnam": {"ru": "Вьетнам", "en": "Vietnam"},
+    "singapore": {"ru": "Сингапур", "en": "Singapore"},
+    "indonesia": {"ru": "Индонезия", "en": "Indonesia"},
+    "philippines": {"ru": "Филиппины", "en": "Philippines"},
+    "malaysia": {"ru": "Малайзия", "en": "Malaysia"},
+    "iran": {"ru": "Иран", "en": "Iran"},
+    # America
+    "usa": {"ru": "США", "en": "USA"},
+    "canada": {"ru": "Канада", "en": "Canada"},
+    "mexico": {"ru": "Мексика", "en": "Mexico"},
+    "brazil": {"ru": "Бразилия", "en": "Brazil"},
+    "argentina": {"ru": "Аргентина", "en": "Argentina"},
+    "chile": {"ru": "Чили", "en": "Chile"},
+    "colombia": {"ru": "Колумбия", "en": "Colombia"},
+    "peru": {"ru": "Перу", "en": "Peru"},
+    "venezuela": {"ru": "Венесуэла", "en": "Venezuela"},
+    "cuba": {"ru": "Куба", "en": "Cuba"},
+    # Other
+    "south_africa": {"ru": "ЮАР", "en": "South Africa"},
+    "egypt": {"ru": "Египет", "en": "Egypt"},
+    "morocco": {"ru": "Марокко", "en": "Morocco"},
+    "nigeria": {"ru": "Нигерия", "en": "Nigeria"},
+    "kenya": {"ru": "Кения", "en": "Kenya"},
+    "australia": {"ru": "Австралия", "en": "Australia"},
+    "new_zealand": {"ru": "Новая Зеландия", "en": "New Zealand"},
+    "utc": {"ru": "UTC", "en": "UTC"},
+}
+
+
+def _country_label(slug: str, lang: str) -> str:
+    """Return the localized country name for a slug, falling back gracefully.
+
+    Resolution order:
+        1. ``_COUNTRY_LABELS[slug][lang]`` — exact match for the requested language.
+        2. ``_COUNTRY_LABELS[slug]["en"]`` — English fallback.
+        3. The slug rendered in title case (``"new_country"`` → ``"New Country"``)
+           so newly added countries without translations still appear sensibly.
+    """
+    translations = _COUNTRY_LABELS.get(slug)
+    if translations is not None:
+        label = translations.get(lang) or translations.get("en")
+        if label:
+            return label
+    return slug.replace("_", " ").title()
 
 
 class TimezoneSetupStates(StatesGroup):
@@ -223,12 +329,12 @@ def _available_zones_for(country_zones: list[str]) -> list[str]:
 
 
 def _countries_with_zones(continent: str) -> list[tuple[str, list[str]]]:
-    """Return (country, zones) pairs for a continent, dropping entries with no live zones."""
+    """Return (slug, zones) pairs for a continent, dropping entries with no live zones."""
     result: list[tuple[str, list[str]]] = []
-    for country, zones in _CONTINENT_COUNTRIES[continent].items():
+    for slug, zones in _CONTINENT_COUNTRIES[continent].items():
         live = _available_zones_for(zones)
         if live:
-            result.append((country, live))
+            result.append((slug, live))
     return result
 
 
@@ -249,11 +355,11 @@ def _continent_keyboard(lang: str) -> InlineKeyboardMarkup:
 def _country_keyboard(
     continent: str, lang: str
 ) -> tuple[InlineKeyboardMarkup, list[tuple[str, list[str]]]]:
-    """Build the step-2 keyboard; return (keyboard, ordered [country, zones] pairs)."""
+    """Build the step-2 keyboard; return (keyboard, ordered [slug, zones] pairs)."""
     pairs = _countries_with_zones(continent)
     buttons = [
-        InlineKeyboardButton(text=country, callback_data=f"{_CB_COUNTRY}{idx}")
-        for idx, (country, _) in enumerate(pairs)
+        InlineKeyboardButton(text=_country_label(slug, lang), callback_data=f"{_CB_COUNTRY}{idx}")
+        for idx, (slug, _) in enumerate(pairs)
     ]
     rows = _chunk(buttons, _ROW_WIDTH)
     rows.append(
@@ -382,16 +488,16 @@ async def cb_pick_country(
     if idx < 0 or idx >= len(pairs):
         return
 
-    country, zones = pairs[idx]
+    country_slug, zones = pairs[idx]
 
     if len(zones) == 1:
         await _finalize_zone(callback, state, zones[0], user_settings_service, lang)
         return
 
-    await state.update_data({_STATE_COUNTRY_KEY: country})
+    await state.update_data({_STATE_COUNTRY_KEY: country_slug})
     await state.set_state(TimezoneSetupStates.waiting_for_zone)
     await callback.message.edit_text(
-        t("tz_choose_city", lang, country=country),
+        t("tz_choose_city", lang, country=_country_label(country_slug, lang)),
         reply_markup=_zone_keyboard(zones, lang),
     )
 
@@ -433,8 +539,8 @@ async def cb_pick_zone(
 
     data = await state.get_data()
     continent = data.get(_STATE_CONTINENT_KEY)
-    country = data.get(_STATE_COUNTRY_KEY)
-    if continent not in _CONTINENT_COUNTRIES or not country:
+    country_slug = data.get(_STATE_COUNTRY_KEY)
+    if continent not in _CONTINENT_COUNTRIES or not country_slug:
         return
 
     try:
@@ -442,7 +548,7 @@ async def cb_pick_zone(
     except ValueError:
         return
 
-    zones = dict(_countries_with_zones(continent)).get(country, [])
+    zones = dict(_countries_with_zones(continent)).get(country_slug, [])
     if idx < 0 or idx >= len(zones):
         return
 

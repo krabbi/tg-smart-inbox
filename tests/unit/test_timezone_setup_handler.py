@@ -14,6 +14,8 @@ from bot.handlers.timezone_setup import (
     _CB_CONTINENT,
     _CB_COUNTRY,
     _CB_ZONE,
+    _CONTINENT_COUNTRIES,
+    _COUNTRY_LABELS,
     _STATE_CONTINENT_KEY,
     _STATE_COUNTRY_KEY,
     CONTINENT_ASIA,
@@ -23,6 +25,7 @@ from bot.handlers.timezone_setup import (
     _continent_keyboard,
     _countries_with_zones,
     _country_keyboard,
+    _country_label,
     _format_utc_offset,
     _zone_keyboard,
     _zone_label,
@@ -113,11 +116,37 @@ def test_country_keyboard_has_back_button() -> None:
     assert last_row[0].callback_data == _CB_BACK_CONTINENT
 
 
-def test_country_keyboard_labels_match_pairs() -> None:
+def test_country_keyboard_labels_are_localized_ru() -> None:
     kb, pairs = _country_keyboard(CONTINENT_OTHER, "ru")
-    country_names = {name for name, _ in pairs}
+    expected = {_country_label(slug, "ru") for slug, _ in pairs}
     labels = {b.text for row in kb.inline_keyboard[:-1] for b in row}
-    assert labels == country_names
+    assert labels == expected
+    # Sanity check: at least one well-known country renders in Russian.
+    assert "Австралия" in labels
+
+
+def test_country_keyboard_labels_are_localized_en() -> None:
+    kb, pairs = _country_keyboard(CONTINENT_OTHER, "en")
+    expected = {_country_label(slug, "en") for slug, _ in pairs}
+    labels = {b.text for row in kb.inline_keyboard[:-1] for b in row}
+    assert labels == expected
+    # Sanity check: at least one well-known country renders in English.
+    assert "Australia" in labels
+    assert "Австралия" not in labels
+
+
+def test_country_keyboard_europe_localizes_russia_and_germany() -> None:
+    kb_ru, _ = _country_keyboard(CONTINENT_EUROPE, "ru")
+    kb_en, _ = _country_keyboard(CONTINENT_EUROPE, "en")
+    labels_ru = {b.text for row in kb_ru.inline_keyboard[:-1] for b in row}
+    labels_en = {b.text for row in kb_en.inline_keyboard[:-1] for b in row}
+    assert "Россия" in labels_ru
+    assert "Германия" in labels_ru
+    assert "Russia" in labels_en
+    assert "Germany" in labels_en
+    # No leakage across languages.
+    assert "Россия" not in labels_en
+    assert "Russia" not in labels_ru
 
 
 def test_zone_keyboard_has_back_button() -> None:
@@ -230,7 +259,7 @@ async def test_cb_pick_country_with_multiple_zones_advances_to_zone_step() -> No
     # Russia in Europe continent has many zones → zone step required
     state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE})
     pairs = _countries_with_zones(CONTINENT_EUROPE)
-    russia_idx = next(i for i, (c, _) in enumerate(pairs) if c == "Россия")
+    russia_idx = next(i for i, (slug, _) in enumerate(pairs) if slug == "russia")
     cb = make_callback(f"{_CB_COUNTRY}{russia_idx}")
     svc = make_tz_service()
 
@@ -239,15 +268,38 @@ async def test_cb_pick_country_with_multiple_zones_advances_to_zone_step() -> No
     state.set_state.assert_awaited_with(TimezoneSetupStates.waiting_for_zone)
     cb.message.edit_text.assert_awaited_once()
     stored = await state.get_data()
-    assert stored[_STATE_COUNTRY_KEY] == "Россия"
+    # The slug (internal id) is stored — never the localized label.
+    assert stored[_STATE_COUNTRY_KEY] == "russia"
     svc.set_timezone.assert_not_awaited()
+
+
+async def test_cb_pick_country_uses_localized_country_in_prompt() -> None:
+    # When advancing to the zone picker, the prompt should show the
+    # country in the user's language, not the slug.
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE})
+    pairs = _countries_with_zones(CONTINENT_EUROPE)
+    russia_idx = next(i for i, (slug, _) in enumerate(pairs) if slug == "russia")
+    svc = make_tz_service()
+
+    cb_ru = make_callback(f"{_CB_COUNTRY}{russia_idx}")
+    await cb_pick_country(cb_ru, state, user_settings_service=svc, lang="ru")
+    prompt_ru = cb_ru.message.edit_text.call_args[0][0]
+    assert "Россия" in prompt_ru
+    assert "russia" not in prompt_ru
+
+    state_en = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE})
+    cb_en = make_callback(f"{_CB_COUNTRY}{russia_idx}")
+    await cb_pick_country(cb_en, state_en, user_settings_service=svc, lang="en")
+    prompt_en = cb_en.message.edit_text.call_args[0][0]
+    assert "Russia" in prompt_en
+    assert "Россия" not in prompt_en
 
 
 async def test_cb_pick_country_with_single_zone_finalizes_immediately() -> None:
     # Germany has exactly one zone → should skip the zone step and save directly
     state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE})
     pairs = _countries_with_zones(CONTINENT_EUROPE)
-    germany_idx = next(i for i, (c, _) in enumerate(pairs) if c == "Германия")
+    germany_idx = next(i for i, (slug, _) in enumerate(pairs) if slug == "germany")
     cb = make_callback(f"{_CB_COUNTRY}{germany_idx}")
     svc = make_tz_service()
 
@@ -295,7 +347,7 @@ async def test_cb_pick_country_missing_continent_state_ignored() -> None:
 async def test_cb_pick_country_service_none_shows_friendly_error() -> None:
     state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE})
     pairs = _countries_with_zones(CONTINENT_EUROPE)
-    germany_idx = next(i for i, (c, _) in enumerate(pairs) if c == "Германия")
+    germany_idx = next(i for i, (slug, _) in enumerate(pairs) if slug == "germany")
     cb = make_callback(f"{_CB_COUNTRY}{germany_idx}")
 
     await cb_pick_country(cb, state, user_settings_service=None)
@@ -330,7 +382,7 @@ async def test_cb_back_to_country_falls_back_to_continent_when_state_lost() -> N
 
 
 async def test_cb_pick_zone_saves_and_confirms() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Россия"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "russia"})
     cb = make_callback(f"{_CB_ZONE}0")  # first zone for Russia
     svc = make_tz_service()
 
@@ -347,7 +399,7 @@ async def test_cb_pick_zone_saves_and_confirms() -> None:
 
 
 async def test_cb_pick_zone_invalid_index_ignored() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Россия"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "russia"})
     cb = make_callback(f"{_CB_ZONE}9999")
     svc = make_tz_service()
 
@@ -367,7 +419,7 @@ async def test_cb_pick_zone_missing_country_state_ignored() -> None:
 
 
 async def test_cb_pick_zone_unknown_country_ignored() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Мордор"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "mordor"})
     cb = make_callback(f"{_CB_ZONE}0")
     svc = make_tz_service()
 
@@ -377,7 +429,7 @@ async def test_cb_pick_zone_unknown_country_ignored() -> None:
 
 
 async def test_cb_pick_zone_non_numeric_ignored() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Россия"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "russia"})
     cb = make_callback(f"{_CB_ZONE}xyz")
     svc = make_tz_service()
 
@@ -387,7 +439,7 @@ async def test_cb_pick_zone_non_numeric_ignored() -> None:
 
 
 async def test_cb_pick_zone_service_none_shows_error() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Россия"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "russia"})
     cb = make_callback(f"{_CB_ZONE}0")
 
     await cb_pick_zone(cb, state, user_settings_service=None)
@@ -397,7 +449,7 @@ async def test_cb_pick_zone_service_none_shows_error() -> None:
 
 
 async def test_cb_pick_zone_invalid_timezone_from_service_recovers() -> None:
-    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "Россия"})
+    state = make_state({_STATE_CONTINENT_KEY: CONTINENT_EUROPE, _STATE_COUNTRY_KEY: "russia"})
     cb = make_callback(f"{_CB_ZONE}0")
     svc = make_tz_service()
     svc.set_timezone = AsyncMock(side_effect=InvalidTimezoneError("bad"))
@@ -408,3 +460,52 @@ async def test_cb_pick_zone_invalid_timezone_from_service_recovers() -> None:
     cb.message.edit_text.assert_awaited_once()
     state.set_state.assert_awaited_with(TimezoneSetupStates.waiting_for_continent)
     state.clear.assert_not_awaited()
+
+
+# ── _country_label localization ──────────────────────────────────────────────
+
+
+def test_country_label_returns_russian_for_ru() -> None:
+    assert _country_label("russia", "ru") == "Россия"
+    assert _country_label("germany", "ru") == "Германия"
+    assert _country_label("south_korea", "ru") == "Южная Корея"
+
+
+def test_country_label_returns_english_for_en() -> None:
+    assert _country_label("russia", "en") == "Russia"
+    assert _country_label("germany", "en") == "Germany"
+    assert _country_label("south_korea", "en") == "South Korea"
+
+
+def test_country_label_falls_back_to_english_for_unknown_language() -> None:
+    # Unknown language → fall back to English so we never show the raw slug.
+    assert _country_label("russia", "fr") == "Russia"
+
+
+def test_country_label_unknown_slug_renders_title_case() -> None:
+    # Newly added countries without a translation entry render readably.
+    assert _country_label("new_country", "ru") == "New Country"
+    assert _country_label("new_country", "en") == "New Country"
+    assert _country_label("singleword", "en") == "Singleword"
+
+
+def test_every_country_slug_has_localizations() -> None:
+    # Hard guard: every slug used in the data must have ru and en labels so
+    # we never show a fallback in production.
+    all_slugs: set[str] = set()
+    for countries in _CONTINENT_COUNTRIES.values():
+        all_slugs.update(countries.keys())
+    missing_ru = [s for s in all_slugs if "ru" not in _COUNTRY_LABELS.get(s, {})]
+    missing_en = [s for s in all_slugs if "en" not in _COUNTRY_LABELS.get(s, {})]
+    assert not missing_ru, f"slugs missing ru translation: {missing_ru}"
+    assert not missing_en, f"slugs missing en translation: {missing_en}"
+
+
+def test_country_dictionary_keys_are_ascii_slugs() -> None:
+    # The slug is what the FSM persists and what callbacks key off of —
+    # it must stay ASCII-safe and free of UI-language drift.
+    for countries in _CONTINENT_COUNTRIES.values():
+        for slug in countries:
+            assert slug.isascii(), f"non-ASCII slug: {slug!r}"
+            assert slug == slug.lower(), f"slug must be lowercase: {slug!r}"
+            assert " " not in slug, f"slug must not contain spaces: {slug!r}"
