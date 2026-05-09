@@ -343,10 +343,17 @@ Telegram users and gives each user a self-contained Drive view.
 `DriveService._folder_cache` is an in-memory `dict[tuple[int, str], str]`
 keyed by `(user_id, category)`, with a special `(user_id, "__user_root__")`
 entry storing the per-user root ID. The cache is populated on first lookup and
-short-circuits subsequent uploads for the same user/category — no `files.list`
-or `files.create` round trips, just the file upload itself. The cache lives on
-the `DriveService` instance and therefore persists for the lifetime of the
-single instance owned by the running bot process.
+short-circuits subsequent folder lookups within the same request — no
+`files.list` or `files.create` round trips, just the file upload itself.
+
+The cache lives on the `DriveService` instance, and `DependencyMiddleware`
+constructs a fresh `DriveService` for every incoming update (see
+`bot/middleware.py`). As a result the cache is **scoped to a single request**
+and is discarded once the handler returns. In practice this still helps when a
+single message produces multiple Drive uploads (e.g. a media group), but it
+does not persist across messages. Promoting `DriveService` to a long-lived
+singleton so the cache survives across requests is tracked as a separate
+follow-up task.
 
 ### Failure modes
 
