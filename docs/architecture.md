@@ -302,6 +302,73 @@ The classifier strips them before parsing.
 
 ---
 
+## Google Drive
+
+`DriveService` (`bot/services/drive_service.py`) wraps the Google Drive v3 API
+and is the only service that uploads files. It is constructed once per request
+by `DependencyMiddleware`, but its OAuth credentials and authenticated
+`googleapiclient` service are loaded lazily inside `_ensure_service()` on the
+first upload (so cold-start handlers that don't touch Drive aren't penalised).
+
+### Folder layout
+
+Each Telegram user gets their own subtree under `GOOGLE_DRIVE_FOLDER_ID`:
+
+```
+{GOOGLE_DRIVE_FOLDER_ID}/
+├── user_{user_id_a}/
+│   ├── 📄 Receipts/
+│   ├── 📁 Documents/
+│   ├── 🖥️ Screenshots/
+│   ├── 🖼️ Photos/
+│   ├── 😄 Memes/
+│   └── 📦 Other/
+├── user_{user_id_b}/
+│   └── ...
+```
+
+`upload_file(file_bytes, filename, category, user_id)` resolves
+(or creates) two folders before uploading:
+
+1. The per-user root `user_{user_id}` directly under `GOOGLE_DRIVE_FOLDER_ID`.
+2. The category folder (`📄 Receipts`, `🖼️ Photos`, …) under that user root.
+   Unknown categories fall back to `📦 Other`.
+
+Both lookups are idempotent: if a folder with the target name already exists
+under the right parent, its existing ID is reused. This isolates files between
+Telegram users and gives each user a self-contained Drive view.
+
+### Folder ID cache
+
+`DriveService._folder_cache` is an in-memory `dict[tuple[int, str], str]`
+keyed by `(user_id, category)`, with a special `(user_id, "__user_root__")`
+entry storing the per-user root ID. The cache is populated on first lookup and
+short-circuits subsequent folder lookups within the same request — no
+`files.list` or `files.create` round trips, just the file upload itself.
+
+The cache lives on the `DriveService` instance, and `DependencyMiddleware`
+constructs a fresh `DriveService` for every incoming update (see
+`bot/middleware.py`). As a result the cache is **scoped to a single request**
+and is discarded once the handler returns. In practice this still helps when a
+single message produces multiple Drive uploads (e.g. a media group), but it
+does not persist across messages. Promoting `DriveService` to a long-lived
+singleton so the cache survives across requests is tracked as a separate
+follow-up task.
+
+### Failure modes
+
+- Missing or empty `token.json` → `DriveUploadError` with a hint to run
+  `scripts/drive_auth.py`.
+- Token refresh failure (network down, revoked refresh token) →
+  `DriveUploadError` wrapping the original exception.
+- Any Drive API error during upload → `DriveUploadError` (raised by
+  `upload_file`).
+
+`MediaService.process` is the only caller; it forwards the user's Telegram ID
+into `upload_file` so files always land in the correct per-user subfolder.
+
+---
+
 ## AI Integration
 
 ### Claude Client (`bot/services/claude_client.py`)

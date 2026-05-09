@@ -4,7 +4,12 @@ import pytest
 
 from bot.config import Config
 from bot.exceptions import DriveUploadError
-from bot.services.drive_service import _CATEGORY_FOLDERS, DriveFile, DriveService
+from bot.services.drive_service import (
+    _CATEGORY_FOLDERS,
+    _USER_ROOT_KEY,
+    DriveFile,
+    DriveService,
+)
 
 
 def make_config() -> Config:
@@ -42,6 +47,7 @@ def test_init_does_not_load_credentials_or_build_service() -> None:
         mock_load.assert_not_called()
         mock_build.assert_not_called()
         assert svc._service is None
+        assert svc._folder_cache == {}
 
 
 async def test_credentials_loaded_lazily_from_existing_valid_token() -> None:
@@ -216,7 +222,7 @@ async def test_get_or_create_folder_creates_new() -> None:
     assert result == "new-folder-id"
 
 
-async def test_upload_returns_drive_file() -> None:
+async def test_upload_file_returns_drive_file() -> None:
     svc, mock_api = make_service_with_mock_api()
     mock_api.files().list().execute.return_value = {"files": [{"id": "folder-id"}]}
     mock_api.files().create().execute.return_value = {
@@ -225,7 +231,7 @@ async def test_upload_returns_drive_file() -> None:
         "webViewLink": "https://drive.google.com/file/d/file-id",
     }
 
-    result = await svc.upload(b"image bytes", "photo.jpg", "photo")
+    result = await svc.upload_file(b"image bytes", "photo.jpg", "photo", user_id=42)
 
     assert isinstance(result, DriveFile)
     assert result.file_id == "file-id"
@@ -233,7 +239,7 @@ async def test_upload_returns_drive_file() -> None:
     assert "drive.google.com" in result.web_link
 
 
-async def test_upload_uses_correct_category_folder() -> None:
+async def test_upload_file_uses_correct_category_folder() -> None:
     svc, mock_api = make_service_with_mock_api()
     files_mock = mock_api.files.return_value
     files_mock.list.return_value.execute.return_value = {"files": [{"id": "receipt-folder"}]}
@@ -243,14 +249,13 @@ async def test_upload_uses_correct_category_folder() -> None:
         "webViewLink": "https://drive.google.com",
     }
 
-    await svc.upload(b"bytes", "receipt.jpg", "receipt")
+    await svc.upload_file(b"bytes", "receipt.jpg", "receipt", user_id=42)
 
-    list_call = files_mock.list.call_args_list[0]
-    query = list_call[1]["q"]
-    assert "📄 Receipts" in query
+    queries = [call[1]["q"] for call in files_mock.list.call_args_list]
+    assert any("📄 Receipts" in q for q in queries)
 
 
-async def test_upload_unknown_category_uses_other_folder() -> None:
+async def test_upload_file_unknown_category_uses_other_folder() -> None:
     svc, mock_api = make_service_with_mock_api()
     files_mock = mock_api.files.return_value
     files_mock.list.return_value.execute.return_value = {"files": [{"id": "other-folder"}]}
@@ -260,19 +265,174 @@ async def test_upload_unknown_category_uses_other_folder() -> None:
         "webViewLink": "",
     }
 
-    await svc.upload(b"bytes", "file.bin", "unknown_category")
+    await svc.upload_file(b"bytes", "file.bin", "unknown_category", user_id=42)
 
-    list_call = files_mock.list.call_args_list[0]
-    query = list_call[1]["q"]
-    assert "📦 Other" in query
+    queries = [call[1]["q"] for call in files_mock.list.call_args_list]
+    assert any("📦 Other" in q for q in queries)
 
 
-async def test_upload_raises_drive_upload_error_on_failure() -> None:
+async def test_upload_file_raises_drive_upload_error_on_failure() -> None:
     svc, mock_api = make_service_with_mock_api()
     mock_api.files().list().execute.side_effect = Exception("API error")
 
     with pytest.raises(DriveUploadError, match="Drive upload failed"):
-        await svc.upload(b"bytes", "file.jpg", "photo")
+        await svc.upload_file(b"bytes", "file.jpg", "photo", user_id=1)
+
+
+async def test_upload_file_creates_per_user_root_then_category() -> None:
+    """First upload for a user must look up/create ``user_{id}`` then the category folder."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    # All folder lookups return empty so each parent is created fresh.
+    files_mock.list.return_value.execute.return_value = {"files": []}
+    # ``create`` is called for: user_42 root, 🖼️ Photos folder, then the file itself.
+    files_mock.create.return_value.execute.side_effect = [
+        {"id": "user-root-id"},
+        {"id": "photos-folder-id"},
+        {
+            "id": "file-id",
+            "name": "photo.jpg",
+            "webViewLink": "https://drive.google.com/file/d/file-id",
+        },
+    ]
+
+    await svc.upload_file(b"bytes", "photo.jpg", "photo", user_id=42)
+
+    create_bodies = [call[1]["body"] for call in files_mock.create.call_args_list]
+    assert create_bodies[0]["name"] == "user_42"
+    assert create_bodies[0]["parents"] == ["root-folder-id"]
+    assert create_bodies[1]["name"] == "🖼️ Photos"
+    assert create_bodies[1]["parents"] == ["user-root-id"]
+    assert create_bodies[2]["name"] == "photo.jpg"
+    assert create_bodies[2]["parents"] == ["photos-folder-id"]
+
+
+async def test_upload_file_isolates_users_into_separate_subfolders() -> None:
+    """Two different users uploading the same category land in distinct ``user_{id}`` roots."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    files_mock.list.return_value.execute.return_value = {"files": []}
+    # user 1: user_root, photos folder, file. user 2: user_root, photos folder, file.
+    files_mock.create.return_value.execute.side_effect = [
+        {"id": "user1-root"},
+        {"id": "user1-photos"},
+        {"id": "file-1", "name": "a.jpg", "webViewLink": ""},
+        {"id": "user2-root"},
+        {"id": "user2-photos"},
+        {"id": "file-2", "name": "b.jpg", "webViewLink": ""},
+    ]
+
+    await svc.upload_file(b"a", "a.jpg", "photo", user_id=1)
+    await svc.upload_file(b"b", "b.jpg", "photo", user_id=2)
+
+    create_names = [call[1]["body"]["name"] for call in files_mock.create.call_args_list]
+    assert "user_1" in create_names
+    assert "user_2" in create_names
+    # The cache should now hold both per-user roots and category folders.
+    assert svc._folder_cache[(1, _USER_ROOT_KEY)] == "user1-root"
+    assert svc._folder_cache[(2, _USER_ROOT_KEY)] == "user2-root"
+    assert svc._folder_cache[(1, "photo")] == "user1-photos"
+    assert svc._folder_cache[(2, "photo")] == "user2-photos"
+
+
+async def test_upload_file_caches_folder_per_user_and_category() -> None:
+    """Second upload to the same (user, category) skips folder lookup/creation entirely."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    files_mock.list.return_value.execute.return_value = {"files": []}
+    files_mock.create.return_value.execute.side_effect = [
+        {"id": "user-root"},
+        {"id": "photos-folder"},
+        {"id": "file-1", "name": "a.jpg", "webViewLink": ""},
+        {"id": "file-2", "name": "b.jpg", "webViewLink": ""},
+    ]
+
+    await svc.upload_file(b"a", "a.jpg", "photo", user_id=7)
+    list_calls_after_first = files_mock.list.call_count
+    create_calls_after_first = files_mock.create.call_count
+
+    await svc.upload_file(b"b", "b.jpg", "photo", user_id=7)
+
+    # Second upload: no extra ``files.list`` calls (folders served from cache),
+    # and only one extra ``files.create`` call — for the file itself.
+    assert files_mock.list.call_count == list_calls_after_first
+    assert files_mock.create.call_count == create_calls_after_first + 1
+
+
+async def test_upload_file_reuses_user_root_across_categories() -> None:
+    """Different categories for the same user must share a single ``user_{id}`` root."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    files_mock.list.return_value.execute.return_value = {"files": []}
+    files_mock.create.return_value.execute.side_effect = [
+        {"id": "user-root"},
+        {"id": "photos-folder"},
+        {"id": "file-photo", "name": "p.jpg", "webViewLink": ""},
+        {"id": "receipts-folder"},
+        {"id": "file-receipt", "name": "r.jpg", "webViewLink": ""},
+    ]
+
+    await svc.upload_file(b"p", "p.jpg", "photo", user_id=99)
+    await svc.upload_file(b"r", "r.jpg", "receipt", user_id=99)
+
+    create_names = [call[1]["body"]["name"] for call in files_mock.create.call_args_list]
+    # Only one ``user_99`` folder is ever created.
+    assert create_names.count("user_99") == 1
+    assert svc._folder_cache[(99, _USER_ROOT_KEY)] == "user-root"
+    assert svc._folder_cache[(99, "photo")] == "photos-folder"
+    assert svc._folder_cache[(99, "receipt")] == "receipts-folder"
+
+
+async def test_upload_file_uses_existing_folders_idempotently() -> None:
+    """When ``user_{id}`` and the category folder already exist on Drive, no creates run."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    # First list call → existing user_3 root; second → existing 🖼️ Photos; then create file.
+    files_mock.list.return_value.execute.side_effect = [
+        {"files": [{"id": "existing-user-root"}]},
+        {"files": [{"id": "existing-photos"}]},
+    ]
+    files_mock.create.return_value.execute.return_value = {
+        "id": "file-id",
+        "name": "p.jpg",
+        "webViewLink": "https://drive.google.com",
+    }
+
+    await svc.upload_file(b"bytes", "p.jpg", "photo", user_id=3)
+
+    # Only the file itself is created; both folders were resolved to existing IDs.
+    create_bodies = [call[1]["body"] for call in files_mock.create.call_args_list]
+    assert len(create_bodies) == 1
+    assert create_bodies[0]["name"] == "p.jpg"
+    assert create_bodies[0]["parents"] == ["existing-photos"]
+
+
+def test_get_or_create_subfolder_sync_caches_after_lookup() -> None:
+    """``_get_or_create_subfolder_sync`` populates the folder cache after a fresh lookup."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    files_mock.list.return_value.execute.side_effect = [
+        {"files": [{"id": "user-root"}]},
+        {"files": [{"id": "photos"}]},
+    ]
+
+    folder_id = svc._get_or_create_subfolder_sync(mock_api, user_id=5, category="photo")
+
+    assert folder_id == "photos"
+    assert svc._folder_cache[(5, _USER_ROOT_KEY)] == "user-root"
+    assert svc._folder_cache[(5, "photo")] == "photos"
+
+
+def test_get_or_create_subfolder_sync_short_circuits_on_cache_hit() -> None:
+    """Pre-populated cache means no Drive API calls happen at all."""
+    svc, mock_api = make_service_with_mock_api()
+    svc._folder_cache[(5, _USER_ROOT_KEY)] = "user-root"
+    svc._folder_cache[(5, "photo")] = "cached-photos"
+
+    folder_id = svc._get_or_create_subfolder_sync(mock_api, user_id=5, category="photo")
+
+    assert folder_id == "cached-photos"
+    mock_api.files.assert_not_called()
 
 
 def test_all_categories_have_folder_mappings() -> None:

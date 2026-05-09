@@ -67,7 +67,7 @@ class MediaService:
         Raises VisionService fallback errors or DriveUploadError on failure.
         """
         analysis = await self._vision.analyze(file_bytes, media_type, lang=lang)
-        drive_file = await self._drive.upload(file_bytes, filename, analysis.category)
+        drive_file = await self._drive.upload_file(file_bytes, filename, analysis.category, user_id)
         item = await self._repo.create(
             user_id=user_id,
             type=ItemType.media,
