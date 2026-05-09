@@ -26,16 +26,21 @@ def make_message(text: str = "https://example.com", user_id: int = 1) -> Message
 
 
 def make_callback(
-    data: str, message_text: str = "🔗 Ссылка сохранена:\nhttps://example.com"
+    data: str,
+    message_text: str = "🔗 Ссылка сохранена:\nhttps://example.com",
+    user_id: int = 1,
 ) -> CallbackQuery:
     msg = MagicMock()
     msg.text = message_text
     msg.edit_text = AsyncMock()
     msg.edit_reply_markup = AsyncMock()
     msg.answer = AsyncMock()
+    user = MagicMock(spec=User)
+    user.id = user_id
     cb = MagicMock(spec=CallbackQuery)
     cb.data = data
     cb.message = msg
+    cb.from_user = user
     cb.answer = AsyncMock()
     return cb
 
@@ -197,7 +202,9 @@ async def test_cb_link_summary_forwards_item_id_to_service() -> None:
 
     await cb_link_summary(cb, svc, lang="ru")
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="ru")
+    svc.summarize.assert_awaited_once_with(
+        "https://example.com", user_id=1, item_id=item_id, lang="ru"
+    )
 
 
 async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> None:
@@ -207,7 +214,9 @@ async def test_cb_link_summary_passes_none_item_id_for_malformed_callback() -> N
 
     await cb_link_summary(cb, svc, lang="ru")
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=None, lang="ru")
+    svc.summarize.assert_awaited_once_with(
+        "https://example.com", user_id=1, item_id=None, lang="ru"
+    )
 
 
 async def test_cb_link_summary_forwards_lang_to_service() -> None:
@@ -218,4 +227,6 @@ async def test_cb_link_summary_forwards_lang_to_service() -> None:
 
     await cb_link_summary(cb, svc, lang="en")
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="en")
+    svc.summarize.assert_awaited_once_with(
+        "https://example.com", user_id=1, item_id=item_id, lang="en"
+    )

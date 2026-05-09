@@ -43,17 +43,6 @@ async def test_get_due_delegates_to_repo() -> None:
     assert result == expected
 
 
-async def test_cancel_calls_repo_and_commits() -> None:
-    svc, repo, session = make_service()
-    reminder_id = uuid.uuid4()
-    repo.cancel = AsyncMock()
-
-    await svc.cancel(reminder_id)
-
-    repo.cancel.assert_awaited_once_with(reminder_id)
-    session.commit.assert_awaited_once()
-
-
 async def test_mark_sent_sets_flag_and_commits() -> None:
     svc, _, session = make_service()
     reminder = MagicMock(spec=Reminder)

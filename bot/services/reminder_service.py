@@ -24,11 +24,6 @@ class ReminderService:
         """Return all reminders due at or before now."""
         return await self._repo.get_due(now)
 
-    async def cancel(self, reminder_id: uuid.UUID) -> None:
-        """Cancel a reminder and commit."""
-        await self._repo.cancel(reminder_id)
-        await self._session.commit()
-
     async def cancel_for_user(self, reminder_id: uuid.UUID, user_id: int) -> bool:
         """Cancel a reminder only if it belongs to user_id; return False if not found/owned."""
         reminder = await self._repo.get_by_id_for_user(reminder_id, user_id)
