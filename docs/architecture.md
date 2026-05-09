@@ -364,8 +364,14 @@ follow-up task.
 - Any Drive API error during upload → `DriveUploadError` (raised by
   `upload_file`).
 
-`MediaService.process` is the only caller; it forwards the user's Telegram ID
-into `upload_file` so files always land in the correct per-user subfolder.
+`MediaService.process` is the only caller; it forwards the user's Telegram
+ID into `upload_file` as the `user_id=` keyword argument so files always
+land in the correct per-user subfolder. The handlers `handle_photo` and
+`handle_document` (`bot/handlers/messages.py`) read `user_id` directly from
+`message.from_user.id` and pass it to `MediaService.process`. Anonymous
+messages (no `from_user`) are dropped before any Drive call so a missing id
+is never silently coerced into a placeholder that would mix folders across
+users.
 
 ---
 

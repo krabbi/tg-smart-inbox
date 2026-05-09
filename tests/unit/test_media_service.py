@@ -45,10 +45,28 @@ async def test_process_analyzes_and_uploads() -> None:
     result = await svc.process(b"image bytes", "photo.jpg", user_id=1)
 
     vision.analyze.assert_awaited_once_with(b"image bytes", "image/jpeg", lang="en")
-    drive.upload_file.assert_awaited_once_with(b"image bytes", "photo.jpg", "photo", 1)
+    drive.upload_file.assert_awaited_once_with(b"image bytes", "photo.jpg", "photo", user_id=1)
     assert isinstance(result, MediaResult)
     assert result.analysis.category == "photo"
     assert result.drive_file.file_id == "abc"
+
+
+async def test_process_forwards_user_id_to_drive_as_keyword() -> None:
+    """``user_id`` must reach DriveService as a keyword to avoid positional drift."""
+    svc, _, drive = make_media_service()
+    await svc.process(b"bytes", "img.jpg", user_id=12345)
+
+    call = drive.upload_file.await_args
+    assert call.kwargs.get("user_id") == 12345
+
+
+async def test_process_creates_item_for_correct_user() -> None:
+    """``user_id`` must also be persisted on the resulting Item via ItemRepository."""
+    svc, _, _ = make_media_service()
+    await svc.process(b"bytes", "img.jpg", user_id=777)
+
+    svc._repo.create.assert_awaited_once()
+    assert svc._repo.create.await_args.kwargs["user_id"] == 777
 
 
 async def test_process_forwards_lang_to_vision_service() -> None:

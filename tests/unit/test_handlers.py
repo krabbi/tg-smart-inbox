@@ -1,3 +1,5 @@
+import uuid
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.fsm.context import FSMContext
@@ -13,7 +15,11 @@ from bot.handlers.commands import (
 )
 from bot.handlers.messages import handle_document, handle_photo, handle_text
 from bot.i18n import t
+from bot.models.item import Item, ItemType
+from bot.services.drive_service import DriveFile
+from bot.services.media_service import MediaResult, MediaService
 from bot.services.user_settings_service import UserSettingsService
+from bot.services.vision_service import MediaAnalysis
 
 
 def _make_config(
@@ -257,3 +263,100 @@ async def test_handle_text_without_user() -> None:
     message.from_user = None
     await handle_text(message, state=state, lang="ru")
     message.answer.assert_awaited_once()
+
+
+def _make_media_message_with_photo(user_id: int = 555) -> Message:
+    """Build a Message mock with a single photo and a stubbed bot for downloads."""
+    message = make_message(user_id=user_id)
+    photo = MagicMock()
+    photo.file_id = "FILE_ID_PHOTO"
+    message.photo = [photo]
+
+    file = MagicMock()
+    file.file_path = "photos/file.jpg"
+    bot = MagicMock()
+    bot.get_file = AsyncMock(return_value=file)
+    bot.download_file = AsyncMock(return_value=BytesIO(b"jpeg-bytes"))
+    message.bot = bot
+    return message
+
+
+def _make_media_message_with_document(user_id: int = 555, mime_type: str = "image/png") -> Message:
+    """Build a Message mock with a document and a stubbed bot for downloads."""
+    message = make_message(user_id=user_id)
+    doc = MagicMock()
+    doc.file_id = "FILE_ID_DOC"
+    doc.file_name = "report.pdf"
+    doc.mime_type = mime_type
+    message.document = doc
+
+    file = MagicMock()
+    file.file_path = "files/report.pdf"
+    bot = MagicMock()
+    bot.get_file = AsyncMock(return_value=file)
+    bot.download_file = AsyncMock(return_value=BytesIO(b"doc-bytes"))
+    message.bot = bot
+    return message
+
+
+def _make_media_service_mock() -> MagicMock:
+    """Build a MediaService mock that returns a predictable MediaResult."""
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.type = ItemType.media
+    item.description = "stub"
+    drive_file = DriveFile(file_id="x", name="x", web_link="https://drive.google.com/x")
+    analysis = MediaAnalysis(category="photo", description="stub")
+    result = MediaResult(item=item, analysis=analysis, drive_file=drive_file)
+
+    svc = MagicMock(spec=MediaService)
+    svc.process = AsyncMock(return_value=result)
+    return svc
+
+
+async def test_handle_photo_passes_user_id_to_media_service() -> None:
+    """``message.from_user.id`` must reach MediaService.process unchanged."""
+    media_service = _make_media_service_mock()
+    message = _make_media_message_with_photo(user_id=42)
+
+    await handle_photo(message, media_service=media_service, lang="ru")
+
+    media_service.process.assert_awaited_once()
+    kwargs = media_service.process.await_args.kwargs
+    assert kwargs["user_id"] == 42
+
+
+async def test_handle_document_passes_user_id_to_media_service() -> None:
+    """Documents must propagate ``message.from_user.id`` into MediaService.process."""
+    media_service = _make_media_service_mock()
+    message = _make_media_message_with_document(user_id=99)
+
+    await handle_document(message, media_service=media_service, lang="ru")
+
+    media_service.process.assert_awaited_once()
+    kwargs = media_service.process.await_args.kwargs
+    assert kwargs["user_id"] == 99
+
+
+async def test_handle_photo_drops_anonymous_message_without_calling_service() -> None:
+    """No ``from_user`` → never call MediaService (would otherwise mix Drive folders)."""
+    media_service = _make_media_service_mock()
+    message = _make_media_message_with_photo()
+    message.from_user = None
+
+    await handle_photo(message, media_service=media_service, lang="ru")
+
+    media_service.process.assert_not_awaited()
+    message.answer.assert_not_awaited()
+
+
+async def test_handle_document_drops_anonymous_message_without_calling_service() -> None:
+    """No ``from_user`` → never call MediaService (would otherwise mix Drive folders)."""
+    media_service = _make_media_service_mock()
+    message = _make_media_message_with_document()
+    message.from_user = None
+
+    await handle_document(message, media_service=media_service, lang="ru")
+
+    media_service.process.assert_not_awaited()
+    message.answer.assert_not_awaited()
