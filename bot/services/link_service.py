@@ -125,16 +125,18 @@ class LinkService:
     async def summarize(
         self,
         url: str,
+        user_id: int,
         item_id: uuid.UUID | None = None,
         lang: str = DEFAULT_LANGUAGE,
     ) -> LinkSummary:
         """Fetch the page and generate a summary using Claude in the user's language.
 
-        When ``item_id`` is provided and the Item already has ``scraped_text`` cached,
-        the cached text is reused and no HTTP request is made. On a cache miss (or when
-        no ``item_id`` is passed) the page is fetched via the scraper, the new text is
-        written back to the cache on the Item, and then summarized. Scraper failures
-        still raise ``ScrapingError`` so the handler can show a retry button.
+        When ``item_id`` is provided and the Item belongs to ``user_id`` and already
+        has ``scraped_text`` cached, the cached text is reused and no HTTP request is
+        made. On a cache miss (or when ``item_id`` is missing/foreign) the page is
+        fetched via the scraper. The fresh text is written back to the cache only when
+        the Item belongs to ``user_id``, so a callback-supplied ID for another user's
+        Item never reads or writes that user's data.
 
         The ``lang`` argument is interpolated into the Claude prompt so the title and
         body are returned in the user's interface language (``"ru"`` or ``"en"``).
@@ -142,24 +144,31 @@ class LinkService:
         Raises ScrapingError if the page is unreachable and no cached text is available.
         Raises ClassificationError if Claude fails.
         """
-        page_text = await self._resolve_page_text(url, item_id)
+        page_text = await self._resolve_page_text(url, item_id, user_id)
         prompt = _SUMMARIZE_PROMPT.format(language=language_name(lang)) + page_text
         raw = await self._claude.complete(prompt, max_tokens=_SUMMARIZE_MAX_TOKENS)
         return self._parse_summary(raw, url)
 
-    async def _resolve_page_text(self, url: str, item_id: uuid.UUID | None) -> str:
-        """Return cached ``scraped_text`` for the Item, or scrape and cache it."""
+    async def _resolve_page_text(self, url: str, item_id: uuid.UUID | None, user_id: int) -> str:
+        """Return cached ``scraped_text`` for the user's Item, or scrape and cache it.
+
+        Cache reads and writes are scoped to ``user_id`` so a malicious callback
+        carrying another user's item_id cannot leak that user's cached text or
+        overwrite their cache with attacker-controlled content.
+        """
         if item_id is not None:
-            item = await self._repo.get_by_id(item_id)
+            item = await self._repo.get_by_id_for_user(item_id, user_id)
             if item is not None and item.scraped_text:
                 return item.scraped_text
 
         page_text = await self._scraper.fetch_text(url)
 
         # Backfill the cache so subsequent summaries for the same Item hit memory.
+        # ``update_scraped_text_for_user`` silently returns False for foreign IDs,
+        # which means we never write a value into another user's row.
         if item_id is not None:
             try:
-                await self._repo.update_scraped_text(item_id, page_text)
+                await self._repo.update_scraped_text_for_user(item_id, user_id, page_text)
                 await self._session.commit()
             except Exception:
                 logger.exception("Failed to cache scraped_text for item %s", item_id)

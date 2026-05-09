@@ -21,24 +21,43 @@ class ItemRepository:
         return item
 
     async def update_embedding(self, item_id: uuid.UUID, embedding: list[float]) -> None:
-        """Persist the vector embedding on an existing Item; caller commits."""
+        """Persist the vector embedding on an existing Item; caller commits.
+
+        SYSTEM-ONLY method: not bounded by ``user_id`` because the only callers are the
+        background reindex job and post-create indexing inside services that already
+        own the freshly inserted Item. Never expose to user-controlled item IDs.
+        """
         item = await self._session.get(Item, item_id)
         if item is None:
             return
         item.embedding = embedding
         await self._session.flush()
 
-    async def update_scraped_text(self, item_id: uuid.UUID, scraped_text: str) -> None:
-        """Persist the cached page text on an existing Item; caller commits."""
-        item = await self._session.get(Item, item_id)
+    async def update_scraped_text_for_user(
+        self, item_id: uuid.UUID, user_id: int, scraped_text: str
+    ) -> bool:
+        """Persist cached page text only when item_id belongs to user_id; caller commits.
+
+        Returns True on a successful write, False when the row is missing or owned by
+        a different user. The user_id check prevents callback-controlled item IDs from
+        overwriting another user's cache.
+        """
+        result = await self._session.execute(
+            select(Item).where(Item.id == item_id, Item.user_id == user_id)
+        )
+        item = result.scalar_one_or_none()
         if item is None:
-            return
+            return False
         item.scraped_text = scraped_text
         await self._session.flush()
+        return True
 
-    async def get_by_id(self, item_id: uuid.UUID) -> Item | None:
-        """Return the Item with this id, or ``None`` if it does not exist."""
-        return await self._session.get(Item, item_id)
+    async def get_by_id_for_user(self, item_id: uuid.UUID, user_id: int) -> Item | None:
+        """Return the Item with this id only if it belongs to user_id; None otherwise."""
+        result = await self._session.execute(
+            select(Item).where(Item.id == item_id, Item.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_missing_embedding(self, *, limit: int = 50) -> list[Item]:
         """Return Items without a stored embedding, oldest first (batch for reindex)."""

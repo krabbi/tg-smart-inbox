@@ -168,6 +168,25 @@ async def test_cb_link_summary_scraping_error_preserves_url() -> None:
     assert "https://example.com" in error_call[0][0]
 
 
+async def test_cb_link_summary_forwards_user_id_to_service() -> None:
+    """Handler must propagate callback.from_user.id so the service can scope DB calls."""
+    import uuid
+
+    item_id = uuid.uuid4()
+    cb = make_callback(f"link:summary:{item_id}")
+    cb.from_user.id = 4242
+    svc = MagicMock(spec=LinkService)
+    svc.summarize = AsyncMock(
+        return_value=LinkSummary(title="T", body="B", url="https://example.com")
+    )
+
+    await cb_link_summary(cb, link_service=svc, lang="en")
+
+    svc.summarize.assert_awaited_once_with(
+        "https://example.com", user_id=4242, item_id=item_id, lang="en"
+    )
+
+
 async def test_cb_link_summary_unexpected_error_shows_retry_button() -> None:
     """Non-ScrapingError exceptions (e.g. network, Claude API) must not leak."""
     cb = make_callback("link:summary:uuid")
@@ -203,7 +222,9 @@ async def test_cb_link_retry_triggers_summarize_flow() -> None:
 
     await cb_link_retry(cb, link_service=svc)
 
-    svc.summarize.assert_awaited_once_with("https://example.com", item_id=item_id, lang="en")
+    svc.summarize.assert_awaited_once_with(
+        "https://example.com", user_id=1, item_id=item_id, lang="en"
+    )
     # Should show loading then final result (2 edit_text calls)
     assert cb.message.edit_text.await_count == 2
 

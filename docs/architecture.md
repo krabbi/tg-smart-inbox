@@ -413,7 +413,7 @@ Public service signatures that accept `lang` (keyword-only or default
 `"en"`):
 
 - `ClassifierService.classify(text, *, has_media, lang)`
-- `LinkService.summarize(url, item_id, lang)`
+- `LinkService.summarize(url, user_id, item_id, lang)`
 - `IdeaService.save_idea(text, user_id, lang)` and `suggest(user_id, query, lang)`
 - `VisionService.analyze(image_bytes, media_type, lang)`
 - `MediaService.process(file_bytes, filename, user_id, media_type, lang)`
@@ -567,6 +567,32 @@ Call sites:
 
 This is a whitelist, not a blocklist — it fails closed by default.
 
+### Per-user data isolation
+
+All repository methods that operate on user-owned data are split into two
+families:
+
+- **User-scoped methods** — every read and every mutation triggered by a
+  user-controlled ID (FSM state, callback payload, message text) goes through a
+  method whose name ends with `_for_user` or that takes `user_id` as a required
+  argument. The SQL filters on `user_id` (or joins to `items.user_id` for child
+  rows like `Reminder` and `Idea`). Examples: `ItemRepository.get_by_id_for_user`,
+  `ItemRepository.update_scraped_text_for_user`, `ItemRepository.search`,
+  `IdeaRepository.search_by_embedding`, `ReminderRepository.get_by_id_for_user`,
+  `ReminderRepository.get_upcoming`.
+- **System-scoped methods** — used only by the background scheduler or by
+  services immediately after they themselves created the row. These do not take
+  `user_id`. Examples: `ItemRepository.update_embedding`,
+  `ItemRepository.get_missing_embedding`, `ReminderRepository.get_due`,
+  `ReminderRepository.get_due_auto_resend`. They must never be called with a
+  user-supplied ID.
+
+The split prevents callback handlers from being able to read or mutate another
+user's data even when an attacker forges a valid-looking record ID. Integration
+tests in `tests/integration/test_repository_user_isolation.py` create rows for
+two distinct users and verify that the user-scoped queries never return or
+modify the other user's rows.
+
 ---
 
 ## Background Scheduler
@@ -599,10 +625,13 @@ At save time:
   `SavedLink(item, indexed)` tuple; the handler shows
   `ℹ️ Умный поиск временно недоступен, запись сохранена без индексации.` when
   `indexed` is `False`.
-- `LinkService.summarize(url, item_id=...)` reuses the cached `scraped_text` when the
-  Item has one — no HTTP request is made. On a cache miss the scraper is called and
-  the fresh text is written back to the Item via `ItemRepository.update_scraped_text()`,
-  so the next summary is served from cache.
+- `LinkService.summarize(url, user_id=..., item_id=...)` reuses the cached
+  `scraped_text` when the Item belongs to ``user_id`` and has one — no HTTP
+  request is made. On a cache miss the scraper is called and the fresh text is
+  written back via `ItemRepository.update_scraped_text_for_user(item_id, user_id, ...)`,
+  which silently no-ops for foreign-owned IDs. Both the read
+  (`get_by_id_for_user`) and the write are scoped by `user_id` so a
+  callback-supplied ID for another user's Item never leaks or corrupts data.
 - `IdeaService.save_idea()` persists the `Item` + `Idea`, commits, then attempts to
   generate embeddings for both records. The `SavedIdea.indexed` flag is `True` only
   when both vectors were produced and stored successfully; the handler shows the same

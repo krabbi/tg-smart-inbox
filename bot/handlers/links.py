@@ -113,7 +113,12 @@ async def handle_link_message(
 
 
 async def _do_summarize(
-    callback: CallbackQuery, item_id: str, url: str, link_service: LinkService, lang: str
+    callback: CallbackQuery,
+    item_id: str,
+    url: str,
+    link_service: LinkService,
+    lang: str,
+    user_id: int,
 ) -> None:
     """Run the summarize flow: show loading, fetch summary, update message."""
     # Show loading state immediately, preserving URL
@@ -124,7 +129,9 @@ async def _do_summarize(
 
     try:
         parsed_item_id = _parse_item_id(item_id)
-        summary = await link_service.summarize(url, item_id=parsed_item_id, lang=lang)
+        summary = await link_service.summarize(
+            url, user_id=user_id, item_id=parsed_item_id, lang=lang
+        )
         text = t(
             "link_summary_result",
             lang,
@@ -159,9 +166,10 @@ async def cb_link_summary(
     """Handle [Саммари] button — fetch page and show Claude summary."""
     item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
     url = _extract_url(callback.message.text) if callback.message else ""  # type: ignore[union-attr]
+    user_id = callback.from_user.id if callback.from_user else 0
 
     await callback.answer()
-    await _do_summarize(callback, item_id, url, link_service, lang)
+    await _do_summarize(callback, item_id, url, link_service, lang, user_id)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("link:retry:"))
@@ -172,9 +180,10 @@ async def cb_link_retry(
     item_id = callback.data.split(":", 2)[2]  # type: ignore[union-attr]
     # URL is on the first line after the emoji prefix
     url = _extract_url_from_status_message(callback.message.text) if callback.message else ""  # type: ignore[union-attr]
+    user_id = callback.from_user.id if callback.from_user else 0
 
     await callback.answer()
-    await _do_summarize(callback, item_id, url, link_service, lang)
+    await _do_summarize(callback, item_id, url, link_service, lang, user_id)
 
 
 def _extract_url_from_status_message(text: str) -> str:

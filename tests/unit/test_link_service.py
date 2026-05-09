@@ -41,8 +41,8 @@ def make_link_service(
     mock_repo = MagicMock(spec=ItemRepository)
     mock_repo.create = AsyncMock(return_value=mock_item)
     mock_repo.update_embedding = AsyncMock()
-    mock_repo.update_scraped_text = AsyncMock()
-    mock_repo.get_by_id = AsyncMock(return_value=cached_item)
+    mock_repo.update_scraped_text_for_user = AsyncMock(return_value=cached_item is not None)
+    mock_repo.get_by_id_for_user = AsyncMock(return_value=cached_item)
 
     mock_scraper = MagicMock(spec=Scraper)
     mock_scraper.fetch_text = AsyncMock(return_value=scraper_text)
@@ -155,7 +155,7 @@ async def test_save_rolls_back_when_update_embedding_fails() -> None:
 
 async def test_summarize_calls_scraper_and_claude() -> None:
     svc, _ = make_link_service()
-    result = await svc.summarize("https://example.com")
+    result = await svc.summarize("https://example.com", user_id=1)
     assert isinstance(result, LinkSummary)
     assert result.title == "Как печь хлеб"
     assert "просто" in result.body
@@ -166,7 +166,7 @@ async def test_summarize_raises_scraping_error() -> None:
     svc, _ = make_link_service()
     svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
     with pytest.raises(ScrapingError):
-        await svc.summarize("https://example.com")
+        await svc.summarize("https://example.com", user_id=1)
 
 
 # ── language requirement ─────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ async def test_summarize_sends_russian_instruction_when_lang_ru() -> None:
         scraper_text=english_page,
         claude_response="Как печь хлеб\n\nСтатья о домашней выпечке хлеба.",
     )
-    result = await svc.summarize("https://example.com/bread", lang="ru")
+    result = await svc.summarize("https://example.com/bread", user_id=1, lang="ru")
 
     svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
     sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
@@ -212,7 +212,7 @@ async def test_summarize_sends_english_instruction_when_lang_en() -> None:
         scraper_text=russian_page,
         claude_response="Bread baking\n\nA page about baking bread at home.",
     )
-    await svc.summarize("https://example.com/bread", lang="en")
+    await svc.summarize("https://example.com/bread", user_id=1, lang="en")
 
     sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
     assert "English" in sent_prompt
@@ -223,7 +223,7 @@ async def test_summarize_sends_english_instruction_when_lang_en() -> None:
 async def test_summarize_default_lang_is_english() -> None:
     """Omitting lang falls back to the default (English) — not Russian."""
     svc, _ = make_link_service()
-    await svc.summarize("https://example.com")
+    await svc.summarize("https://example.com", user_id=1)
 
     sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
     assert "English" in sent_prompt
@@ -238,7 +238,7 @@ async def test_summarize_returns_russian_for_non_english_source() -> None:
         "и её месте в мировой гастрономии."
     )
     svc, _ = make_link_service(scraper_text=french_page, claude_response=russian_response)
-    result = await svc.summarize("https://example.com/cuisine", lang="ru")
+    result = await svc.summarize("https://example.com/cuisine", user_id=1, lang="ru")
 
     assert result.title == "Французская кухня"
     assert "Французская" in result.body or "французской" in result.body
@@ -372,9 +372,9 @@ async def test_summarize_uses_cached_scraped_text_and_skips_http() -> None:
     svc, repo = make_link_service(cached_item=cached)
 
     item_id = uuid.uuid4()
-    result = await svc.summarize("https://example.com", item_id=item_id)
+    result = await svc.summarize("https://example.com", user_id=1, item_id=item_id)
 
-    repo.get_by_id.assert_awaited_once_with(item_id)  # type: ignore[attr-defined]
+    repo.get_by_id_for_user.assert_awaited_once_with(item_id, 1)  # type: ignore[attr-defined]
     svc._scraper.fetch_text.assert_not_awaited()  # type: ignore[attr-defined]
     svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
     sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
@@ -389,10 +389,10 @@ async def test_summarize_falls_back_to_scraper_when_cache_is_empty() -> None:
     svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
 
     item_id = uuid.uuid4()
-    await svc.summarize("https://example.com", item_id=item_id)
+    await svc.summarize("https://example.com", user_id=1, item_id=item_id)
 
     svc._scraper.fetch_text.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
-    repo.update_scraped_text.assert_awaited_once_with(item_id, "fresh body")  # type: ignore[attr-defined]
+    repo.update_scraped_text_for_user.assert_awaited_once_with(item_id, 1, "fresh body")  # type: ignore[attr-defined]
 
 
 async def test_summarize_falls_back_to_scraper_when_item_missing() -> None:
@@ -400,21 +400,21 @@ async def test_summarize_falls_back_to_scraper_when_item_missing() -> None:
     svc, repo = make_link_service(cached_item=None, scraper_text="fresh body")
 
     item_id = uuid.uuid4()
-    await svc.summarize("https://example.com", item_id=item_id)
+    await svc.summarize("https://example.com", user_id=1, item_id=item_id)
 
     svc._scraper.fetch_text.assert_awaited_once()  # type: ignore[attr-defined]
-    repo.update_scraped_text.assert_awaited_once_with(item_id, "fresh body")  # type: ignore[attr-defined]
+    repo.update_scraped_text_for_user.assert_awaited_once_with(item_id, 1, "fresh body")  # type: ignore[attr-defined]
 
 
 async def test_summarize_without_item_id_skips_cache_entirely() -> None:
     """Backwards-compatible path: no item_id means always call the scraper."""
     svc, repo = make_link_service(scraper_text="fresh body")
 
-    await svc.summarize("https://example.com")
+    await svc.summarize("https://example.com", user_id=1)
 
     svc._scraper.fetch_text.assert_awaited_once()  # type: ignore[attr-defined]
-    repo.get_by_id.assert_not_awaited()  # type: ignore[attr-defined]
-    repo.update_scraped_text.assert_not_awaited()  # type: ignore[attr-defined]
+    repo.get_by_id_for_user.assert_not_awaited()  # type: ignore[attr-defined]
+    repo.update_scraped_text_for_user.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 async def test_summarize_rolls_back_when_cache_write_fails() -> None:
@@ -422,10 +422,10 @@ async def test_summarize_rolls_back_when_cache_write_fails() -> None:
     cached = MagicMock(spec=Item)
     cached.scraped_text = None
     svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
-    repo.update_scraped_text = AsyncMock(side_effect=RuntimeError("DB down"))  # type: ignore[attr-defined]
+    repo.update_scraped_text_for_user = AsyncMock(side_effect=RuntimeError("DB down"))  # type: ignore[attr-defined]
 
     item_id = uuid.uuid4()
-    result = await svc.summarize("https://example.com", item_id=item_id)
+    result = await svc.summarize("https://example.com", user_id=1, item_id=item_id)
 
     svc._session.rollback.assert_awaited_once()  # type: ignore[attr-defined]
     assert isinstance(result, LinkSummary)
@@ -439,4 +439,33 @@ async def test_summarize_raises_scraping_error_when_no_cache_and_fetch_fails() -
     svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
 
     with pytest.raises(ScrapingError):
-        await svc.summarize("https://example.com", item_id=uuid.uuid4())
+        await svc.summarize("https://example.com", user_id=1, item_id=uuid.uuid4())
+
+
+async def test_summarize_does_not_leak_other_users_cache_when_item_id_foreign() -> None:
+    """A callback carrying another user's item_id must not return their cached text."""
+    # ``cached_item=None`` means get_by_id_for_user returns None for the calling user_id,
+    # so the service falls through to the scraper instead of leaking foreign data.
+    svc, repo = make_link_service(cached_item=None, scraper_text="fresh body")
+
+    item_id = uuid.uuid4()
+    result = await svc.summarize("https://example.com", user_id=42, item_id=item_id)
+
+    repo.get_by_id_for_user.assert_awaited_once_with(item_id, 42)  # type: ignore[attr-defined]
+    svc._scraper.fetch_text.assert_awaited_once_with("https://example.com")  # type: ignore[attr-defined]
+    assert isinstance(result, LinkSummary)
+
+
+async def test_summarize_does_not_overwrite_other_users_cache_on_miss() -> None:
+    """When the item belongs to another user, update_scraped_text_for_user is no-op."""
+    # ``cached_item=None`` makes the factory configure update_scraped_text_for_user to
+    # return False, simulating a foreign-owned row that the repo refuses to write.
+    svc, repo = make_link_service(cached_item=None, scraper_text="fresh body")
+
+    item_id = uuid.uuid4()
+    await svc.summarize("https://example.com", user_id=42, item_id=item_id)
+
+    # The service still issues the call — the SQL guard is what enforces isolation.
+    repo.update_scraped_text_for_user.assert_awaited_once_with(item_id, 42, "fresh body")  # type: ignore[attr-defined]
+    # Repo returned False, so no other user's row was modified.
+    assert repo.update_scraped_text_for_user.return_value is False  # type: ignore[attr-defined]
