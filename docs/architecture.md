@@ -424,6 +424,18 @@ Steps:
 3. **Zone/City** — offered only if the selected country maps to more than one IANA zone;
    countries with a single zone (e.g. Germany → `Europe/Berlin`) skip this step.
 
+Country dictionaries (`_EUROPE_COUNTRIES`, `_ASIA_COUNTRIES`, `_AMERICA_COUNTRIES`,
+`_OTHER_COUNTRIES`) are keyed by ASCII slugs (`"russia"`, `"germany"`, …) — internal
+identifiers that decouple the data from the UI. Localized country names live in a
+separate `_COUNTRY_LABELS: dict[slug, dict[lang, name]]` table used by the
+`_country_label(slug, lang)` helper, which renders the right language for the user
+(issue #122). The slug — not the localized name — is what gets persisted into the FSM
+state, so language changes and renames cannot break in-flight pickers. Callbacks key
+off numeric indices, so adding/renaming countries does not require migrating any
+stored callback data. New countries without a translation entry render as a
+title-cased slug (`"new_country"` → `"New Country"`), keeping the picker usable until
+labels are added.
+
 On confirmation the handler calls `UserSettingsService.set_timezone()` which validates
 the IANA name with `zoneinfo.ZoneInfo` before persisting. The confirmation message shows
 the canonical IANA name and the current UTC offset (e.g. `Europe/Moscow (UTC+03:00)`).
