@@ -297,6 +297,8 @@ _RU: dict[str, str] = {
     "botcmd_search": "Поиск по записям",
     "botcmd_reminders": "Предстоящие напоминания",
     "botcmd_ideas": "Мои идеи",
+    "botcmd_config": "Настройки",
+    "botcmd_cancel": "Отменить текущее действие",
 }
 
 
@@ -550,6 +552,8 @@ _EN: dict[str, str] = {
     "botcmd_search": "Search records",
     "botcmd_reminders": "Upcoming reminders",
     "botcmd_ideas": "My ideas",
+    "botcmd_config": "Settings",
+    "botcmd_cancel": "Cancel the current action",
 }
 
 

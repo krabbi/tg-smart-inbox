@@ -19,6 +19,8 @@ def _bot_commands_for(lang: str) -> list[BotCommand]:
         BotCommand(command="search", description=t("botcmd_search", lang)),
         BotCommand(command="reminders", description=t("botcmd_reminders", lang)),
         BotCommand(command="ideas", description=t("botcmd_ideas", lang)),
+        BotCommand(command="config", description=t("botcmd_config", lang)),
+        BotCommand(command="cancel", description=t("botcmd_cancel", lang)),
     ]
 
 
