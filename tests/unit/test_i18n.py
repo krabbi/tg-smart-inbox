@@ -247,6 +247,8 @@ def test_button_translations_differ_across_languages() -> None:
         "botcmd_search",
         "botcmd_reminders",
         "botcmd_ideas",
+        "botcmd_config",
+        "botcmd_cancel",
     ],
 )
 def test_every_key_is_non_empty_in_both_languages(key: str) -> None:
