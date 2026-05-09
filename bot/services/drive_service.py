@@ -26,6 +26,10 @@ _CATEGORY_FOLDERS: dict[str, str] = {
     "other": "📦 Other",
 }
 
+# Cache marker used internally to remember the per-user root folder id.
+# Stored in the same dict as category folders, keyed by ``(user_id, _USER_ROOT_KEY)``.
+_USER_ROOT_KEY = "__user_root__"
+
 
 @dataclass(frozen=True)
 class DriveFile:
@@ -37,7 +41,7 @@ class DriveFile:
 
 
 class DriveService:
-    """Upload files to Google Drive and manage category subfolders."""
+    """Upload files to Google Drive and manage per-user category subfolders."""
 
     def __init__(self, config: Config) -> None:
         """Store configuration. Credential loading is deferred to first use."""
@@ -46,6 +50,9 @@ class DriveService:
         self._token_file = config.google_drive_token_file
         self._service: Any | None = None
         self._init_lock = asyncio.Lock()
+        # Folder id cache keyed by (user_id, category). The special category
+        # ``_USER_ROOT_KEY`` stores the per-user root folder id itself.
+        self._folder_cache: dict[tuple[int, str], str] = {}
 
     def _load_credentials(self) -> Credentials:
         """Load OAuth user credentials, refreshing or running the auth flow as needed.
@@ -127,17 +134,47 @@ class DriveService:
         folder = service.files().create(body=folder_metadata, fields="id").execute()
         return folder["id"]
 
+    def _get_or_create_subfolder_sync(self, service: Any, user_id: int, category: str) -> str:
+        """Synchronously resolve the category subfolder for ``user_id``.
+
+        Layout: ``{root}/user_{user_id}/{category folder}``. Both the per-user
+        root and the category folder are looked up (created if missing) and then
+        cached, so subsequent uploads for the same ``(user_id, category)`` pair
+        skip the Drive list/create round trips entirely.
+        """
+        cache_key = (user_id, category)
+        cached = self._folder_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        user_root_key = (user_id, _USER_ROOT_KEY)
+        user_root_id = self._folder_cache.get(user_root_key)
+        if user_root_id is None:
+            user_root_id = self._get_or_create_folder_sync(
+                service, f"user_{user_id}", self._root_folder_id
+            )
+            self._folder_cache[user_root_key] = user_root_id
+
+        folder_name = _CATEGORY_FOLDERS.get(category, _CATEGORY_FOLDERS["other"])
+        folder_id = self._get_or_create_folder_sync(service, folder_name, user_root_id)
+        self._folder_cache[cache_key] = folder_id
+        return folder_id
+
     async def get_or_create_folder(self, name: str, parent_id: str | None = None) -> str:
         """Return the folder ID for the given name, creating it if it doesn't exist."""
         service = await self._ensure_service()
         return await asyncio.to_thread(self._get_or_create_folder_sync, service, name, parent_id)
 
     def _upload_sync(
-        self, service: Any, file_bytes: bytes, filename: str, category: str
+        self,
+        service: Any,
+        file_bytes: bytes,
+        filename: str,
+        category: str,
+        user_id: int,
     ) -> DriveFile:
-        """Synchronously upload bytes to the matching category folder on Drive."""
-        folder_name = _CATEGORY_FOLDERS.get(category, _CATEGORY_FOLDERS["other"])
-        folder_id = self._get_or_create_folder_sync(service, folder_name, None)
+        """Synchronously upload bytes to the user's category subfolder on Drive."""
+        folder_id = self._get_or_create_subfolder_sync(service, user_id, category)
 
         file_metadata = {"name": filename, "parents": [folder_id]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype="application/octet-stream")
@@ -152,15 +189,24 @@ class DriveService:
             web_link=uploaded.get("webViewLink", ""),
         )
 
-    async def upload(self, file_bytes: bytes, filename: str, category: str) -> DriveFile:
-        """Upload file_bytes to the category subfolder and return DriveFile metadata.
+    async def upload_file(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        category: str,
+        user_id: int,
+    ) -> DriveFile:
+        """Upload ``file_bytes`` to the user's category subfolder and return metadata.
+
+        Files are stored under ``{GOOGLE_DRIVE_FOLDER_ID}/user_{user_id}/{category}/``
+        so each Telegram user gets an isolated folder tree on Drive.
 
         Raises DriveUploadError on any failure (OAuth, network, API errors).
         """
         service = await self._ensure_service()
         try:
             return await asyncio.to_thread(
-                self._upload_sync, service, file_bytes, filename, category
+                self._upload_sync, service, file_bytes, filename, category, user_id
             )
         except DriveUploadError:
             raise

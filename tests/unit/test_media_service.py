@@ -32,7 +32,7 @@ def make_media_service(
     )
 
     drive = MagicMock(spec=DriveService)
-    drive.upload = AsyncMock(
+    drive.upload_file = AsyncMock(
         return_value=DriveFile(file_id="abc", name="photo.jpg", web_link=drive_link)
     )
 
@@ -45,7 +45,7 @@ async def test_process_analyzes_and_uploads() -> None:
     result = await svc.process(b"image bytes", "photo.jpg", user_id=1)
 
     vision.analyze.assert_awaited_once_with(b"image bytes", "image/jpeg", lang="en")
-    drive.upload.assert_awaited_once_with(b"image bytes", "photo.jpg", "photo")
+    drive.upload_file.assert_awaited_once_with(b"image bytes", "photo.jpg", "photo", 1)
     assert isinstance(result, MediaResult)
     assert result.analysis.category == "photo"
     assert result.drive_file.file_id == "abc"
