@@ -151,3 +151,22 @@ async def test_get_by_id_for_user_returns_none_for_foreign_owner(
     await db_session.commit()
 
     assert await repo.get_by_id_for_user(item.id, 999) is None
+
+
+async def test_get_by_id_returns_item_without_ownership_filter(db_session: AsyncSession) -> None:
+    """System-only get_by_id returns the row regardless of owner — callers must scope upstream."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://x.com")
+    await db_session.commit()
+
+    result = await repo.get_by_id(item.id)
+    assert result is not None
+    assert result.id == item.id
+    assert result.user_id == 1
+
+
+async def test_get_by_id_returns_none_for_unknown_id(db_session: AsyncSession) -> None:
+    import uuid
+
+    repo = ItemRepository(db_session)
+    assert await repo.get_by_id(uuid.uuid4()) is None

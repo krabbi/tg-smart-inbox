@@ -565,7 +565,7 @@ Call sites:
 - `_handle_task_with_time` (auto-created reminder confirmation in
   `handlers/messages.py` / `handlers/voice.py`).
 - `cb_remind_snooze` (snooze confirmation).
-- `_send_due_reminders` and `_auto_resend_reminders` in `bot/scheduler.py` —
+- `_send_due_reminders` and `_auto_archive_reminders` in `bot/scheduler.py` —
   the scheduler builds its own `UserSettingsService` per tick to look up the
   recipient's timezone, since the DI middleware does not run for background jobs.
 

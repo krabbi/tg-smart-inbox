@@ -72,7 +72,7 @@ async def _send_due_reminders(
     now = datetime.now(UTC)
     async with session_factory() as session:
         repo = ReminderRepository(session)
-        svc = ReminderService(session, repo)
+        svc = ReminderService(session, repo, ItemRepository(session))
         settings_svc = UserSettingsService(session, UserSettingsRepository(session))
         due = await svc.get_due(now)
         for reminder in due:
@@ -107,7 +107,7 @@ async def _auto_archive_reminders(
     now = datetime.now(UTC)
     async with session_factory() as session:
         repo = ReminderRepository(session)
-        svc = ReminderService(session, repo)
+        svc = ReminderService(session, repo, ItemRepository(session))
         settings_svc = UserSettingsService(session, UserSettingsRepository(session))
         due = await svc.get_due_auto_archive(now)
         for reminder in due:

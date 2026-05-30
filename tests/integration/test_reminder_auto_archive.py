@@ -5,8 +5,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.item import Item, ItemType
+from bot.repositories.item_repository import ItemRepository
 from bot.repositories.reminder_repository import ReminderRepository
-from bot.services.reminder_service import ReminderService
+from bot.services.reminder_service import ReactivatedReminder, ReminderService
 
 
 async def test_reminder_lifecycle_send_then_auto_archive_then_reactivate(
@@ -18,7 +19,7 @@ async def test_reminder_lifecycle_send_then_auto_archive_then_reactivate(
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
-    svc = ReminderService(db_session, repo)
+    svc = ReminderService(db_session, repo, ItemRepository(db_session))
 
     # 1. Create a reminder due in the past — eligible for the next send tick.
     past = datetime(2026, 5, 1, 10, 0, tzinfo=UTC)
@@ -47,12 +48,15 @@ async def test_reminder_lifecycle_send_then_auto_archive_then_reactivate(
     due_after = await svc.get_due_auto_archive(later + timedelta(hours=1))
     assert all(r.id != reminder.id for r in due_after)
 
-    # 6. User clicks "Реактивировать" — service resets state and gives a new remind_at.
+    # 6. User clicks "Реактивировать" — service resets state, returns the row with its Item.
     reactivate_at = sent_at + timedelta(hours=26)
     reactivated = await svc.reactivate_for_user(
         reminder_id=reminder.id, user_id=1, remind_at=reactivate_at
     )
-    assert reactivated is not None
+    assert isinstance(reactivated, ReactivatedReminder)
+    assert reactivated.reminder.id == reminder.id
+    assert reactivated.item is not None
+    assert reactivated.item.id == item.id
     await db_session.refresh(reminder)
     assert reminder.is_auto_completed is False
     assert reminder.is_sent is False
@@ -71,7 +75,7 @@ async def test_acknowledge_before_24h_prevents_auto_archive(db_session: AsyncSes
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
-    svc = ReminderService(db_session, repo)
+    svc = ReminderService(db_session, repo, ItemRepository(db_session))
 
     past = datetime(2026, 5, 1, tzinfo=UTC)
     reminder = await svc.create(item_id=item.id, remind_at=past)
@@ -98,7 +102,7 @@ async def test_snooze_before_24h_prevents_auto_archive_on_original(
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
-    svc = ReminderService(db_session, repo)
+    svc = ReminderService(db_session, repo, ItemRepository(db_session))
 
     past = datetime(2026, 5, 1, tzinfo=UTC)
     reminder = await svc.create(item_id=item.id, remind_at=past)
@@ -124,7 +128,7 @@ async def test_cancel_clears_auto_archive_timer(db_session: AsyncSession) -> Non
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
-    svc = ReminderService(db_session, repo)
+    svc = ReminderService(db_session, repo, ItemRepository(db_session))
 
     past = datetime(2026, 5, 1, tzinfo=UTC)
     reminder = await svc.create(item_id=item.id, remind_at=past)
@@ -144,7 +148,7 @@ async def test_reactivate_rejects_foreign_user(db_session: AsyncSession) -> None
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
-    svc = ReminderService(db_session, repo)
+    svc = ReminderService(db_session, repo, ItemRepository(db_session))
 
     reminder = await svc.create(item_id=owner_item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
     await svc.mark_auto_completed(reminder)

@@ -11,11 +11,9 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.exceptions import TimeParseError
 from bot.i18n import t
-from bot.models.item import Item
 from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
@@ -264,7 +262,6 @@ def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
 @router.callback_query(F.data.startswith("remind_reactivate:"))
 async def cb_remind_reactivate(
     callback: CallbackQuery,
-    session: AsyncSession | None = None,
     reminder_service: ReminderService | None = None,
     user_settings_service: UserSettingsService | None = None,
     lang: str = "en",
@@ -274,7 +271,7 @@ async def cb_remind_reactivate(
     if callback.message is None or callback.from_user is None:
         return
 
-    if reminder_service is None or session is None:
+    if reminder_service is None:
         await callback.message.answer(t("reminder_service_unavailable", lang))
         return
 
@@ -288,7 +285,7 @@ async def cb_remind_reactivate(
 
     now = datetime.now(UTC)
     try:
-        reminder = await reminder_service.reactivate_for_user(
+        result = await reminder_service.reactivate_for_user(
             reminder_id=reminder_id,
             user_id=callback.from_user.id,
             remind_at=now,
@@ -298,19 +295,20 @@ async def cb_remind_reactivate(
         await callback.message.answer(t("reminder_reactivate_failed", lang))
         return
 
-    if reminder is None:
+    if result is None:
         await callback.message.answer(t("reminder_not_found_or_inactive", lang))
+        return
+
+    reminder = result.reminder
+    item = result.item
+    if item is None:
+        # Defensive: the parent record was deleted between reactivate and re-send.
+        # The service has still committed the reactivation, but there is nothing to display.
+        await callback.message.answer(t("reminder_reactivate_failed", lang))
         return
 
     # Reactivated reminders are pushed to the user right away and immediately
     # enter the 24h auto-archive window again, exactly like a fresh due notice.
-    item: Item | None = await session.get(Item, reminder.item_id)
-    if item is None:
-        # Defensive: the parent record was deleted between reactivate and re-send.
-        # We've still committed the reactivation, but there is nothing to display.
-        await callback.message.answer(t("reminder_reactivate_failed", lang))
-        return
-
     user_tz = "UTC"
     if user_settings_service is not None:
         user_tz = await user_settings_service.get_timezone(callback.from_user.id)

@@ -163,7 +163,9 @@ async def __call__(self, handler, event, data):
         claude = ClaudeClient(self._config)
         item_repo = ItemRepository(session)
         data["link_service"] = LinkService(session=session, item_repo=item_repo, ...)
-        data["reminder_service"] = ReminderService(session=session, repo=ReminderRepository(session))
+        data["reminder_service"] = ReminderService(
+            session=session, repo=ReminderRepository(session), item_repo=item_repo
+        )
 
         # Optional — injected as None when credentials are missing
         if self._config.groq_api_key:

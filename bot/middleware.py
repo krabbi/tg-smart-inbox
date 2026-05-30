@@ -77,7 +77,9 @@ class DependencyMiddleware(BaseMiddleware):
                 claude=claude,
                 embedding_service=embedding_service,
             )
-            data["reminder_service"] = ReminderService(session=session, repo=reminder_repo)
+            data["reminder_service"] = ReminderService(
+                session=session, repo=reminder_repo, item_repo=item_repo
+            )
             data["time_parser"] = TimeParser(claude)
             data["idea_service"] = IdeaService(
                 session,
