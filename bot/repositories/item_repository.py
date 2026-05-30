@@ -59,6 +59,15 @@ class ItemRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, item_id: uuid.UUID) -> Item | None:
+        """Return the Item with this id without an ownership check.
+
+        SYSTEM-ONLY method: callers must have already verified the requesting user's
+        right to access the row (e.g. by loading a Reminder via ``get_by_id_for_user``
+        and following its FK). Never pass user-controlled item IDs straight in.
+        """
+        return await self._session.get(Item, item_id)
+
     async def get_missing_embedding(self, *, limit: int = 50) -> list[Item]:
         """Return Items without a stored embedding, oldest first (batch for reindex)."""
         result = await self._session.execute(

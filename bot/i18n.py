@@ -95,7 +95,9 @@ _RU: dict[str, str] = {
         "⏰ +1ч — отложить на час\n"
         "🌙 +1д — отложить на день\n"
         "✅ Принято — отметить выполненным\n"
-        "Если не нажать кнопку — бот напомнит повторно через 5 минут."
+        "Если ни одна кнопка не нажата в течение 24 часов, бот автоматически "
+        "пометит задачу как выполненную. Её всегда можно вернуть кнопкой "
+        "«🔄 Реактивировать»."
     ),
     "help_commands": (
         "<b>Команды</b>\n"
@@ -161,6 +163,7 @@ _RU: dict[str, str] = {
     "reminder_btn_snooze_1d": "🌙 +1д",
     "reminder_btn_ack": "✅ Принято",
     "reminder_btn_cancel": "❌ Отменить",
+    "reminder_btn_reactivate": "🔄 Реактивировать",
     "reminder_snooze_1h_label": "1 час",
     "reminder_snooze_1d_label": "1 день",
     "reminder_snoozed": "⏰ Напомню через {period} ({formatted}).",
@@ -169,7 +172,9 @@ _RU: dict[str, str] = {
     "reminder_ack_failed": "Не удалось подтвердить напоминание.",
     "reminder_ack_done": "✅ <i>Выполнено</i>",
     "reminder_notification": "🔔 Напомню {formatted}\n{content}",
-    "reminder_auto_closed": "🔔 Напоминание закрыто автоматически: {content}",
+    "reminder_auto_completed": ("✅ Задача автоматически помечена как выполненная:\n{content}"),
+    "reminder_reactivated_marker": "🔄 <i>Реактивировано</i>",
+    "reminder_reactivate_failed": "Не удалось реактивировать напоминание.",
     "reminder_cancelled_marker": "✅ Напоминание отменено",
     "reminder_cancel_not_found": "Напоминание не найдено или уже отменено.",
     "reminder_cancel_invalid": "Неверный запрос.",
@@ -353,7 +358,9 @@ _EN: dict[str, str] = {
         "⏰ +1h — snooze for an hour\n"
         "🌙 +1d — snooze for a day\n"
         "✅ Done — mark as acknowledged\n"
-        "If no button is pressed — the bot will nudge again in 5 minutes."
+        "If no button is pressed within 24 hours, the bot will automatically "
+        "mark the task as done. You can always bring it back with the "
+        "🔄 Reactivate button."
     ),
     "help_commands": (
         "<b>Commands</b>\n"
@@ -417,6 +424,7 @@ _EN: dict[str, str] = {
     "reminder_btn_snooze_1d": "🌙 +1d",
     "reminder_btn_ack": "✅ Done",
     "reminder_btn_cancel": "❌ Cancel",
+    "reminder_btn_reactivate": "🔄 Reactivate",
     "reminder_snooze_1h_label": "1 hour",
     "reminder_snooze_1d_label": "1 day",
     "reminder_snoozed": "⏰ I'll remind you in {period} ({formatted}).",
@@ -425,7 +433,9 @@ _EN: dict[str, str] = {
     "reminder_ack_failed": "Failed to acknowledge the reminder.",
     "reminder_ack_done": "✅ <i>Done</i>",
     "reminder_notification": "🔔 Reminder {formatted}\n{content}",
-    "reminder_auto_closed": "🔔 Reminder auto-closed: {content}",
+    "reminder_auto_completed": ("✅ Task automatically marked as done:\n{content}"),
+    "reminder_reactivated_marker": "🔄 <i>Reactivated</i>",
+    "reminder_reactivate_failed": "Failed to reactivate the reminder.",
     "reminder_cancelled_marker": "✅ Reminder cancelled",
     "reminder_cancel_not_found": "Reminder not found or already cancelled.",
     "reminder_cancel_invalid": "Invalid request.",

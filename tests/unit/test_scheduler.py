@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.scheduler import _auto_resend_reminders, _send_due_reminders, start_scheduler
+from bot.scheduler import _auto_archive_reminders, _send_due_reminders, start_scheduler
 
 
 def make_session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -40,7 +40,7 @@ async def test_send_due_reminders_sends_notifications() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_repo_cls.return_value = MagicMock()
         mock_settings = MagicMock()
@@ -63,7 +63,54 @@ async def test_send_due_reminders_sends_notifications() -> None:
     assert call_kwargs["reply_markup"] is not None
     mock_settings.get_timezone.assert_awaited_once_with(123)
     mock_settings.get_language.assert_awaited_once_with(123)
-    mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
+    mock_svc.mark_sent_with_auto_archive.assert_awaited_once()
+
+
+async def test_send_due_reminders_schedules_auto_archive_24h_later() -> None:
+    """When a reminder is sent, the auto-archive timer is set to now+24h, not 5min."""
+    from datetime import UTC, datetime, timedelta
+
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 1
+    item.content = "task"
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        before = datetime.now(UTC)
+        await _send_due_reminders(bot, factory)
+        after = datetime.now(UTC)
+
+    archive_at = mock_svc.mark_sent_with_auto_archive.call_args[0][1]
+    # The scheduled archive time must fall in [before+24h, after+24h] — confirms
+    # that the new 24h window (not the legacy 5min window) is being used.
+    assert before + timedelta(hours=24) <= archive_at <= after + timedelta(hours=24)
 
 
 async def test_send_due_reminders_uses_user_language_for_notification() -> None:
@@ -92,7 +139,7 @@ async def test_send_due_reminders_uses_user_language_for_notification() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_repo_cls.return_value = MagicMock()
         mock_settings = MagicMock()
@@ -114,52 +161,6 @@ async def test_send_due_reminders_uses_user_language_for_notification() -> None:
     texts = [b.text for row in rows for b in row]
     assert any("+1h" in t for t in texts)
     assert any("Done" in t for t in texts)
-
-
-async def test_auto_resend_max_uses_user_language() -> None:
-    """Auto-close notification text must be localized to the user's stored language."""
-    from bot.models.item import Item
-    from bot.models.reminder import Reminder
-    from bot.scheduler import _MAX_AUTO_RESENDS
-
-    item = MagicMock(spec=Item)
-    item.user_id = 55
-    item.content = "buy milk"
-
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = _MAX_AUTO_RESENDS
-
-    session = MagicMock(spec=AsyncSession)
-    session.get = AsyncMock(return_value=item)
-
-    with (
-        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
-        patch("bot.scheduler.ReminderService") as mock_svc_cls,
-        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
-    ):
-        mock_repo_cls.return_value = MagicMock()
-
-        mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.mark_acknowledged = AsyncMock()
-        mock_svc.prepare_auto_resend = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
-
-        mock_settings = MagicMock()
-        mock_settings.get_language = AsyncMock(return_value="en")
-        mock_settings_cls.return_value = mock_settings
-
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-        factory = make_session_factory(session)
-
-        await _auto_resend_reminders(bot, factory)
-
-    call_kwargs = bot.send_message.call_args[1]
-    # English auto-close template uses "auto-closed".
-    assert "auto-closed" in call_kwargs["text"]
 
 
 async def test_send_due_reminders_no_item_marks_sent() -> None:
@@ -215,7 +216,7 @@ async def test_send_due_reminders_handles_send_error() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="UTC")
@@ -229,44 +230,36 @@ async def test_send_due_reminders_handles_send_error() -> None:
         # Should not raise — errors are logged and swallowed
         await _send_due_reminders(bot, factory)
 
-    mock_svc.mark_sent_with_auto_resend.assert_not_awaited()
+    mock_svc.mark_sent_with_auto_archive.assert_not_awaited()
 
 
-async def test_auto_resend_reminders_creates_followup() -> None:
-    from datetime import UTC, datetime
-
+async def test_auto_archive_marks_completed_and_notifies_with_reactivate_button() -> None:
+    """An overdue auto-archive reminder is closed and the user gets a Reactivate keyboard."""
     from bot.models.item import Item
     from bot.models.reminder import Reminder
 
     item = MagicMock(spec=Item)
     item.user_id = 42
-    item.content = "задача"
+    item.content = "купить молоко"
 
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = 0
-
-    new_reminder = MagicMock(spec=Reminder)
-    new_reminder.id = "new-id"
-    new_reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
 
     with (
-        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderRepository"),
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
         patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.prepare_auto_resend = AsyncMock(return_value=new_reminder)
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
         mock_svc_cls.return_value = mock_svc
-        mock_repo_cls.return_value = MagicMock()
+
         mock_settings = MagicMock()
-        mock_settings.get_timezone = AsyncMock(return_value="UTC")
         mock_settings.get_language = AsyncMock(return_value="ru")
         mock_settings_cls.return_value = mock_settings
 
@@ -274,104 +267,131 @@ async def test_auto_resend_reminders_creates_followup() -> None:
         bot.send_message = AsyncMock()
         factory = make_session_factory(session)
 
-        await _auto_resend_reminders(bot, factory)
+        await _auto_archive_reminders(bot, factory)
 
-    mock_svc.prepare_auto_resend.assert_awaited_once()
-    assert mock_svc.prepare_auto_resend.call_args[1]["original"] is original
     bot.send_message.assert_awaited_once()
     call_kwargs = bot.send_message.call_args[1]
     assert call_kwargs["chat_id"] == 42
-    assert "задача" in call_kwargs["text"]
-    assert "10:00 UTC" in call_kwargs["text"]
-    mock_settings.get_timezone.assert_awaited_once_with(42)
-    mock_settings.get_language.assert_awaited_once_with(42)
-    mock_svc.mark_sent_with_auto_resend.assert_awaited_once()
+    assert "автоматически" in call_kwargs["text"]
+    assert "купить молоко" in call_kwargs["text"]
+    # Single-button keyboard with the reactivate callback.
+    rows = call_kwargs["reply_markup"].inline_keyboard
+    buttons = [b for row in rows for b in row]
+    assert len(buttons) == 1
+    assert buttons[0].callback_data.startswith("remind_reactivate:")
+    assert "Реактивировать" in buttons[0].text
+
+    mock_svc.mark_auto_completed.assert_awaited_once_with(reminder)
 
 
-async def test_auto_resend_stops_after_max_resends() -> None:
+async def test_auto_archive_uses_user_language() -> None:
+    """The auto-archive notification is localized to the user's stored language."""
     from bot.models.item import Item
     from bot.models.reminder import Reminder
-    from bot.scheduler import _MAX_AUTO_RESENDS
 
     item = MagicMock(spec=Item)
-    item.user_id = 99
-    item.content = "купить молоко"
+    item.user_id = 55
+    item.content = "buy milk"
 
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = _MAX_AUTO_RESENDS  # already at limit
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
 
     with (
-        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderRepository"),
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
         patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
-        mock_repo_cls.return_value = MagicMock()
-
         mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.mark_acknowledged = AsyncMock()
-        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
         mock_svc_cls.return_value = mock_svc
 
         mock_settings = MagicMock()
-        mock_settings.get_language = AsyncMock(return_value="ru")
+        mock_settings.get_language = AsyncMock(return_value="en")
         mock_settings_cls.return_value = mock_settings
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
         factory = make_session_factory(session)
 
-        await _auto_resend_reminders(bot, factory)
+        await _auto_archive_reminders(bot, factory)
 
-    mock_svc.mark_acknowledged.assert_awaited_once_with(original)
-    mock_svc.prepare_auto_resend.assert_not_awaited()
-    # User is notified that the reminder was closed automatically.
-    bot.send_message.assert_awaited_once()
-    call_kwargs = bot.send_message.call_args[1]
-    assert call_kwargs["chat_id"] == 99
-    assert "закрыто автоматически" in call_kwargs["text"]
-    assert "купить молоко" in call_kwargs["text"]
+    text = bot.send_message.call_args[1]["text"]
+    assert "automatically" in text
 
 
-async def test_auto_resend_missing_item_still_acks_without_notifying() -> None:
-    """When the item is gone, the reminder is acknowledged silently (no notification)."""
+async def test_auto_archive_missing_item_still_marks_completed_silently() -> None:
+    """When the parent Item is gone, the reminder is auto-completed without a push."""
     from bot.models.reminder import Reminder
-    from bot.scheduler import _MAX_AUTO_RESENDS
 
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = _MAX_AUTO_RESENDS
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=None)
 
     with (
-        patch("bot.scheduler.ReminderRepository") as mock_repo_cls,
+        patch("bot.scheduler.ReminderRepository"),
         patch("bot.scheduler.ReminderService") as mock_svc_cls,
     ):
-        mock_repo_cls.return_value = MagicMock()
-
         mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.mark_acknowledged = AsyncMock()
-        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
         mock_svc_cls.return_value = mock_svc
 
         bot = MagicMock()
         bot.send_message = AsyncMock()
         factory = make_session_factory(session)
 
-        await _auto_resend_reminders(bot, factory)
+        await _auto_archive_reminders(bot, factory)
 
-    mock_svc.mark_acknowledged.assert_awaited_once_with(original)
-    mock_svc.prepare_auto_resend.assert_not_awaited()
+    mock_svc.mark_auto_completed.assert_awaited_once_with(reminder)
     bot.send_message.assert_not_awaited()
+
+
+async def test_auto_archive_handles_send_failure_without_raising() -> None:
+    """Send errors are logged and swallowed; the row is not marked auto-completed."""
+    from bot.models.item import Item
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 42
+    item.content = "task"
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock(side_effect=Exception("Telegram error"))
+        factory = make_session_factory(session)
+
+        await _auto_archive_reminders(bot, factory)
+
+    # Failure must be swallowed — and because the send failed, we don't claim
+    # the reminder is closed (the next tick will retry).
+    mock_svc.mark_auto_completed.assert_not_awaited()
 
 
 def test_start_scheduler_returns_scheduler() -> None:
@@ -387,6 +407,7 @@ def test_start_scheduler_registers_two_jobs_without_config() -> None:
     factory = MagicMock()
     with patch.object(AsyncIOScheduler, "start"):
         scheduler = start_scheduler(bot, factory)
+    # send_due + auto_archive = 2 jobs (no reindex job without config).
     assert len(scheduler.get_jobs()) == 2
 
 
@@ -398,8 +419,17 @@ def test_start_scheduler_registers_reindex_job_when_config_given() -> None:
     config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
     with patch.object(AsyncIOScheduler, "start"):
         scheduler = start_scheduler(bot, factory, config)
-    # Reminders + auto-resend + reindex = 3 jobs
+    # Reminders + auto-archive + reindex = 3 jobs
     assert len(scheduler.get_jobs()) == 3
+
+
+def test_start_scheduler_does_not_register_a_legacy_auto_resend_job() -> None:
+    """The 5-minute auto-resend behaviour must be gone — no such job is registered."""
+    import bot.scheduler as scheduler_mod
+
+    # The legacy private symbol no longer exists on the module.
+    assert not hasattr(scheduler_mod, "_auto_resend_reminders")
+    assert not hasattr(scheduler_mod, "_MAX_AUTO_RESENDS")
 
 
 async def test_reindex_missing_embeddings_processes_items_and_ideas() -> None:
@@ -645,7 +675,7 @@ async def test_send_due_reminders_uses_link_title_in_notification() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="UTC")
@@ -691,7 +721,7 @@ async def test_send_due_reminders_link_without_title_shows_bare_url() -> None:
     ):
         mock_svc = MagicMock()
         mock_svc.get_due = AsyncMock(return_value=[reminder])
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_settings = MagicMock()
         mock_settings.get_timezone = AsyncMock(return_value="UTC")
@@ -710,74 +740,21 @@ async def test_send_due_reminders_link_without_title_shows_bare_url() -> None:
     assert "https://example.com/raw (" not in text
 
 
-async def test_auto_resend_link_uses_title_in_notification() -> None:
-    """Auto-resent reminders for links keep using the title-aware display."""
-    from datetime import UTC, datetime
-
+async def test_auto_archive_link_uses_title_in_notification() -> None:
+    """Auto-archive notifications for links use the title-aware display."""
     from bot.models.item import Item, ItemType
     from bot.models.reminder import Reminder
 
     item = MagicMock(spec=Item)
     item.user_id = 8
-    item.content = "https://example.com/news"
-    item.type = ItemType.link
-    item.title = "Breaking News"
-    item.description = None
-
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = 0
-
-    new_reminder = MagicMock(spec=Reminder)
-    new_reminder.id = "new-id"
-    new_reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
-
-    session = MagicMock(spec=AsyncSession)
-    session.get = AsyncMock(return_value=item)
-
-    with (
-        patch("bot.scheduler.ReminderRepository"),
-        patch("bot.scheduler.ReminderService") as mock_svc_cls,
-        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
-    ):
-        mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.prepare_auto_resend = AsyncMock(return_value=new_reminder)
-        mock_svc.mark_sent_with_auto_resend = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
-        mock_settings = MagicMock()
-        mock_settings.get_timezone = AsyncMock(return_value="UTC")
-        mock_settings.get_language = AsyncMock(return_value="ru")
-        mock_settings_cls.return_value = mock_settings
-
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-        factory = make_session_factory(session)
-
-        await _auto_resend_reminders(bot, factory)
-
-    text = bot.send_message.call_args[1]["text"]
-    assert "Breaking News (https://example.com/news)" in text
-
-
-async def test_auto_resend_max_link_uses_title_in_close_notification() -> None:
-    """The 'auto-closed' final message also renders the title for links."""
-    from bot.models.item import Item, ItemType
-    from bot.models.reminder import Reminder
-    from bot.scheduler import _MAX_AUTO_RESENDS
-
-    item = MagicMock(spec=Item)
-    item.user_id = 9
     item.content = "https://example.com/old-article"
     item.type = ItemType.link
     item.title = "Old Article"
     item.description = None
 
-    original = MagicMock(spec=Reminder)
-    original.id = "orig-id"
-    original.item_id = "item-id"
-    original.snooze_count = _MAX_AUTO_RESENDS
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
 
     session = MagicMock(spec=AsyncSession)
     session.get = AsyncMock(return_value=item)
@@ -788,9 +765,8 @@ async def test_auto_resend_max_link_uses_title_in_close_notification() -> None:
         patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
     ):
         mock_svc = MagicMock()
-        mock_svc.get_due_auto_resend = AsyncMock(return_value=[original])
-        mock_svc.mark_acknowledged = AsyncMock()
-        mock_svc.prepare_auto_resend = AsyncMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
         mock_svc_cls.return_value = mock_svc
         mock_settings = MagicMock()
         mock_settings.get_language = AsyncMock(return_value="ru")
@@ -800,7 +776,7 @@ async def test_auto_resend_max_link_uses_title_in_close_notification() -> None:
         bot.send_message = AsyncMock()
         factory = make_session_factory(session)
 
-        await _auto_resend_reminders(bot, factory)
+        await _auto_archive_reminders(bot, factory)
 
     text = bot.send_message.call_args[1]["text"]
     assert "Old Article (https://example.com/old-article)" in text

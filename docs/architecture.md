@@ -76,7 +76,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error |
 | `link_service.py` | Save links to DB (with cached page text and extracted page title), reuse the cache when generating Claude summaries |
-| `reminder_service.py` | Create, cancel, snooze, acknowledge reminders |
+| `reminder_service.py` | Create, cancel, snooze, acknowledge, mark auto-completed, and reactivate reminders |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
 | `task_service.py` | Save tasks to DB |
@@ -99,7 +99,7 @@ the transaction boundary.
 | File | Responsibility |
 |------|---------------|
 | `item_repository.py` | CRUD for `Item` records |
-| `reminder_repository.py` | CRUD for `Reminder` records, due/auto-resend queries |
+| `reminder_repository.py` | CRUD for `Reminder` records, due/auto-archive queries, reactivate |
 | `idea_repository.py` | CRUD for `Idea` records |
 | `user_settings.py` | CRUD for `UserSettings` records (per-user preferences) |
 
@@ -135,8 +135,15 @@ One reminder per item (can have multiple per item after snooze cycles).
 | `is_sent` | Boolean | Whether the reminder was dispatched |
 | `is_cancelled` | Boolean | Whether the user cancelled it |
 | `is_acknowledged` | Boolean | Whether the user pressed "Принято" |
-| `snooze_count` | Integer | How many times this reminder was snoozed/auto-resent |
-| `auto_resend_at` | DateTime (nullable) | When to auto-resend if not acknowledged |
+| `is_auto_completed` | Boolean | Whether the 24h auto-archive job closed the reminder (set by `_auto_archive_reminders`; cleared on reactivate) |
+| `snooze_count` | Integer | How many times this reminder was snoozed |
+| `auto_archive_at` | DateTime (nullable) | When to auto-archive if no button was pressed (set to `now + 24h` on delivery; cleared on acknowledge / snooze / cancel / auto-archive completion / reactivate) |
+
+Reminder status is encoded as four mutually-recoverable boolean flags rather
+than an enum so each transition (deliver → snooze → ack → auto-complete →
+reactivate) maps to a single column update. The migration that introduced the
+24h flow (`f1a2c3d4e5b6`) renamed the legacy `auto_resend_at` column to
+`auto_archive_at` and added `is_auto_completed`.
 
 ### `ideas` table
 
@@ -457,19 +464,26 @@ scheduler._send_due_reminders()
 Bot sends: "🔔 Напоминание: <content>"
 + keyboard: [⏰ +1ч] [🌙 +1д] [✅ Принято]
       │
-      ├── set auto_resend_at = now + 5 minutes
+      ├── set auto_archive_at = now + 24h
       │
-      ├── User presses ✅ Принято → reminder.is_acknowledged = True → done
+      ├── User presses ✅ Принято → reminder.is_acknowledged = True, auto_archive_at = None → done
       │
-      ├── User presses ⏰ +1ч → new Reminder in 1 hour (snooze_count++)
+      ├── User presses ⏰ +1ч → original acknowledged + new Reminder in 1 hour (snooze_count++)
       │
-      ├── User presses 🌙 +1д → new Reminder in 1 day (snooze_count++)
+      ├── User presses 🌙 +1д → original acknowledged + new Reminder in 1 day (snooze_count++)
       │
-      └── No action for 5 minutes:
-              scheduler._auto_resend_reminders()
+      └── No action for 24 hours:
+              scheduler._auto_archive_reminders()  [also runs every 60s]
                     │
-                    ├── snooze_count < 5: auto-resend, snooze_count++
-                    └── snooze_count >= 5: notify user ("🔔 Напоминание закрыто автоматически: …"), then acknowledge
+                    ▼
+              reminder.is_auto_completed = True, auto_archive_at = None
+              Bot sends: "✅ Задача автоматически помечена как выполненная: …"
+              + keyboard: [🔄 Реактивировать]
+                    │
+                    └── User presses 🔄 Реактивировать (handler `cb_remind_reactivate`):
+                          reset is_auto_completed/is_acknowledged/is_sent/is_cancelled to False
+                          remind_at = now → bot sends the reminder again immediately
+                          set auto_archive_at = now + 24h (the cycle can repeat)
 ```
 
 ---
@@ -551,7 +565,7 @@ Call sites:
 - `_handle_task_with_time` (auto-created reminder confirmation in
   `handlers/messages.py` / `handlers/voice.py`).
 - `cb_remind_snooze` (snooze confirmation).
-- `_send_due_reminders` and `_auto_resend_reminders` in `bot/scheduler.py` —
+- `_send_due_reminders` and `_auto_archive_reminders` in `bot/scheduler.py` —
   the scheduler builds its own `UserSettingsService` per tick to look up the
   recipient's timezone, since the DI middleware does not run for background jobs.
 
@@ -584,7 +598,8 @@ families:
   services immediately after they themselves created the row. These do not take
   `user_id`. Examples: `ItemRepository.update_embedding`,
   `ItemRepository.get_missing_embedding`, `ReminderRepository.get_due`,
-  `ReminderRepository.get_due_auto_resend`. They must never be called with a
+  `ReminderRepository.get_due_auto_archive`,
+  `ReminderRepository.mark_auto_completed`. They must never be called with a
   user-supplied ID.
 
 The split prevents callback handlers from being able to read or mutate another
@@ -601,8 +616,8 @@ modify the other user's rows.
 
 | Job | Interval | Function | What it does |
 |-----|----------|----------|-------------|
-| Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_resend_at = now + 5min`. |
-| Auto-resend | 60 seconds | `_auto_resend_reminders` | Finds reminders where `auto_resend_at <= now`. If `snooze_count < 5`, creates new reminder and re-notifies. If `>= 5`, silently acknowledges. |
+| Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_archive_at = now + 24h`. |
+| Auto-archive | 60 seconds | `_auto_archive_reminders` | Finds reminders where `auto_archive_at <= now` and none of the close flags are set. Marks them `is_auto_completed = True`, clears the timer, and sends a final message with a single `🔄 Реактивировать` button. There are no intermediate auto-resends — between the first delivery and the auto-archive close, the user is silent for a full 24h. |
 | Reindex embeddings | 10 minutes + at startup | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Sleeps 0.3 s after every successful embedding to stay under Voyage AI's rate limit (~3 req/s). Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
 
 Each scheduler job opens its own DB session.

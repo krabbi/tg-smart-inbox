@@ -241,7 +241,7 @@ async def test_reminder_service_cancel_for_user_refuses_foreign_owner(
 ) -> None:
     item_repo = ItemRepository(db_session)
     rem_repo = ReminderRepository(db_session)
-    svc = ReminderService(session=db_session, repo=rem_repo)
+    svc = ReminderService(session=db_session, repo=rem_repo, item_repo=item_repo)
 
     item_a = await item_repo.create(user_id=USER_A, type=ItemType.task, content="A task")
     await db_session.commit()
@@ -270,7 +270,7 @@ async def test_reminder_service_acknowledge_refuses_foreign_owner(
 ) -> None:
     item_repo = ItemRepository(db_session)
     rem_repo = ReminderRepository(db_session)
-    svc = ReminderService(session=db_session, repo=rem_repo)
+    svc = ReminderService(session=db_session, repo=rem_repo, item_repo=item_repo)
 
     item_a = await item_repo.create(user_id=USER_A, type=ItemType.task, content="A task")
     await db_session.commit()
@@ -288,7 +288,7 @@ async def test_reminder_service_acknowledge_refuses_foreign_owner(
 async def test_reminder_service_snooze_refuses_foreign_owner(db_session: AsyncSession) -> None:
     item_repo = ItemRepository(db_session)
     rem_repo = ReminderRepository(db_session)
-    svc = ReminderService(session=db_session, repo=rem_repo)
+    svc = ReminderService(session=db_session, repo=rem_repo, item_repo=item_repo)
 
     item_a = await item_repo.create(user_id=USER_A, type=ItemType.task, content="A task")
     await db_session.commit()

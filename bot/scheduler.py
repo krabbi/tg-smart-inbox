@@ -22,8 +22,7 @@ from bot.utils.text import format_item_display
 
 logger = logging.getLogger(__name__)
 
-_AUTO_RESEND_DELAY = timedelta(minutes=5)
-_MAX_AUTO_RESENDS = 5
+_AUTO_ARCHIVE_DELAY = timedelta(hours=24)
 _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
 _REINDEX_THROTTLE_SECONDS = 0.3
@@ -51,6 +50,20 @@ def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
     )
 
 
+def _reactivate_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
+    """Build the single-button keyboard for an auto-archived reminder notification."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("reminder_btn_reactivate", lang),
+                    callback_data=f"remind_reactivate:{reminder_id}",
+                ),
+            ]
+        ]
+    )
+
+
 async def _send_due_reminders(
     bot: Bot,
     session_factory: async_sessionmaker[AsyncSession],
@@ -59,7 +72,7 @@ async def _send_due_reminders(
     now = datetime.now(UTC)
     async with session_factory() as session:
         repo = ReminderRepository(session)
-        svc = ReminderService(session, repo)
+        svc = ReminderService(session, repo, ItemRepository(session))
         settings_svc = UserSettingsService(session, UserSettingsRepository(session))
         due = await svc.get_due(now)
         for reminder in due:
@@ -81,61 +94,43 @@ async def _send_due_reminders(
                     ),
                     reply_markup=_snooze_keyboard(str(reminder.id), user_lang),
                 )
-                await svc.mark_sent_with_auto_resend(reminder, now + _AUTO_RESEND_DELAY)
+                await svc.mark_sent_with_auto_archive(reminder, now + _AUTO_ARCHIVE_DELAY)
             except Exception:
                 logger.exception("Failed to send reminder %s", reminder.id)
 
 
-async def _auto_resend_reminders(
+async def _auto_archive_reminders(
     bot: Bot,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Re-send reminders that were not acknowledged within the auto-resend window."""
+    """Mark reminders without user action after 24h as auto-completed and notify the user."""
     now = datetime.now(UTC)
     async with session_factory() as session:
         repo = ReminderRepository(session)
-        svc = ReminderService(session, repo)
+        svc = ReminderService(session, repo, ItemRepository(session))
         settings_svc = UserSettingsService(session, UserSettingsRepository(session))
-        due = await svc.get_due_auto_resend(now)
+        due = await svc.get_due_auto_archive(now)
         for reminder in due:
             try:
                 item: Item = await session.get(Item, reminder.item_id)  # type: ignore[assignment]
                 if item is None:
-                    await svc.mark_acknowledged(reminder)
+                    # The parent Item is gone — just close the reminder silently.
+                    await svc.mark_auto_completed(reminder)
                     continue
 
                 user_lang = await settings_svc.get_language(item.user_id)
-
-                if reminder.snooze_count >= _MAX_AUTO_RESENDS:
-                    # Too many auto-resends — notify the user that the reminder
-                    # is being closed automatically, then acknowledge to stop spam.
-                    await bot.send_message(
-                        chat_id=item.user_id,
-                        text=t(
-                            "reminder_auto_closed",
-                            user_lang,
-                            content=format_item_display(item),
-                        ),
-                    )
-                    await svc.mark_acknowledged(reminder)
-                    continue
-
-                new_reminder = await svc.prepare_auto_resend(original=reminder, remind_at=now)
-                user_tz = await settings_svc.get_timezone(item.user_id)
-                formatted = format_remind_at(new_reminder.remind_at, user_tz)
                 await bot.send_message(
                     chat_id=item.user_id,
                     text=t(
-                        "reminder_notification",
+                        "reminder_auto_completed",
                         user_lang,
-                        formatted=formatted,
                         content=format_item_display(item),
                     ),
-                    reply_markup=_snooze_keyboard(str(new_reminder.id), user_lang),
+                    reply_markup=_reactivate_keyboard(str(reminder.id), user_lang),
                 )
-                await svc.mark_sent_with_auto_resend(new_reminder, now + _AUTO_RESEND_DELAY)
+                await svc.mark_auto_completed(reminder)
             except Exception:
-                logger.exception("Failed to auto-resend reminder %s", reminder.id)
+                logger.exception("Failed to auto-archive reminder %s", reminder.id)
 
 
 async def _reindex_missing_embeddings(
@@ -197,7 +192,7 @@ def start_scheduler(
         kwargs=reminder_kwargs,
     )
     scheduler.add_job(
-        _auto_resend_reminders,
+        _auto_archive_reminders,
         trigger="interval",
         seconds=60,
         kwargs=reminder_kwargs,
