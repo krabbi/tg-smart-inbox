@@ -22,6 +22,7 @@ async def test_create_returns_reminder(db_session: AsyncSession) -> None:
     assert reminder.item_id == item.id
     assert reminder.is_sent is False
     assert reminder.is_cancelled is False
+    assert reminder.is_auto_completed is False
 
 
 async def test_get_due_returns_past_due(db_session: AsyncSession) -> None:
@@ -75,13 +76,14 @@ async def test_get_due_excludes_cancelled(db_session: AsyncSession) -> None:
     assert len(due) == 0
 
 
-async def test_cancel_sets_flag(db_session: AsyncSession) -> None:
+async def test_cancel_sets_flag_and_clears_archive_timer(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    r.auto_archive_at = datetime(2026, 6, 2, tzinfo=UTC)
     await db_session.commit()
 
     await repo.cancel(r.id)
@@ -89,6 +91,7 @@ async def test_cancel_sets_flag(db_session: AsyncSession) -> None:
     await db_session.refresh(r)
 
     assert r.is_cancelled is True
+    assert r.auto_archive_at is None
 
 
 async def test_cancel_nonexistent_id_does_nothing(db_session: AsyncSession) -> None:
@@ -139,14 +142,14 @@ async def test_get_by_id_for_user_returns_none_for_wrong_user(db_session: AsyncS
     assert found is None
 
 
-async def test_acknowledge_sets_flag_and_clears_auto_resend(db_session: AsyncSession) -> None:
+async def test_acknowledge_sets_flag_and_clears_archive_timer(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
-    r.auto_resend_at = datetime(2026, 6, 1, 10, 5, tzinfo=UTC)
+    r.auto_archive_at = datetime(2026, 6, 2, 10, 5, tzinfo=UTC)
     await db_session.commit()
 
     await repo.acknowledge(r.id)
@@ -154,10 +157,10 @@ async def test_acknowledge_sets_flag_and_clears_auto_resend(db_session: AsyncSes
     await db_session.refresh(r)
 
     assert r.is_acknowledged is True
-    assert r.auto_resend_at is None
+    assert r.auto_archive_at is None
 
 
-async def test_get_due_auto_resend_returns_overdue(db_session: AsyncSession) -> None:
+async def test_get_due_auto_archive_returns_overdue(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
@@ -165,16 +168,16 @@ async def test_get_due_auto_resend_returns_overdue(db_session: AsyncSession) -> 
     repo = ReminderRepository(db_session)
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
     r.is_sent = True
-    r.auto_resend_at = datetime(2026, 5, 1, 10, 5, tzinfo=UTC)
+    r.auto_archive_at = datetime(2026, 5, 2, tzinfo=UTC)
     await db_session.commit()
 
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    due = await repo.get_due_auto_resend(now)
+    due = await repo.get_due_auto_archive(now)
     assert len(due) == 1
     assert due[0].id == r.id
 
 
-async def test_get_due_auto_resend_excludes_acknowledged(db_session: AsyncSession) -> None:
+async def test_get_due_auto_archive_excludes_acknowledged(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
@@ -183,15 +186,15 @@ async def test_get_due_auto_resend_excludes_acknowledged(db_session: AsyncSessio
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
     r.is_sent = True
     r.is_acknowledged = True
-    r.auto_resend_at = datetime(2026, 5, 1, 10, 5, tzinfo=UTC)
+    r.auto_archive_at = datetime(2026, 5, 2, tzinfo=UTC)
     await db_session.commit()
 
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    due = await repo.get_due_auto_resend(now)
+    due = await repo.get_due_auto_archive(now)
     assert len(due) == 0
 
 
-async def test_get_due_auto_resend_excludes_future(db_session: AsyncSession) -> None:
+async def test_get_due_auto_archive_excludes_already_completed(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
@@ -199,24 +202,117 @@ async def test_get_due_auto_resend_excludes_future(db_session: AsyncSession) -> 
     repo = ReminderRepository(db_session)
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
     r.is_sent = True
-    r.auto_resend_at = datetime(2026, 12, 1, tzinfo=UTC)
+    r.is_auto_completed = True
+    r.auto_archive_at = datetime(2026, 5, 2, tzinfo=UTC)
     await db_session.commit()
 
     now = datetime(2026, 6, 1, tzinfo=UTC)
-    due = await repo.get_due_auto_resend(now)
+    due = await repo.get_due_auto_archive(now)
     assert len(due) == 0
 
 
-async def test_set_auto_resend_at_persists(db_session: AsyncSession) -> None:
+async def test_get_due_auto_archive_excludes_cancelled(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.is_cancelled = True
+    r.auto_archive_at = datetime(2026, 5, 2, tzinfo=UTC)
+    await db_session.commit()
+
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    due = await repo.get_due_auto_archive(now)
+    assert len(due) == 0
+
+
+async def test_get_due_auto_archive_excludes_future(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 5, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.auto_archive_at = datetime(2026, 12, 1, tzinfo=UTC)
+    await db_session.commit()
+
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    due = await repo.get_due_auto_archive(now)
+    assert len(due) == 0
+
+
+async def test_set_auto_archive_at_persists(db_session: AsyncSession) -> None:
     item = Item(user_id=1, type=ItemType.task, content="task")
     db_session.add(item)
     await db_session.flush()
 
     repo = ReminderRepository(db_session)
     r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
-    auto_at = datetime(2026, 6, 1, 10, 5, tzinfo=UTC)
-    await repo.set_auto_resend_at(r, auto_at)
+    archive_at = datetime(2026, 6, 2, 10, 0, tzinfo=UTC)
+    await repo.set_auto_archive_at(r, archive_at)
     await db_session.commit()
     await db_session.refresh(r)
 
-    assert r.auto_resend_at is not None
+    assert r.auto_archive_at is not None
+
+
+async def test_mark_auto_completed_sets_flag_and_clears_timer(db_session: AsyncSession) -> None:
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.auto_archive_at = datetime(2026, 6, 2, tzinfo=UTC)
+    await db_session.commit()
+
+    await repo.mark_auto_completed(r.id)
+    await db_session.commit()
+    await db_session.refresh(r)
+
+    assert r.is_auto_completed is True
+    assert r.auto_archive_at is None
+
+
+async def test_mark_auto_completed_nonexistent_id_does_nothing(db_session: AsyncSession) -> None:
+    repo = ReminderRepository(db_session)
+    await repo.mark_auto_completed(uuid.uuid4())  # should not raise
+
+
+async def test_reactivate_resets_state_and_returns_row(db_session: AsyncSession) -> None:
+    """Reactivating an auto-completed reminder clears all close flags and resets remind_at."""
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.is_acknowledged = False
+    r.is_auto_completed = True
+    r.auto_archive_at = None
+    await db_session.commit()
+
+    new_at = datetime(2026, 6, 5, 12, 0, tzinfo=UTC)
+    returned = await repo.reactivate(r.id, new_at)
+    await db_session.commit()
+    await db_session.refresh(r)
+
+    assert returned is not None
+    assert returned.id == r.id
+    assert r.is_auto_completed is False
+    assert r.is_acknowledged is False
+    assert r.is_cancelled is False
+    assert r.is_sent is False
+    assert r.auto_archive_at is None
+    assert r.remind_at.replace(tzinfo=None) == new_at.replace(tzinfo=None)
+
+
+async def test_reactivate_nonexistent_id_returns_none(db_session: AsyncSession) -> None:
+    repo = ReminderRepository(db_session)
+    result = await repo.reactivate(uuid.uuid4(), datetime(2026, 6, 1, tzinfo=UTC))
+    assert result is None

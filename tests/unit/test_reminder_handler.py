@@ -4,11 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.exceptions import TimeParseError
 from bot.handlers.reminders import (
     ReminderStates,
     cb_remind_ack,
+    cb_remind_reactivate,
     cb_remind_snooze,
     cb_task_remind,
     receive_reminder_time,
@@ -509,3 +511,266 @@ async def test_cb_remind_ack_service_error_replies_error() -> None:
     cb.message.answer.assert_awaited_once()
     assert "Не удалось" in cb.message.answer.call_args[0][0]
     cb.message.edit_text.assert_not_awaited()
+
+
+# ── cb_remind_reactivate ────────────────────────────────────────────────────
+
+
+def _make_reactivate_callback(reminder_id: str, user_id: int = 1) -> CallbackQuery:
+    """Build a callback with edit_text wired up (the handler edits in place)."""
+    msg = MagicMock()
+    msg.answer = AsyncMock()
+    msg.edit_text = AsyncMock()
+    msg.edit_reply_markup = AsyncMock()
+    msg.html_text = "✅ Задача автоматически помечена как выполненная:\nкупить молоко"
+    msg.text = msg.html_text
+    user = MagicMock()
+    user.id = user_id
+    cb = MagicMock(spec=CallbackQuery)
+    cb.data = f"remind_reactivate:{reminder_id}"
+    cb.message = msg
+    cb.from_user = user
+    cb.answer = AsyncMock()
+    return cb
+
+
+async def test_cb_remind_reactivate_resends_and_schedules_auto_archive() -> None:
+    """Reactivate re-sends the reminder notification and sets a fresh 24h archive timer."""
+    from datetime import timedelta
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id, user_id=42)
+
+    item = MagicMock(spec=Item)
+    item.user_id = 42
+    item.content = "купить молоко"
+    item.type = ItemType.task
+    item.title = None
+    item.description = None
+
+    reactivated = MagicMock(spec=Reminder)
+    reactivated.id = uuid.UUID(reminder_id)
+    reactivated.item_id = uuid.uuid4()
+    reactivated.remind_at = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock(return_value=reactivated)
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    settings = MagicMock(spec=UserSettingsService)
+    settings.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    before = datetime.now(UTC)
+    await cb_remind_reactivate(
+        cb,
+        session=session,
+        reminder_service=svc,
+        user_settings_service=settings,
+        lang="ru",
+    )
+    after = datetime.now(UTC)
+
+    svc.reactivate_for_user.assert_awaited_once()
+    kwargs = svc.reactivate_for_user.call_args[1]
+    assert kwargs["reminder_id"] == uuid.UUID(reminder_id)
+    assert kwargs["user_id"] == 42
+    # The remind_at passed to the service is "now" — i.e. an immediate push.
+    assert before <= kwargs["remind_at"] <= after
+
+    # Fresh notification is sent with the standard snooze/ack keyboard.
+    cb.message.answer.assert_awaited_once()
+    sent_kwargs = cb.message.answer.call_args[1]
+    rows = sent_kwargs["reply_markup"].inline_keyboard
+    callbacks = [b.callback_data for row in rows for b in row]
+    assert any(c.startswith("remind_snooze:1h:") for c in callbacks)
+    assert any(c.startswith("remind_snooze:1d:") for c in callbacks)
+    assert any(c.startswith("remind_ack:") for c in callbacks)
+    # The push body contains the item content.
+    assert "купить молоко" in cb.message.answer.call_args[0][0]
+
+    # The auto-archive timer is set to now+24h after the push went out.
+    svc.mark_sent_with_auto_archive.assert_awaited_once()
+    archive_at = svc.mark_sent_with_auto_archive.call_args[0][1]
+    assert before + timedelta(hours=24) <= archive_at <= after + timedelta(hours=24)
+
+    # The original auto-archive notice is updated to drop the Reactivate button.
+    cb.message.edit_text.assert_awaited_once()
+    edit_kwargs = cb.message.edit_text.call_args[1]
+    assert edit_kwargs["reply_markup"] is None
+    assert "Реактивировано" in cb.message.edit_text.call_args[0][0]
+
+
+async def test_cb_remind_reactivate_returns_not_found_when_not_owned() -> None:
+    """When the reminder is not owned or already active, surface the standard message."""
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock(return_value=None)
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock()
+
+    await cb_remind_reactivate(cb, session=session, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "не найдено" in cb.message.answer.call_args[0][0].lower()
+    svc.mark_sent_with_auto_archive.assert_not_awaited()
+    session.get.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_no_service_replies_unavailable() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+
+    await cb_remind_reactivate(cb, session=None, reminder_service=None, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "недоступен" in cb.message.answer.call_args[0][0].lower()
+
+
+async def test_cb_remind_reactivate_no_session_replies_unavailable() -> None:
+    """Without a session the handler can't load the parent Item — fail gracefully."""
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock()
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    await cb_remind_reactivate(cb, session=None, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "недоступен" in cb.message.answer.call_args[0][0].lower()
+    svc.reactivate_for_user.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_handles_service_error() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock(side_effect=Exception("db down"))
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock()
+
+    await cb_remind_reactivate(cb, session=session, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "Не удалось" in cb.message.answer.call_args[0][0]
+    svc.mark_sent_with_auto_archive.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_no_message_returns_early() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+    cb.message = None
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock()
+
+    await cb_remind_reactivate(cb, session=MagicMock(spec=AsyncSession), reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.reactivate_for_user.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_no_from_user_returns_early() -> None:
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id)
+    cb.from_user = None
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock()
+
+    await cb_remind_reactivate(cb, session=MagicMock(spec=AsyncSession), reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.reactivate_for_user.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_invalid_uuid_returns_not_found() -> None:
+    cb = _make_reactivate_callback("not-a-uuid")
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock()
+
+    await cb_remind_reactivate(
+        cb,
+        session=MagicMock(spec=AsyncSession),
+        reminder_service=svc,
+        lang="ru",
+    )
+
+    cb.message.answer.assert_awaited_once()
+    assert "не найдено" in cb.message.answer.call_args[0][0].lower()
+    svc.reactivate_for_user.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_missing_item_replies_error() -> None:
+    """Defensive: if the parent Item is gone between reactivate and resend, error out."""
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id, user_id=1)
+
+    reactivated = MagicMock(spec=Reminder)
+    reactivated.id = uuid.UUID(reminder_id)
+    reactivated.item_id = uuid.uuid4()
+    reactivated.remind_at = datetime(2026, 6, 1, tzinfo=UTC)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock(return_value=reactivated)
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=None)
+
+    await cb_remind_reactivate(cb, session=session, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "Не удалось" in cb.message.answer.call_args[0][0]
+    svc.mark_sent_with_auto_archive.assert_not_awaited()
+
+
+async def test_cb_remind_reactivate_tolerates_edit_failure() -> None:
+    """If editing the old auto-archive message fails, the fresh push is still sent."""
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = _make_reactivate_callback(reminder_id, user_id=1)
+    cb.message.edit_text = AsyncMock(side_effect=Exception("message too old"))
+
+    item = MagicMock(spec=Item)
+    item.user_id = 1
+    item.content = "task"
+    item.type = ItemType.task
+    item.title = None
+    item.description = None
+
+    reactivated = MagicMock(spec=Reminder)
+    reactivated.id = uuid.UUID(reminder_id)
+    reactivated.item_id = uuid.uuid4()
+    reactivated.remind_at = datetime(2026, 6, 1, tzinfo=UTC)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reactivate_for_user = AsyncMock(return_value=reactivated)
+    svc.mark_sent_with_auto_archive = AsyncMock()
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    await cb_remind_reactivate(cb, session=session, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    svc.mark_sent_with_auto_archive.assert_awaited_once()

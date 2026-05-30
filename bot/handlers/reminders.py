@@ -11,15 +11,22 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.exceptions import TimeParseError
 from bot.i18n import t
+from bot.models.item import Item
 from bot.services.link_service import LinkService
 from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
-from bot.utils.text import extract_url
+from bot.utils.text import extract_url, format_item_display
+
+# 24h window between sending a reminder and auto-archiving it if the user
+# hasn't pressed any of the snooze / ack / reactivate buttons. Mirrors the
+# constant used by the scheduler — kept in sync intentionally.
+_AUTO_ARCHIVE_DELAY = timedelta(hours=24)
 
 logger = logging.getLogger(__name__)
 
@@ -230,3 +237,106 @@ async def cb_remind_ack(
         parse_mode="HTML",
         reply_markup=None,
     )
+
+
+def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
+    """Build the snooze/acknowledge keyboard for an active reminder notification."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_1h", lang),
+                    callback_data=f"remind_snooze:1h:{reminder_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_1d", lang),
+                    callback_data=f"remind_snooze:1d:{reminder_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_ack", lang),
+                    callback_data=f"remind_ack:{reminder_id}",
+                ),
+            ]
+        ]
+    )
+
+
+@router.callback_query(F.data.startswith("remind_reactivate:"))
+async def cb_remind_reactivate(
+    callback: CallbackQuery,
+    session: AsyncSession | None = None,
+    reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
+) -> None:
+    """Reactivate an auto-completed reminder and immediately re-send the notification."""
+    await callback.answer()
+    if callback.message is None or callback.from_user is None:
+        return
+
+    if reminder_service is None or session is None:
+        await callback.message.answer(t("reminder_service_unavailable", lang))
+        return
+
+    reminder_id_str = (callback.data or "").removeprefix("remind_reactivate:")
+
+    try:
+        reminder_id = uuid.UUID(reminder_id_str)
+    except ValueError:
+        await callback.message.answer(t("reminder_not_found_or_inactive", lang))
+        return
+
+    now = datetime.now(UTC)
+    try:
+        reminder = await reminder_service.reactivate_for_user(
+            reminder_id=reminder_id,
+            user_id=callback.from_user.id,
+            remind_at=now,
+        )
+    except Exception:
+        logger.exception("Failed to reactivate reminder %s", reminder_id_str)
+        await callback.message.answer(t("reminder_reactivate_failed", lang))
+        return
+
+    if reminder is None:
+        await callback.message.answer(t("reminder_not_found_or_inactive", lang))
+        return
+
+    # Reactivated reminders are pushed to the user right away and immediately
+    # enter the 24h auto-archive window again, exactly like a fresh due notice.
+    item: Item | None = await session.get(Item, reminder.item_id)
+    if item is None:
+        # Defensive: the parent record was deleted between reactivate and re-send.
+        # We've still committed the reactivation, but there is nothing to display.
+        await callback.message.answer(t("reminder_reactivate_failed", lang))
+        return
+
+    user_tz = "UTC"
+    if user_settings_service is not None:
+        user_tz = await user_settings_service.get_timezone(callback.from_user.id)
+    formatted = format_remind_at(reminder.remind_at, user_tz)
+
+    # Strip the "Реактивировать" button on the old auto-archive notice so the
+    # user can't click it twice, then signal that the row is back to active.
+    existing_text = callback.message.html_text or callback.message.text or ""
+    try:
+        await callback.message.edit_text(
+            existing_text + f"\n\n{t('reminder_reactivated_marker', lang)}",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        # Telegram may reject edits to messages older than 48h — fall through to
+        # send the fresh notification regardless.
+        logger.warning("Could not edit auto-archive message for reminder %s", reminder_id_str)
+
+    await callback.message.answer(
+        t(
+            "reminder_notification",
+            lang,
+            formatted=formatted,
+            content=format_item_display(item),
+        ),
+        reply_markup=_snooze_keyboard(str(reminder.id), lang),
+    )
+    await reminder_service.mark_sent_with_auto_archive(reminder, now + _AUTO_ARCHIVE_DELAY)

@@ -8,7 +8,7 @@ from bot.repositories.reminder_repository import ReminderRepository
 
 
 class ReminderService:
-    """Business logic for creating, querying, and cancelling reminders."""
+    """Business logic for creating, querying, and acting on reminders."""
 
     def __init__(self, session: AsyncSession, repo: ReminderRepository) -> None:
         self._session = session
@@ -42,29 +42,21 @@ class ReminderService:
         reminder.is_sent = True
         await self._session.commit()
 
-    async def mark_sent_with_auto_resend(
-        self, reminder: Reminder, auto_resend_at: datetime
+    async def mark_sent_with_auto_archive(
+        self, reminder: Reminder, auto_archive_at: datetime
     ) -> None:
-        """Mark reminder as sent, set auto_resend_at window, and commit."""
+        """Mark reminder as sent, set auto_archive_at window, and commit."""
         reminder.is_sent = True
-        await self._repo.set_auto_resend_at(reminder, auto_resend_at)
+        await self._repo.set_auto_archive_at(reminder, auto_archive_at)
         await self._session.commit()
 
-    async def get_due_auto_resend(self, now: datetime) -> list[Reminder]:
-        """Return reminders that need to be automatically re-sent."""
-        return await self._repo.get_due_auto_resend(now)
+    async def get_due_auto_archive(self, now: datetime) -> list[Reminder]:
+        """Return reminders whose 24h auto-archive window has elapsed without user action."""
+        return await self._repo.get_due_auto_archive(now)
 
-    async def prepare_auto_resend(self, original: Reminder, remind_at: datetime) -> Reminder:
-        """Acknowledge original and flush a new follow-up reminder; caller must commit."""
-        await self._repo.acknowledge(original.id)
-        new_reminder = await self._repo.create(item_id=original.item_id, remind_at=remind_at)
-        new_reminder.snooze_count = original.snooze_count + 1
-        await self._session.flush()
-        return new_reminder
-
-    async def mark_acknowledged(self, reminder: Reminder) -> None:
-        """Acknowledge a reminder without user ownership check (for scheduler use)."""
-        await self._repo.acknowledge(reminder.id)
+    async def mark_auto_completed(self, reminder: Reminder) -> None:
+        """Flag a reminder as auto-completed and commit (used by scheduler)."""
+        await self._repo.mark_auto_completed(reminder.id)
         await self._session.commit()
 
     async def snooze(self, reminder_id: uuid.UUID, user_id: int, remind_at: datetime) -> bool:
@@ -88,3 +80,16 @@ class ReminderService:
         await self._repo.acknowledge(reminder_id)
         await self._session.commit()
         return True
+
+    async def reactivate_for_user(
+        self, reminder_id: uuid.UUID, user_id: int, remind_at: datetime
+    ) -> Reminder | None:
+        """Reactivate an auto-completed reminder for ``user_id``; return the row or None."""
+        reminder = await self._repo.get_by_id_for_user(reminder_id, user_id)
+        if reminder is None:
+            return None
+        updated = await self._repo.reactivate(reminder_id, remind_at)
+        if updated is None:
+            return None
+        await self._session.commit()
+        return updated
