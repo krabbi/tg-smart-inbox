@@ -83,6 +83,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `note_service.py` | Save notes to DB |
 | `list_service.py` | Paginated item listing and full-text search |
 | `semantic_search_service.py` | Cosine-similarity search over Item and Idea embeddings via pgvector |
+| `reindex_service.py` | Regenerate missing embeddings for one user — single record (`reindex_item` / `reindex_idea`) or bulk pass (`reindex_all_for_user`); throttles Voyage AI to one call per 100 ms and caps each run at 200 records |
 | `media_service.py` | Process photos/files: vision categorization + Drive upload |
 | `drive_service.py` | Google Drive API wrapper |
 | `scraper.py` | HTTP page fetcher for link summarization; extracts `og:title` / `<title>` alongside the body text |
@@ -237,7 +238,8 @@ DependencyMiddleware.__call__()
   │            ReminderRepository, IdeaRepository
   ├── injects: classifier, embedding_service, link_service, reminder_service,
   │            time_parser, idea_service, task_service, note_service,
-  │            list_service, semantic_search_service, user_settings_service
+  │            list_service, semantic_search_service, reindex_service,
+  │            user_settings_service
   ├── if GROQ_API_KEY: injects transcription_service (else None)
   ├── if GOOGLE_DRIVE_FOLDER_ID: injects media_service (else None)
   └── calls handler
@@ -695,6 +697,58 @@ Page size is fixed at 5 for both modes. Semantic results are rendered with a
 surface the same "Умный поиск временно недоступен. Попробуйте обычный поиск."
 message without exiting the dialog, so the user can retry or `/cancel`.
 
+### On-demand reindexing
+
+`ReindexService` (`bot/services/reindex_service.py`) regenerates embeddings for
+records that were saved while Voyage AI was unreachable. Unlike the background
+`_reindex_missing_embeddings` scheduler job — which sweeps the global backlog
+every ten minutes — `ReindexService` is scoped to a single Telegram user and is
+intended to be triggered from a user-facing handler (e.g. a button on the
+unindexed-records list).
+
+- `reindex_item(item_id, user_id) -> ReindexResult` and
+  `reindex_idea(idea_id, user_id) -> ReindexResult` regenerate a single record.
+  Both go through `*Repository.get_by_id_for_user` so a forged callback ID can
+  never touch another user's data. They return one of:
+
+  | `ReindexResult` | Meaning |
+  |---|---|
+  | `SUCCESS` | A vector was generated and persisted; the row's `embedding` is now non-NULL. |
+  | `ALREADY_INDEXED` | The row already had an embedding — nothing was written. |
+  | `NOT_FOUND` | No row with that id belongs to the requesting user. |
+  | `SERVICE_UNAVAILABLE` | Voyage AI returned `None` (rate-limited, transport error, or key unset). Nothing was written. |
+
+- `reindex_all_for_user(user_id, max_items=200) -> ReindexSummary` walks the
+  user's Items (oldest first) and then their Ideas (oldest first), respecting a
+  combined cap of `max_items` records per pass. A 100 ms pause is inserted
+  between successive Voyage AI calls to stay below the provider's ~3 req/s
+  ceiling. The result carries:
+
+  | Field | Meaning |
+  |---|---|
+  | `succeeded` | Records whose embedding was generated and persisted. |
+  | `failed` | Records where Voyage AI returned `None` after at least one earlier success in the same pass. |
+  | `total_found` | How many unindexed records were loaded for this pass (≤ `max_items`). |
+  | `truncated` | `True` when the user has more unindexed records than this pass loaded — call again to keep draining. |
+
+  When the very first Voyage AI call of the pass returns `None`, the run is
+  aborted immediately (the endpoint is assumed dead for this attempt) and the
+  summary reports `succeeded = 0, failed = total_found` so the caller can tell
+  the user "smart search is unavailable, try again later" without locking the
+  backlog into a failed state.
+
+- Repository surface: `ItemRepository.list_without_embedding(user_id, limit)` /
+  `count_without_embedding(user_id)` and `IdeaRepository.list_without_embedding`
+  / `count_without_embedding` / `get_by_id_for_user(idea_id, user_id)` — all
+  scoped by `user_id`, oldest-first ordering for `list_*`. They are part of the
+  user-scoped family described in the access-control section.
+
+- Text fed into the embedding for a reindex matches what services produce at
+  initial save: Items use `content + description + scraped_text` joined by blank
+  lines, Ideas blend the parent Item's content with a `Теги: ...` line built
+  from the idea's tags. The helpers live as `_build_item_text` /
+  `_build_idea_text` static methods on `ReindexService`.
+
 ---
 
 ## Configuration
@@ -891,6 +945,8 @@ tg-smart-inbox/
 │   │   ├── task_service.py   # Task save
 │   │   ├── note_service.py   # Note save
 │   │   ├── list_service.py   # Listing + search
+│   │   ├── semantic_search_service.py  # Cosine-similarity search via pgvector
+│   │   ├── reindex_service.py  # Per-user single/bulk embedding reindex
 │   │   ├── media_service.py  # Photo/file processing
 │   │   ├── drive_service.py  # Google Drive upload
 │   │   ├── scraper.py        # HTTP page fetcher

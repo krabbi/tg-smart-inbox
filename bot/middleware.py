@@ -19,6 +19,7 @@ from bot.services.link_service import LinkService
 from bot.services.list_service import ListService
 from bot.services.media_service import MediaService
 from bot.services.note_service import NoteService
+from bot.services.reindex_service import ReindexService
 from bot.services.reminder_service import ReminderService
 from bot.services.scraper import Scraper
 from bot.services.semantic_search_service import SemanticSearchService
@@ -95,6 +96,12 @@ class DependencyMiddleware(BaseMiddleware):
                 embedding_service=embedding_service,
                 item_repo=item_repo,
                 idea_repo=idea_repo,
+            )
+            data["reindex_service"] = ReindexService(
+                embedding_service=embedding_service,
+                item_repository=item_repo,
+                idea_repository=idea_repo,
+                session=session,
             )
             user_settings_service = UserSettingsService(
                 session=session, repo=UserSettingsRepository(session)
