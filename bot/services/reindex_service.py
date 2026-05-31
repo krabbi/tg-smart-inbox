@@ -58,6 +58,17 @@ class ReindexService:
         self._ideas = idea_repository
         self._session = session
 
+    async def count_unindexed_for_user(self, user_id: int) -> int:
+        """Return total Items + Ideas without an embedding for one user.
+
+        Used by the ``/reindex`` handler to short-circuit when the backlog is
+        empty and to decide whether the pre-run "Found N records" message needs
+        the "(first 200 will be processed)" suffix.
+        """
+        items = await self._items.count_without_embedding(user_id)
+        ideas = await self._ideas.count_without_embedding(user_id)
+        return items + ideas
+
     async def reindex_item(self, item_id: uuid.UUID, user_id: int) -> ReindexResult:
         """Generate and persist an embedding for a single Item; return the outcome."""
         item = await self._items.get_by_id_for_user(item_id, user_id)

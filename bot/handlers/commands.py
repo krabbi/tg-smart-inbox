@@ -15,7 +15,9 @@ from bot.config import Config
 from bot.handlers.timezone_setup import start_timezone_setup
 from bot.i18n import t
 from bot.models.item import ItemType
+from bot.services.embedding_service import EmbeddingService
 from bot.services.list_service import ListPage, ListService
+from bot.services.reindex_service import ReindexService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
@@ -358,3 +360,70 @@ async def cb_cancel_reminder(
         )
     except Exception:
         logger.warning("Could not edit reminder message after cancel")
+
+
+# ── /reindex ──────────────────────────────────────────────────────────────────
+
+# Bulk reindex cap — mirrors ``ReindexService`` default. Surfaced here so the
+# pre-run "(first 200 will be processed)" suffix and the run itself stay in sync.
+_REINDEX_MAX_ITEMS = 200
+
+# In-memory per-user concurrency lock. The bot runs as a single process and one
+# pass already saturates Voyage AI's rate budget, so a set in module state is
+# enough — no Redis/DB lock required. A user spamming /reindex during an active
+# run is told to wait; the entry is removed in a ``finally`` block so a crash in
+# the service never leaves a user permanently locked out.
+_REINDEX_RUNNING: set[int] = set()
+
+
+@router.message(Command("reindex"))
+async def cmd_reindex(
+    message: Message,
+    reindex_service: ReindexService | None = None,
+    embedding_service: EmbeddingService | None = None,
+    lang: str = "en",
+) -> None:
+    """Reindex up to 200 of the user's records that currently have no embedding."""
+    if reindex_service is None or embedding_service is None:
+        logger.warning("reindex_service or embedding_service not injected — DI misconfiguration")
+        await message.answer(t("reindex.all.not_configured", lang))
+        return
+
+    if not embedding_service.is_configured:
+        await message.answer(t("reindex.all.not_configured", lang))
+        return
+
+    user_id = message.from_user.id if message.from_user else 0
+    if not user_id:
+        return
+
+    if user_id in _REINDEX_RUNNING:
+        await message.answer(t("reindex.all.already_running", lang))
+        return
+
+    total = await reindex_service.count_unindexed_for_user(user_id)
+    if total == 0:
+        await message.answer(t("reindex.all.already_indexed", lang))
+        return
+
+    in_progress_text = t("reindex.all.in_progress", lang, count=total)
+    if total > _REINDEX_MAX_ITEMS:
+        in_progress_text += t("reindex.all.in_progress_truncated_suffix", lang)
+    await message.answer(in_progress_text)
+
+    _REINDEX_RUNNING.add(user_id)
+    try:
+        summary = await reindex_service.reindex_all_for_user(user_id, max_items=_REINDEX_MAX_ITEMS)
+    finally:
+        _REINDEX_RUNNING.discard(user_id)
+
+    if summary.succeeded == 0 and summary.failed > 0:
+        await message.answer(t("reindex.all.unavailable", lang))
+        return
+
+    result_text = t("reindex.all.done", lang, succeeded=summary.succeeded)
+    if summary.failed > 0:
+        result_text += t("reindex.all.done_with_failures_suffix", lang, failed=summary.failed)
+    if summary.truncated:
+        result_text += "\n" + t("reindex.all.done_truncated_suffix", lang)
+    await message.answer(result_text)

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
+from bot.handlers import commands as commands_module
 from bot.handlers.commands import (
     _list_keyboard,
     _parse_type_suffix,
@@ -15,11 +16,14 @@ from bot.handlers.commands import (
     cb_list_page,
     cmd_cancel,
     cmd_list,
+    cmd_reindex,
     cmd_reminders,
 )
 from bot.models.item import Item, ItemType
 from bot.models.reminder import Reminder
+from bot.services.embedding_service import EmbeddingService
 from bot.services.list_service import ListPage, ListService
+from bot.services.reindex_service import ReindexService, ReindexSummary
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 
@@ -581,3 +585,213 @@ async def test_cb_list_filter_edit_failure_is_silenced() -> None:
 
     # Should not raise
     await cb_list_filter(cb, list_service=svc, lang="ru")
+
+
+# ── /reindex ──────────────────────────────────────────────────────────────────
+
+
+def make_reindex_service(
+    *,
+    count: int = 0,
+    summary: ReindexSummary | None = None,
+    summary_exc: Exception | None = None,
+) -> MagicMock:
+    """Build a ReindexService mock with configurable count + summary outcomes."""
+    svc = MagicMock(spec=ReindexService)
+    svc.count_unindexed_for_user = AsyncMock(return_value=count)
+    if summary_exc is not None:
+        svc.reindex_all_for_user = AsyncMock(side_effect=summary_exc)
+    else:
+        svc.reindex_all_for_user = AsyncMock(
+            return_value=summary
+            or ReindexSummary(succeeded=0, failed=0, total_found=0, truncated=False)
+        )
+    return svc
+
+
+def make_embedding_service(configured: bool = True) -> MagicMock:
+    """Build an EmbeddingService mock with the requested ``is_configured`` value."""
+    emb = MagicMock(spec=EmbeddingService)
+    # ``is_configured`` is a property on the real class — emulate it on the mock.
+    type(emb).is_configured = property(lambda self, value=configured: value)
+    return emb
+
+
+def _clear_reindex_lock() -> None:
+    """Reset the module-level concurrency lock between tests."""
+    commands_module._REINDEX_RUNNING.clear()
+
+
+async def test_cmd_reindex_no_services_replies_not_configured() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+
+    await cmd_reindex(msg, reindex_service=None, embedding_service=None, lang="ru")
+
+    assert "не настроен" in msg.answer.call_args[0][0]
+
+
+async def test_cmd_reindex_when_voyage_not_configured() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(count=5)
+    emb = make_embedding_service(configured=False)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    assert "не настроен" in msg.answer.call_args[0][0]
+    reindex_svc.count_unindexed_for_user.assert_not_awaited()
+    reindex_svc.reindex_all_for_user.assert_not_awaited()
+
+
+async def test_cmd_reindex_when_already_indexed() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(count=0)
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    assert "уже проиндексированы" in msg.answer.call_args[0][0]
+    reindex_svc.reindex_all_for_user.assert_not_awaited()
+
+
+async def test_cmd_reindex_full_success() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(
+        count=3,
+        summary=ReindexSummary(succeeded=3, failed=0, total_found=3, truncated=False),
+    )
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    assert msg.answer.await_count == 2
+    first_call = msg.answer.call_args_list[0][0][0]
+    assert "Найдено 3" in first_call
+    assert "первые 200" not in first_call
+    second_call = msg.answer.call_args_list[1][0][0]
+    assert "Проиндексировано: 3" in second_call
+    assert "Не удалось" not in second_call
+    assert "Осталось" not in second_call
+    reindex_svc.reindex_all_for_user.assert_awaited_once_with(msg.from_user.id, max_items=200)
+
+
+async def test_cmd_reindex_partial_success_with_failures() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(
+        count=5,
+        summary=ReindexSummary(succeeded=3, failed=2, total_found=5, truncated=False),
+    )
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    second_call = msg.answer.call_args_list[1][0][0]
+    assert "Проиндексировано: 3" in second_call
+    assert "Не удалось: 2" in second_call
+
+
+async def test_cmd_reindex_service_unavailable_first_call() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    # All records failed because the very first Voyage AI call returned None.
+    reindex_svc = make_reindex_service(
+        count=4,
+        summary=ReindexSummary(succeeded=0, failed=4, total_found=4, truncated=False),
+    )
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    second_call = msg.answer.call_args_list[1][0][0]
+    assert "временно недоступен" in second_call
+    assert "Проиндексировано" not in second_call
+
+
+async def test_cmd_reindex_truncated_suffix_shown_when_more_remain() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(
+        count=350,
+        summary=ReindexSummary(succeeded=200, failed=0, total_found=200, truncated=True),
+    )
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    first_call = msg.answer.call_args_list[0][0][0]
+    assert "Найдено 350" in first_call
+    assert "первые 200" in first_call
+    second_call = msg.answer.call_args_list[1][0][0]
+    assert "Проиндексировано: 200" in second_call
+    assert "Осталось" in second_call
+    assert "/reindex" in second_call
+
+
+async def test_cmd_reindex_rejects_concurrent_run() -> None:
+    _clear_reindex_lock()
+    msg = make_message(user_id=42)
+    reindex_svc = make_reindex_service(count=10)
+    emb = make_embedding_service(configured=True)
+
+    # Simulate the user already having an active reindex run.
+    commands_module._REINDEX_RUNNING.add(42)
+    try:
+        await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+    finally:
+        _clear_reindex_lock()
+
+    assert "уже выполняется" in msg.answer.call_args[0][0]
+    reindex_svc.count_unindexed_for_user.assert_not_awaited()
+    reindex_svc.reindex_all_for_user.assert_not_awaited()
+
+
+async def test_cmd_reindex_releases_lock_on_exception() -> None:
+    """Even if reindex_service raises, the user is removed from the in-progress set."""
+    _clear_reindex_lock()
+    msg = make_message(user_id=99)
+    reindex_svc = make_reindex_service(count=5, summary_exc=RuntimeError("boom"))
+    emb = make_embedding_service(configured=True)
+
+    raised = False
+    try:
+        await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+    except RuntimeError:
+        raised = True
+
+    assert raised, "the original exception must propagate"
+    assert 99 not in commands_module._REINDEX_RUNNING
+
+
+async def test_cmd_reindex_silent_when_no_user_id() -> None:
+    """A defensive no-op when from_user is absent (e.g. anonymous channel post)."""
+    _clear_reindex_lock()
+    msg = make_message()
+    msg.from_user = None
+    reindex_svc = make_reindex_service(count=5)
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
+
+    msg.answer.assert_not_awaited()
+    reindex_svc.count_unindexed_for_user.assert_not_awaited()
+
+
+async def test_cmd_reindex_english_full_success() -> None:
+    _clear_reindex_lock()
+    msg = make_message()
+    reindex_svc = make_reindex_service(
+        count=2,
+        summary=ReindexSummary(succeeded=2, failed=0, total_found=2, truncated=False),
+    )
+    emb = make_embedding_service(configured=True)
+
+    await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="en")
+
+    first_call = msg.answer.call_args_list[0][0][0]
+    assert "Found 2" in first_call
+    second_call = msg.answer.call_args_list[1][0][0]
+    assert "Indexed: 2" in second_call

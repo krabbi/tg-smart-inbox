@@ -9,7 +9,16 @@ from bot.__main__ import _bot_commands_for
 def test_bot_commands_menu_contains_all_user_facing_commands(lang: str) -> None:
     """The Telegram slash menu lists every user-facing command for both languages."""
     commands = {c.command for c in _bot_commands_for(lang)}
-    assert commands == {"start", "list", "search", "reminders", "ideas", "config", "cancel"}
+    assert commands == {
+        "start",
+        "list",
+        "search",
+        "reminders",
+        "ideas",
+        "config",
+        "reindex",
+        "cancel",
+    }
 
 
 @pytest.mark.parametrize("lang", ["ru", "en"])

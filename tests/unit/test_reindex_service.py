@@ -79,6 +79,31 @@ def make_service() -> tuple[
     return svc, item_repo, idea_repo, embedding, session.commit
 
 
+# --- count_unindexed_for_user -----------------------------------------------
+
+
+async def test_count_unindexed_for_user_sums_item_and_idea_counts() -> None:
+    svc, item_repo, idea_repo, _, _ = make_service()
+    item_repo.count_without_embedding.return_value = 7
+    idea_repo.count_without_embedding.return_value = 3
+
+    total = await svc.count_unindexed_for_user(user_id=42)
+
+    assert total == 10
+    item_repo.count_without_embedding.assert_awaited_once_with(42)
+    idea_repo.count_without_embedding.assert_awaited_once_with(42)
+
+
+async def test_count_unindexed_for_user_returns_zero_when_nothing_to_index() -> None:
+    svc, item_repo, idea_repo, _, _ = make_service()
+    item_repo.count_without_embedding.return_value = 0
+    idea_repo.count_without_embedding.return_value = 0
+
+    total = await svc.count_unindexed_for_user(user_id=1)
+
+    assert total == 0
+
+
 # --- reindex_item -----------------------------------------------------------
 
 

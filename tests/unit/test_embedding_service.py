@@ -86,6 +86,25 @@ def _make_status_response(status_code: int) -> MagicMock:
     return resp
 
 
+# ─── is_configured ───────────────────────────────────────────────────────────
+
+
+def test_is_configured_true_when_voyage_key_present() -> None:
+    svc = EmbeddingService(make_config())
+    assert svc.is_configured is True
+
+
+def test_is_configured_false_when_voyage_key_missing() -> None:
+    cfg = Config(
+        telegram_bot_token="fake",
+        anthropic_api_key="sk-ant-fake",
+        voyage_api_key="",
+        embedding_dim=4,
+    )
+    svc = EmbeddingService(cfg)
+    assert svc.is_configured is False
+
+
 # ─── generate ────────────────────────────────────────────────────────────────
 
 
