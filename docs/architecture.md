@@ -58,7 +58,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `messages.py` | Entry point for all incoming text, photo, and document messages |
 | `links.py` | Callback buttons for saved links (summary, save, remind) |
 | `reminders.py` | Reminder dialog (time input FSM), snooze/acknowledge callbacks |
-| `commands.py` | Bot commands: `/start`, `/list`, `/reminders`, `/ideas`, `/help`, `/cancel` |
+| `commands.py` | Bot commands: `/start`, `/list`, `/reminders`, `/ideas`, `/reindex`, `/help`, `/cancel` |
 | `config.py` | `/config` command — extensible settings menu; currently dispatches to the timezone FSM |
 | `ideas.py` | `/ideas` command — display saved ideas |
 | `search.py` | `/search` command — FSM for picking search mode (plain / semantic) + paginated results |
@@ -74,7 +74,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 |------|---------------|
 | `classifier.py` | Classify incoming messages: LINK / TASK / NOTE / IDEA / MEDIA |
 | `claude_client.py` | Thin wrapper around the Anthropic API |
-| `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error |
+| `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error; exposes `is_configured` so callers can distinguish "Voyage AI key absent" from "transient outage" |
 | `link_service.py` | Save links to DB (with cached page text and extracted page title), reuse the cache when generating Claude summaries |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge, mark auto-completed, and reactivate reminders |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
@@ -83,7 +83,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `note_service.py` | Save notes to DB |
 | `list_service.py` | Paginated item listing and full-text search |
 | `semantic_search_service.py` | Cosine-similarity search over Item and Idea embeddings via pgvector |
-| `reindex_service.py` | Regenerate missing embeddings for one user — single record (`reindex_item` / `reindex_idea`) or bulk pass (`reindex_all_for_user`); throttles Voyage AI to one call per 100 ms and caps each run at 200 records |
+| `reindex_service.py` | Regenerate missing embeddings for one user — single record (`reindex_item` / `reindex_idea`), bulk pass (`reindex_all_for_user`), and pre-run backlog count (`count_unindexed_for_user`); throttles Voyage AI to one call per 100 ms and caps each run at 200 records |
 | `media_service.py` | Process photos/files: vision categorization + Drive upload |
 | `drive_service.py` | Google Drive API wrapper |
 | `scraper.py` | HTTP page fetcher for link summarization; extracts `og:title` / `<title>` alongside the body text |
@@ -703,8 +703,22 @@ message without exiting the dialog, so the user can retry or `/cancel`.
 records that were saved while Voyage AI was unreachable. Unlike the background
 `_reindex_missing_embeddings` scheduler job — which sweeps the global backlog
 every ten minutes — `ReindexService` is scoped to a single Telegram user and is
-intended to be triggered from a user-facing handler (e.g. a button on the
-unindexed-records list).
+triggered from the `/reindex` command handler (`bot/handlers/commands.py` →
+`cmd_reindex`).
+
+The `/reindex` handler keeps an in-memory `set[int]` of user IDs currently
+running a pass and rejects re-entry with `ℹ️ Переиндексация уже выполняется,
+дождись окончания.` until the set entry is cleared in a `try/finally`. It also
+calls `EmbeddingService.is_configured` first and replies `ℹ️ Умный поиск не
+настроен в этом инстансе бота.` when Voyage AI is not wired in this deployment,
+to distinguish that case from a transient outage.
+
+- `count_unindexed_for_user(user_id) -> int` sums
+  `ItemRepository.count_without_embedding` and
+  `IdeaRepository.count_without_embedding` for the user. The `/reindex` handler
+  uses it to short-circuit with `✅ Все твои записи уже проиндексированы.` when
+  the backlog is empty, and to decide whether to append the `(будут обработаны
+  первые 200)` suffix to the "starting run" message.
 
 - `reindex_item(item_id, user_id) -> ReindexResult` and
   `reindex_idea(idea_id, user_id) -> ReindexResult` regenerate a single record.

@@ -296,6 +296,23 @@ _RU: dict[str, str] = {
     "tz_continent_asia": "Азия",
     "tz_continent_america": "Америка",
     "tz_continent_other": "Другое",
+    # --- /reindex -----------------------------------------------------------
+    "reindex.all.in_progress": (
+        "🔄 Найдено {count} записей без индексации. Запускаю переиндексацию..."
+    ),
+    "reindex.all.in_progress_truncated_suffix": " (будут обработаны первые 200)",
+    "reindex.all.already_indexed": "✅ Все твои записи уже проиндексированы.",
+    "reindex.all.unavailable": (
+        "ℹ️ Умный поиск временно недоступен. Попробуй переиндексацию позже."
+    ),
+    "reindex.all.not_configured": "ℹ️ Умный поиск не настроен в этом инстансе бота.",
+    "reindex.all.already_running": ("ℹ️ Переиндексация уже выполняется, дождись окончания."),
+    "reindex.all.done": "✅ Готово. Проиндексировано: {succeeded}.",
+    "reindex.all.done_with_failures_suffix": (
+        " Не удалось: {failed} (умный поиск был недоступен)."
+    ),
+    "reindex.all.done_truncated_suffix": ("Осталось ещё записей — запусти /reindex повторно."),
+    "commands.reindex.description": "🔄 Переиндексировать записи",
     # --- Bot commands menu (shown by Telegram clients) ----------------------
     "botcmd_start": "Начать работу",
     "botcmd_list": "Последние записи",
@@ -556,6 +573,19 @@ _EN: dict[str, str] = {
     "tz_continent_asia": "Asia",
     "tz_continent_america": "America",
     "tz_continent_other": "Other",
+    # --- /reindex -----------------------------------------------------------
+    "reindex.all.in_progress": ("🔄 Found {count} items without indexing. Starting re-indexing..."),
+    "reindex.all.in_progress_truncated_suffix": " (the first 200 will be processed)",
+    "reindex.all.already_indexed": "✅ All your items are already indexed.",
+    "reindex.all.unavailable": (
+        "ℹ️ Smart search is temporarily unavailable. Try re-indexing later."
+    ),
+    "reindex.all.not_configured": "ℹ️ Smart search is not configured in this bot instance.",
+    "reindex.all.already_running": ("ℹ️ Re-indexing is already running, wait for it to finish."),
+    "reindex.all.done": "✅ Done. Indexed: {succeeded}.",
+    "reindex.all.done_with_failures_suffix": (" Failed: {failed} (smart search was unavailable)."),
+    "reindex.all.done_truncated_suffix": ("There are more items left — run /reindex again."),
+    "commands.reindex.description": "🔄 Re-index items",
     # --- Bot commands menu (shown by Telegram clients) ----------------------
     "botcmd_start": "Start",
     "botcmd_list": "Latest records",

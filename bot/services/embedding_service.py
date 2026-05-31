@@ -27,6 +27,17 @@ class EmbeddingService:
         self._dim = config.embedding_dim
         self._api_key = config.voyage_api_key
 
+    @property
+    def is_configured(self) -> bool:
+        """Return True when a Voyage AI key is present and the service can attempt calls.
+
+        ``False`` means the bot is running in graceful-fallback mode — :meth:`generate`
+        will short-circuit to ``None`` without touching the network. Callers use this
+        to distinguish "feature disabled in this deployment" from "transient API
+        outage" when reporting to the user.
+        """
+        return bool(self._api_key)
+
     async def generate(self, text: str) -> list[float] | None:
         """Call the Voyage AI Embeddings API and return the vector, or ``None`` on failure."""
         if not text or not text.strip():
