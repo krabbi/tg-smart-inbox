@@ -1,41 +1,104 @@
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
-from bot.services.note_service import NoteService
+from bot.services.embedding_service import EmbeddingService
+from bot.services.note_service import NoteService, SavedNote
 
 
 def make_item(content: str) -> Item:
     item = MagicMock(spec=Item)
-    item.id = "some-uuid"
+    item.id = uuid.uuid4()
     item.content = content
     item.type = ItemType.note
     return item
 
 
-def make_service(item: Item) -> NoteService:
+def make_service(
+    item: Item,
+    *,
+    embedding: list[float] | None = None,
+    with_embedding_service: bool = False,
+) -> tuple[NoteService, ItemRepository, AsyncSession]:
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
+    session.rollback = AsyncMock()
     repo = MagicMock(spec=ItemRepository)
     repo.create = AsyncMock(return_value=item)
-    return NoteService(session, repo)
+    repo.update_embedding = AsyncMock()
+    embedding_service: EmbeddingService | None = None
+    if with_embedding_service:
+        embedding_service = MagicMock(spec=EmbeddingService)
+        embedding_service.generate_for_item = AsyncMock(return_value=embedding)
+    return (
+        NoteService(session, repo, embedding_service=embedding_service),
+        repo,
+        session,
+    )
 
 
 async def test_save_creates_note_item() -> None:
     item = make_item("interesting fact")
-    svc = make_service(item)
+    svc, repo, _ = make_service(item)
 
     result = await svc.save("interesting fact", user_id=1)
 
-    svc._repo.create.assert_awaited_once_with(  # type: ignore[attr-defined]
-        user_id=1, type=ItemType.note, content="interesting fact"
-    )
+    repo.create.assert_awaited_once_with(user_id=1, type=ItemType.note, content="interesting fact")
     assert result.item is item
 
 
 async def test_save_commits_session() -> None:
-    svc = make_service(make_item("note"))
+    svc, _, session = make_service(make_item("note"))
     await svc.save("note", user_id=1)
-    svc._session.commit.assert_awaited_once()  # type: ignore[attr-defined]
+    session.commit.assert_awaited()
+
+
+async def test_save_returns_saved_note() -> None:
+    svc, _, _ = make_service(make_item("note"))
+    saved = await svc.save("note", user_id=1)
+    assert isinstance(saved, SavedNote)
+
+
+async def test_save_without_embedding_service_returns_not_indexed() -> None:
+    svc, _, _ = make_service(make_item("note"))
+    saved = await svc.save("note", user_id=1)
+    assert saved.indexed is False
+
+
+async def test_save_indexes_item_when_embedding_succeeds() -> None:
+    svc, repo, _ = make_service(
+        make_item("note"), with_embedding_service=True, embedding=[0.1] * 1024
+    )
+    saved = await svc.save("note", user_id=1)
+    assert saved.indexed is True
+    repo.update_embedding.assert_awaited_once()
+
+
+async def test_save_marks_not_indexed_when_embedding_returns_none() -> None:
+    svc, repo, _ = make_service(make_item("note"), with_embedding_service=True, embedding=None)
+    saved = await svc.save("note", user_id=1)
+    assert saved.indexed is False
+    repo.update_embedding.assert_not_awaited()
+
+
+async def test_save_marks_not_indexed_when_embedding_raises() -> None:
+    svc, repo, _ = make_service(make_item("note"), with_embedding_service=True)
+    svc._embedding.generate_for_item = AsyncMock(  # type: ignore[union-attr]
+        side_effect=Exception("Voyage API exploded")
+    )
+    saved = await svc.save("note", user_id=1)
+    assert saved.indexed is False
+    repo.update_embedding.assert_not_awaited()
+
+
+async def test_save_rolls_back_when_embedding_persist_fails() -> None:
+    svc, repo, session = make_service(
+        make_item("note"), with_embedding_service=True, embedding=[0.2] * 1024
+    )
+    repo.update_embedding = AsyncMock(side_effect=Exception("DB error"))
+    saved = await svc.save("note", user_id=1)
+    assert saved.indexed is False
+    session.rollback.assert_awaited()

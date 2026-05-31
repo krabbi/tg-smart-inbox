@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.exceptions import ScrapingError
+from bot.handlers.reindex import item_retry_keyboard
 from bot.handlers.reminders import _ATTEMPTS_KEY, _ITEM_ID_KEY, ReminderStates
 from bot.i18n import t
 from bot.services.link_service import LinkService
@@ -109,7 +110,10 @@ async def handle_link_message(
     keyboard = _link_keyboard(str(saved.item.id), lang)
     await message.answer(t("link_saved", lang, url=url), reply_markup=keyboard)
     if not saved.indexed:
-        await message.answer(t("embedding_unavailable_notice", lang))
+        await message.answer(
+            t("embedding_unavailable_notice", lang),
+            reply_markup=item_retry_keyboard(saved.item.id, lang),
+        )
 
 
 async def _do_summarize(

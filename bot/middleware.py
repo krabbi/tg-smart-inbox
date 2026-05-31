@@ -89,8 +89,12 @@ class DependencyMiddleware(BaseMiddleware):
                 claude,
                 embedding_service=embedding_service,
             )
-            data["task_service"] = TaskService(session, item_repo)
-            data["note_service"] = NoteService(session, item_repo)
+            data["task_service"] = TaskService(
+                session, item_repo, embedding_service=embedding_service
+            )
+            data["note_service"] = NoteService(
+                session, item_repo, embedding_service=embedding_service
+            )
             data["list_service"] = ListService(item_repo=item_repo)
             data["semantic_search_service"] = SemanticSearchService(
                 embedding_service=embedding_service,

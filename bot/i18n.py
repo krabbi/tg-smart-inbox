@@ -312,6 +312,11 @@ _RU: dict[str, str] = {
         " Не удалось: {failed} (умный поиск был недоступен)."
     ),
     "reindex.all.done_truncated_suffix": ("Осталось ещё записей — запусти /reindex повторно."),
+    "reindex.button.try_again": "🔄 Попробовать ещё раз",
+    "reindex.one.success": "✅ Запись проиндексирована, теперь её найдёт умный поиск.",
+    "reindex.one.still_unavailable": "ℹ️ Умный поиск всё ещё недоступен, попробуй позже.",
+    "reindex.one.already_indexed": "Запись уже проиндексирована.",
+    "reindex.one.not_yours": "Это не твоя запись.",
     "commands.reindex.description": "🔄 Переиндексировать записи",
     # --- Bot commands menu (shown by Telegram clients) ----------------------
     "botcmd_start": "Начать работу",
@@ -585,6 +590,11 @@ _EN: dict[str, str] = {
     "reindex.all.done": "✅ Done. Indexed: {succeeded}.",
     "reindex.all.done_with_failures_suffix": (" Failed: {failed} (smart search was unavailable)."),
     "reindex.all.done_truncated_suffix": ("There are more items left — run /reindex again."),
+    "reindex.button.try_again": "🔄 Try again",
+    "reindex.one.success": "✅ Item indexed, smart search will find it now.",
+    "reindex.one.still_unavailable": "ℹ️ Smart search is still unavailable, try later.",
+    "reindex.one.already_indexed": "Item is already indexed.",
+    "reindex.one.not_yours": "This is not your item.",
     "commands.reindex.description": "🔄 Re-index items",
     # --- Bot commands menu (shown by Telegram clients) ----------------------
     "botcmd_start": "Start",

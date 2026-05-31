@@ -10,6 +10,7 @@ from aiogram.types import Message
 from bot.exceptions import TimeParseError
 from bot.handlers.ideas import complexity_label, effort_label
 from bot.handlers.links import handle_link_message
+from bot.handlers.reindex import idea_retry_keyboard, item_retry_keyboard
 from bot.handlers.reminders import (
     _ATTEMPTS_KEY,
     _ITEM_ID_KEY,
@@ -223,7 +224,10 @@ async def handle_text(
             return
         await message.answer(_format_idea_reply(saved, lang))
         if not saved.indexed:
-            await message.answer(t("embedding_unavailable_notice", lang))
+            await message.answer(
+                t("embedding_unavailable_notice", lang),
+                reply_markup=idea_retry_keyboard(saved.idea.id, lang),
+            )
     elif msg_type == MessageType.TASK and task_service is not None:
         try:
             saved = await task_service.save(text, user_id)
@@ -252,16 +256,26 @@ async def handle_text(
                     t("task_saved", lang),
                     reply_markup=task_remind_keyboard(str(saved.item.id), lang),
                 )
+            if not saved.indexed:
+                await message.answer(
+                    t("embedding_unavailable_notice", lang),
+                    reply_markup=item_retry_keyboard(saved.item.id, lang),
+                )
         except Exception:
             logger.exception("Failed to handle task reminder for user %s", user_id)
             await message.answer(t("task_reminder_dialog_failed", lang))
     elif msg_type == MessageType.NOTE and note_service is not None:
         try:
-            await note_service.save(text, user_id)
+            saved_note = await note_service.save(text, user_id)
         except Exception:
             logger.exception("Note save failed for user %s", user_id)
             await message.answer(t("note_save_failed", lang))
             return
         await message.answer(t("note_saved", lang))
+        if not saved_note.indexed:
+            await message.answer(
+                t("embedding_unavailable_notice", lang),
+                reply_markup=item_retry_keyboard(saved_note.item.id, lang),
+            )
     else:
         await message.answer(t("unknown_type", lang, type=msg_type.value))

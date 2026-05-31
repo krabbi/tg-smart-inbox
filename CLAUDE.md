@@ -152,6 +152,7 @@ bot/
     ideas.py            # /ideas command
     search.py           # /search FSM — mode picker (plain/semantic) + pagination
     timezone_setup.py   # three-step FSM: continent → country → city
+    reindex.py          # single-record reindex retry button + callback
     voice.py            # voice transcription + routing
   services/
     classifier.py       # LINK/TASK/NOTE/IDEA/MEDIA classification

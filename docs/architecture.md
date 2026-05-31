@@ -64,6 +64,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 | `search.py` | `/search` command — FSM for picking search mode (plain / semantic) + paginated results |
 | `voice.py` | Voice message transcription and routing |
 | `timezone_setup.py` | Three-step inline FSM for picking a timezone (continent → country → city) |
+| `reindex.py` | Single-record retry button under the embedding-unavailable notice (`🔄 Попробовать ещё раз`); routes `reindex:item:<uuid>` / `reindex:idea:<uuid>` callbacks to `ReindexService` |
 
 ### Services (`bot/services/`)
 
@@ -763,6 +764,28 @@ to distinguish that case from a transient outage.
   from the idea's tags. The helpers live as `_build_item_text` /
   `_build_idea_text` static methods on `ReindexService`.
 
+- Single-record retry from a chat notice goes through
+  `bot/handlers/reindex.py`. When `LinkService` / `IdeaService` / `TaskService` /
+  `NoteService` return `indexed=False`, the surrounding handler appends a
+  `🔄 Попробовать ещё раз` inline button to the `embedding_unavailable_notice`
+  message. The callback payload is `reindex:item:<uuid>` for Items and
+  `reindex:idea:<uuid>` for Ideas — both well within Telegram's 64-byte limit.
+  `handle_reindex_one` parses the payload, dispatches to
+  `ReindexService.reindex_item` or `reindex_idea` (which scope by `user_id` via
+  `*Repository.get_by_id_for_user`), and translates the `ReindexResult` into a
+  user-visible outcome:
+
+  | `ReindexResult` | UI effect |
+  |---|---|
+  | `SUCCESS` | Edits the notice to `reindex.one.success` and drops the keyboard. |
+  | `ALREADY_INDEXED` | Alert `reindex.one.already_indexed` plus the same success edit. |
+  | `SERVICE_UNAVAILABLE` | Edits the notice to `reindex.one.still_unavailable` and re-attaches the same `🔄 Попробовать ещё раз` button. |
+  | `NOT_FOUND` | Alert `reindex.one.not_yours` — the chat message is **not** edited (protects against forged callback IDs). |
+
+  When `edit_message_text` fails (Telegram refuses edits older than 48 h or with
+  identical content), the handler falls back to `callback.message.answer()` so
+  the user always sees the result.
+
 ---
 
 ## Configuration
@@ -947,6 +970,7 @@ tg-smart-inbox/
 │   │   ├── ideas.py          # /ideas command
 │   │   ├── search.py         # /search FSM — mode picker (plain/semantic) + pagination
 │   │   ├── timezone_setup.py # Three-step FSM for picking a timezone
+│   │   ├── reindex.py        # Single-record reindex retry button + callback
 │   │   └── voice.py          # Voice message handling
 │   ├── services/
 │   │   ├── classifier.py     # Message type classification
