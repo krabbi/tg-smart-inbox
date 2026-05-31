@@ -165,6 +165,7 @@ bot/
     note_service.py
     list_service.py     # paginated listing + full-text search
     semantic_search_service.py # cosine-similarity search over Item and Idea embeddings
+    reindex_service.py  # per-user single/bulk regeneration of missing embeddings
     media_service.py    # photo/file processing
     drive_service.py    # Google Drive upload
     scraper.py          # HTTP page fetcher

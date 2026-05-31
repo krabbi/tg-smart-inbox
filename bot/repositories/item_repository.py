@@ -78,6 +78,25 @@ class ItemRepository:
         )
         return list(result.scalars().all())
 
+    async def list_without_embedding(self, user_id: int, limit: int) -> list[Item]:
+        """Return one user's Items without a stored embedding, oldest first, capped at limit."""
+        result = await self._session.execute(
+            select(Item)
+            .where(Item.user_id == user_id, Item.embedding.is_(None))
+            .order_by(Item.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_without_embedding(self, user_id: int) -> int:
+        """Return how many of this user's Items currently have no stored embedding."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Item)
+            .where(Item.user_id == user_id, Item.embedding.is_(None))
+        )
+        return result.scalar_one()
+
     async def get_by_user(self, user_id: int, *, limit: int = 10) -> list[Item]:
         """Return the most recent Items for a user, newest first."""
         result = await self._session.execute(

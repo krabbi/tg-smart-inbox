@@ -80,6 +80,44 @@ class IdeaRepository:
         )
         return list(result.all())
 
+    async def list_without_embedding(self, user_id: int, limit: int) -> list[tuple[Item, Idea]]:
+        """Return one user's Ideas without an embedding as (Item, Idea) pairs, oldest first."""
+        result = await self._session.execute(
+            select(Item, Idea)
+            .join(Idea, Idea.item_id == Item.id)
+            .where(
+                Item.user_id == user_id,
+                Item.type == ItemType.idea,
+                Idea.embedding.is_(None),
+            )
+            .order_by(Item.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.all())
+
+    async def count_without_embedding(self, user_id: int) -> int:
+        """Return how many of this user's Ideas currently have no stored embedding."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Idea)
+            .join(Item, Idea.item_id == Item.id)
+            .where(
+                Item.user_id == user_id,
+                Item.type == ItemType.idea,
+                Idea.embedding.is_(None),
+            )
+        )
+        return result.scalar_one()
+
+    async def get_by_id_for_user(self, idea_id: uuid.UUID, user_id: int) -> Idea | None:
+        """Return the Idea with this id only if its parent Item belongs to user_id."""
+        result = await self._session.execute(
+            select(Idea)
+            .join(Item, Idea.item_id == Item.id)
+            .where(Idea.id == idea_id, Item.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def search_by_embedding(
         self, embedding: list[float], user_id: int, *, limit: int = 20
     ) -> list[tuple[Item, Idea, float]]:
