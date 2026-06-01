@@ -50,7 +50,7 @@ Follow the documentation update rules table in `CLAUDE.md`.
 ### 6. Create the PR
 - Branch name: `feat/<slug>-<issue-number>` or `fix/<slug>-<issue-number>`
 - PR description: what changed and why, referencing the issue with `closes #N`
-- Run `make format && make lint && make coverage` — all must pass before pushing
+- Run `make format && make lint && pytest --cov=bot --cov-report=term-missing -q 2>&1 | tail -60` — all must pass before pushing
 
 ### 7. Drive the PR to merge
 
