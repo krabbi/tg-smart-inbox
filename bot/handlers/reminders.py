@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -53,6 +54,64 @@ def task_remind_keyboard(item_id: str, lang: str) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def build_snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
+    """Build the 4-button snooze/acknowledge keyboard for an active reminder notification."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_1h", lang),
+                    callback_data=f"remind_snooze:1h:{reminder_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_24h", lang),
+                    callback_data=f"remind_snooze:24h:{reminder_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_tomorrow", lang),
+                    callback_data=f"remind_snooze:tomorrow:{reminder_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("reminder_btn_ack", lang),
+                    callback_data=f"remind_ack:{reminder_id}",
+                ),
+            ]
+        ]
+    )
+
+
+# Keep the old name as an alias so scheduler.py and other callers can import it.
+_snooze_keyboard = build_snooze_keyboard
+
+
+def _next_day_same_time(remind_at: datetime, user_tz: str) -> datetime:
+    """Return a datetime exactly one calendar day after ``remind_at`` at the same wall-clock time.
+
+    The calculation is DST-safe: we localise ``remind_at`` to ``user_tz``, add one day to
+    the date component while preserving the hour/minute, then convert back to UTC.
+    Falls back to a simple 24-hour offset if the timezone string is invalid.
+    """
+    try:
+        tz = ZoneInfo(user_tz)
+    except (ZoneInfoNotFoundError, KeyError):
+        # Unknown timezone — fall back to a plain 24h offset.
+        return remind_at + timedelta(days=1)
+
+    # Convert to local time.
+    local = remind_at.astimezone(tz)
+    # Move one calendar day forward keeping the same local hour/minute/second.
+    next_local = local.replace(day=local.day) + timedelta(days=1)
+    # Re-express with the same wall-clock time; fold=0 selects the first occurrence
+    # on ambiguous DST transitions (i.e. "the earlier" of the two possible instants).
+    next_local = local.replace(
+        year=next_local.year,
+        month=next_local.month,
+        day=next_local.day,
+        fold=0,
+    )
+    return next_local.astimezone(UTC)
 
 
 @router.callback_query(F.data.startswith("task_remind:"))
@@ -153,7 +212,7 @@ async def cb_remind_snooze(
     user_settings_service: UserSettingsService | None = None,
     lang: str = "en",
 ) -> None:
-    """Snooze a reminder by 1 hour or 1 day."""
+    """Snooze a reminder by 1 hour, 24 hours, or until tomorrow at the same time."""
     await callback.answer()
     if callback.message is None or callback.from_user is None:
         return
@@ -164,20 +223,33 @@ async def cb_remind_snooze(
 
     _, period, reminder_id_str = parts
 
-    if period == "1h":
-        delta = timedelta(hours=1)
-        label = t("reminder_snooze_1h_label", lang)
-    else:
-        delta = timedelta(days=1)
-        label = t("reminder_snooze_1d_label", lang)
-
     if reminder_service is None:
         await callback.message.answer(t("reminder_service_unavailable", lang))
         return
 
+    user_tz = "UTC"
+    if user_settings_service is not None:
+        user_tz = await user_settings_service.get_timezone(callback.from_user.id)
+
     try:
         reminder_id = uuid.UUID(reminder_id_str)
-        remind_at = datetime.now(UTC) + delta
+
+        if period == "tomorrow":
+            # Read the current remind_at from the DB so Tomorrow uses the last
+            # snoozed time, not the moment the button is pressed.
+            existing = await reminder_service.get_by_id_for_user(reminder_id, callback.from_user.id)
+            if existing is None:
+                await callback.message.edit_reply_markup(reply_markup=None)
+                await callback.message.answer(t("reminder_not_found_or_inactive", lang))
+                return
+            remind_at = _next_day_same_time(existing.remind_at, user_tz)
+            is_tomorrow = True
+        else:
+            # Both "24h" and legacy "1d" map to 24 hours from now.
+            delta = timedelta(hours=1) if period == "1h" else timedelta(hours=24)
+            remind_at = datetime.now(UTC) + delta
+            is_tomorrow = False
+
         ok = await reminder_service.snooze(
             reminder_id=reminder_id,
             user_id=callback.from_user.id,
@@ -190,13 +262,18 @@ async def cb_remind_snooze(
 
     await callback.message.edit_reply_markup(reply_markup=None)
     if ok:
-        user_tz = "UTC"
-        if user_settings_service is not None:
-            user_tz = await user_settings_service.get_timezone(callback.from_user.id)
         formatted = format_remind_at(remind_at, user_tz)
-        await callback.message.answer(
-            t("reminder_snoozed", lang, period=label, formatted=formatted)
-        )
+        if is_tomorrow:
+            await callback.message.answer(t("reminder_snoozed_tomorrow", lang, formatted=formatted))
+        else:
+            label = (
+                t("reminder_snooze_1h_label", lang)
+                if period == "1h"
+                else t("reminder_snooze_24h_label", lang)
+            )
+            await callback.message.answer(
+                t("reminder_snoozed", lang, period=label, formatted=formatted)
+            )
     else:
         await callback.message.answer(t("reminder_not_found_or_inactive", lang))
 
@@ -234,28 +311,6 @@ async def cb_remind_ack(
         existing_text + f"\n\n{t('reminder_ack_done', lang)}",
         parse_mode="HTML",
         reply_markup=None,
-    )
-
-
-def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
-    """Build the snooze/acknowledge keyboard for an active reminder notification."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=t("reminder_btn_snooze_1h", lang),
-                    callback_data=f"remind_snooze:1h:{reminder_id}",
-                ),
-                InlineKeyboardButton(
-                    text=t("reminder_btn_snooze_1d", lang),
-                    callback_data=f"remind_snooze:1d:{reminder_id}",
-                ),
-                InlineKeyboardButton(
-                    text=t("reminder_btn_ack", lang),
-                    callback_data=f"remind_ack:{reminder_id}",
-                ),
-            ]
-        ]
     )
 
 

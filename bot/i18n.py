@@ -92,8 +92,9 @@ _RU: dict[str, str] = {
     "help_reminders": (
         "<b>Напоминания</b>\n"
         "Когда напоминание сработает, появятся кнопки:\n"
-        "⏰ +1ч — отложить на час\n"
-        "🌙 +1д — отложить на день\n"
+        "⏰ +1ч — отложить на 1 час\n"
+        "⏰ +24ч — отложить на 24 часа\n"
+        "🌙 Завтра — напомнить завтра в то же время\n"
         "✅ Принято — отметить выполненным\n"
         "Если ни одна кнопка не нажата в течение 24 часов, бот автоматически "
         "пометит задачу как выполненную. Её всегда можно вернуть кнопкой "
@@ -161,12 +162,17 @@ _RU: dict[str, str] = {
     "reminder_service_unavailable": "Сервис напоминаний временно недоступен.",
     "reminder_btn_snooze_1h": "⏰ +1ч",
     "reminder_btn_snooze_1d": "🌙 +1д",
+    "reminder_btn_snooze_24h": "⏰ +24ч",
+    "reminder_btn_snooze_tomorrow": "🌙 Завтра",
     "reminder_btn_ack": "✅ Принято",
     "reminder_btn_cancel": "❌ Отменить",
     "reminder_btn_reactivate": "🔄 Реактивировать",
     "reminder_snooze_1h_label": "1 час",
     "reminder_snooze_1d_label": "1 день",
+    "reminder_snooze_24h_label": "24 часа",
+    "reminder_snooze_tomorrow_label": "завтра",
     "reminder_snoozed": "⏰ Напомню через {period} ({formatted}).",
+    "reminder_snoozed_tomorrow": "🌙 Напомню завтра в {formatted}.",
     "reminder_snooze_failed": "Не удалось отложить напоминание.",
     "reminder_not_found_or_inactive": "Напоминание не найдено или уже неактивно.",
     "reminder_ack_failed": "Не удалось подтвердить напоминание.",
@@ -377,8 +383,9 @@ _EN: dict[str, str] = {
     "help_reminders": (
         "<b>Reminders</b>\n"
         "When a reminder fires, these buttons appear:\n"
-        "⏰ +1h — snooze for an hour\n"
-        "🌙 +1d — snooze for a day\n"
+        "⏰ +1h — snooze for 1 hour\n"
+        "⏰ +24h — snooze for 24 hours\n"
+        "🌙 Tomorrow — remind me tomorrow at the same time\n"
         "✅ Done — mark as acknowledged\n"
         "If no button is pressed within 24 hours, the bot will automatically "
         "mark the task as done. You can always bring it back with the "
@@ -444,12 +451,17 @@ _EN: dict[str, str] = {
     "reminder_service_unavailable": "The reminder service is temporarily unavailable.",
     "reminder_btn_snooze_1h": "⏰ +1h",
     "reminder_btn_snooze_1d": "🌙 +1d",
+    "reminder_btn_snooze_24h": "⏰ +24h",
+    "reminder_btn_snooze_tomorrow": "🌙 Tomorrow",
     "reminder_btn_ack": "✅ Done",
     "reminder_btn_cancel": "❌ Cancel",
     "reminder_btn_reactivate": "🔄 Reactivate",
     "reminder_snooze_1h_label": "1 hour",
     "reminder_snooze_1d_label": "1 day",
+    "reminder_snooze_24h_label": "24 hours",
+    "reminder_snooze_tomorrow_label": "tomorrow",
     "reminder_snoozed": "⏰ I'll remind you in {period} ({formatted}).",
+    "reminder_snoozed_tomorrow": "🌙 I'll remind you tomorrow at {formatted}.",
     "reminder_snooze_failed": "Failed to snooze the reminder.",
     "reminder_not_found_or_inactive": "Reminder not found or already inactive.",
     "reminder_ack_failed": "Failed to acknowledge the reminder.",

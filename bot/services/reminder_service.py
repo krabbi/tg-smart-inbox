@@ -81,6 +81,10 @@ class ReminderService:
         await self._repo.mark_auto_completed(reminder.id)
         await self._session.commit()
 
+    async def get_by_id_for_user(self, reminder_id: uuid.UUID, user_id: int) -> Reminder | None:
+        """Return the reminder if it belongs to user_id, else None."""
+        return await self._repo.get_by_id_for_user(reminder_id, user_id)
+
     async def snooze(self, reminder_id: uuid.UUID, user_id: int, remind_at: datetime) -> bool:
         """Acknowledge original and create a snoozed reminder. Returns False if not owned."""
         reminder = await self._repo.get_by_id_for_user(reminder_id, user_id)

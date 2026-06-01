@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Config
+from bot.handlers.reminders import build_snooze_keyboard
 from bot.i18n import t
 from bot.models.item import Item
 from bot.repositories.idea_repository import IdeaRepository
@@ -26,28 +27,6 @@ _AUTO_ARCHIVE_DELAY = timedelta(hours=24)
 _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
 _REINDEX_THROTTLE_SECONDS = 22.0  # Voyage AI free tier: 3 RPM → ≥20s between requests
-
-
-def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
-    """Build the snooze/acknowledge keyboard for a reminder notification."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=t("reminder_btn_snooze_1h", lang),
-                    callback_data=f"remind_snooze:1h:{reminder_id}",
-                ),
-                InlineKeyboardButton(
-                    text=t("reminder_btn_snooze_1d", lang),
-                    callback_data=f"remind_snooze:1d:{reminder_id}",
-                ),
-                InlineKeyboardButton(
-                    text=t("reminder_btn_ack", lang),
-                    callback_data=f"remind_ack:{reminder_id}",
-                ),
-            ]
-        ]
-    )
 
 
 def _reactivate_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
@@ -92,7 +71,7 @@ async def _send_due_reminders(
                         formatted=formatted,
                         content=format_item_display(item),
                     ),
-                    reply_markup=_snooze_keyboard(str(reminder.id), user_lang),
+                    reply_markup=build_snooze_keyboard(str(reminder.id), user_lang),
                 )
                 await svc.mark_sent_with_auto_archive(reminder, now + _AUTO_ARCHIVE_DELAY)
             except Exception:

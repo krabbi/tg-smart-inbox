@@ -8,6 +8,8 @@ from aiogram.types import CallbackQuery, Message, User
 from bot.exceptions import TimeParseError
 from bot.handlers.reminders import (
     ReminderStates,
+    _next_day_same_time,
+    build_snooze_keyboard,
     cb_remind_ack,
     cb_remind_reactivate,
     cb_remind_snooze,
@@ -380,7 +382,8 @@ async def test_cb_remind_snooze_uses_user_timezone() -> None:
     assert "MSK" in answer_text
 
 
-async def test_cb_remind_snooze_1d_calls_snooze() -> None:
+async def test_cb_remind_snooze_1d_legacy_calls_snooze_with_24h_label() -> None:
+    """Legacy 1d callback still snoozes 24 hours and uses the 24h label."""
     reminder_id = str(uuid.uuid4())
     cb = make_callback_with_user(f"remind_snooze:1d:{reminder_id}", user_id=5)
 
@@ -389,9 +392,29 @@ async def test_cb_remind_snooze_1d_calls_snooze() -> None:
 
     await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
 
-    assert "1 день" in cb.message.answer.call_args[0][0]
+    # Legacy 1d now renders with the 24h label.
+    assert "24 часа" in cb.message.answer.call_args[0][0]
     from datetime import timedelta
 
+    now = datetime.now(UTC)
+    remind_at = svc.snooze.call_args[1]["remind_at"]
+    diff = remind_at - now
+    assert timedelta(hours=23) < diff < timedelta(hours=25)
+
+
+async def test_cb_remind_snooze_24h_calls_snooze() -> None:
+    """New +24h button snoozes exactly 24 hours from now."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:24h:{reminder_id}", user_id=5)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
+
+    from datetime import timedelta
+
+    assert "24 часа" in cb.message.answer.call_args[0][0]
     now = datetime.now(UTC)
     remind_at = svc.snooze.call_args[1]["remind_at"]
     diff = remind_at - now
@@ -587,7 +610,8 @@ async def test_cb_remind_reactivate_resends_and_schedules_auto_archive() -> None
     rows = sent_kwargs["reply_markup"].inline_keyboard
     callbacks = [b.callback_data for row in rows for b in row]
     assert any(c.startswith("remind_snooze:1h:") for c in callbacks)
-    assert any(c.startswith("remind_snooze:1d:") for c in callbacks)
+    assert any(c.startswith("remind_snooze:24h:") for c in callbacks)
+    assert any(c.startswith("remind_snooze:tomorrow:") for c in callbacks)
     assert any(c.startswith("remind_ack:") for c in callbacks)
     # The push body contains the item content.
     assert "купить молоко" in cb.message.answer.call_args[0][0]
@@ -744,3 +768,235 @@ async def test_cb_remind_reactivate_tolerates_edit_failure() -> None:
 
     cb.message.answer.assert_awaited_once()
     svc.mark_sent_with_auto_archive.assert_awaited_once()
+
+
+# ── build_snooze_keyboard ───────────────────────────────────────────────────
+
+
+def test_build_snooze_keyboard_has_four_buttons() -> None:
+    """Active reminder keyboard contains exactly 4 buttons in one row."""
+    reminder_id = str(uuid.uuid4())
+    kb = build_snooze_keyboard(reminder_id, lang="ru")
+    assert len(kb.inline_keyboard) == 1
+    row = kb.inline_keyboard[0]
+    assert len(row) == 4
+
+
+def test_build_snooze_keyboard_button_callbacks() -> None:
+    """Keyboard buttons have the correct callback_data prefixes."""
+    reminder_id = str(uuid.uuid4())
+    kb = build_snooze_keyboard(reminder_id, lang="ru")
+    row = kb.inline_keyboard[0]
+    data = [b.callback_data for b in row]
+    assert data[0] == f"remind_snooze:1h:{reminder_id}"
+    assert data[1] == f"remind_snooze:24h:{reminder_id}"
+    assert data[2] == f"remind_snooze:tomorrow:{reminder_id}"
+    assert data[3] == f"remind_ack:{reminder_id}"
+
+
+def test_build_snooze_keyboard_button_labels_ru() -> None:
+    """Russian keyboard shows correct emoji/text labels."""
+    kb = build_snooze_keyboard("id", lang="ru")
+    labels = [b.text for b in kb.inline_keyboard[0]]
+    assert labels[0] == "⏰ +1ч"
+    assert labels[1] == "⏰ +24ч"
+    assert labels[2] == "🌙 Завтра"
+    assert labels[3] == "✅ Принято"
+
+
+def test_build_snooze_keyboard_button_labels_en() -> None:
+    """English keyboard shows correct emoji/text labels."""
+    kb = build_snooze_keyboard("id", lang="en")
+    labels = [b.text for b in kb.inline_keyboard[0]]
+    assert labels[0] == "⏰ +1h"
+    assert labels[1] == "⏰ +24h"
+    assert labels[2] == "🌙 Tomorrow"
+    assert labels[3] == "✅ Done"
+
+
+# ── _next_day_same_time ─────────────────────────────────────────────────────
+
+
+def test_next_day_same_time_simple() -> None:
+    """Basic case: 10:00 today → 10:00 tomorrow in UTC."""
+
+    remind_at = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "UTC")
+    expected = datetime(2026, 6, 2, 10, 0, 0, tzinfo=UTC)
+    assert result == expected
+
+
+def test_next_day_same_time_midnight_rollover() -> None:
+    """Pressing Tomorrow late at night (23:30) schedules the next calendar day at 23:30."""
+
+    # 23:30 MSK = 20:30 UTC
+    remind_at = datetime(2026, 6, 1, 20, 30, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "Europe/Moscow")
+    # Next day 23:30 MSK = 20:30 UTC on 2026-06-02
+    expected = datetime(2026, 6, 2, 20, 30, 0, tzinfo=UTC)
+    assert result == expected
+
+
+def test_next_day_same_time_uses_current_remind_at_not_now() -> None:
+    """Tomorrow is based on remind_at (post-snooze), not the current wall-clock time."""
+
+    # remind_at is 11:15 UTC (e.g. after a +1h snooze from 10:15)
+    remind_at = datetime(2026, 6, 1, 11, 15, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "UTC")
+    expected = datetime(2026, 6, 2, 11, 15, 0, tzinfo=UTC)
+    assert result == expected
+
+
+def test_next_day_same_time_dst_spring_forward() -> None:
+    """DST spring-forward: if the target wall-clock time doesn't exist, fold=0 picks the post-gap time."""
+    # US/Eastern spring forward on 2026-03-08 at 02:00 → 03:00.
+    # remind_at = 2026-03-07 07:30 UTC = 02:30 EST (UTC-5) — valid time before the gap.
+    # Tomorrow at 02:30 ET does not exist (the clock jumps to 03:00), so fold=0 gives the
+    # equivalent of 03:30 EDT (UTC-4), which is 07:30 UTC.
+    remind_at = datetime(2026, 3, 7, 7, 30, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "America/New_York")
+    # The non-existing 02:30 on 2026-03-08 is interpreted as 03:30 EDT = 07:30 UTC.
+    assert result.hour == 7
+    assert result.minute == 30
+    # The date should be 2026-03-08
+    from zoneinfo import ZoneInfo
+
+    local = result.astimezone(ZoneInfo("America/New_York"))
+    assert local.month == 3
+    assert local.day == 8
+
+
+def test_next_day_same_time_dst_fall_back() -> None:
+    """DST fall-back: when the target wall-clock time is ambiguous, fold=0 picks the first occurrence."""
+    # US/Eastern falls back on 2026-11-01 at 02:00 → 01:00.
+    # remind_at = 2026-10-31 05:30 UTC = 01:30 EDT (UTC-4).
+    # Tomorrow 01:30 ET is ambiguous (it exists twice on 2026-11-01): first at 05:30 UTC (EDT),
+    # second at 06:30 UTC (EST). fold=0 picks the first occurrence → 05:30 UTC.
+    remind_at = datetime(2026, 10, 31, 5, 30, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "America/New_York")
+    assert result.hour == 5
+    assert result.minute == 30
+    from zoneinfo import ZoneInfo
+
+    local = result.astimezone(ZoneInfo("America/New_York"))
+    assert local.month == 11
+    assert local.day == 1
+
+
+def test_next_day_same_time_invalid_tz_falls_back_to_24h() -> None:
+    """Unknown timezone falls back to plain +24h offset."""
+    remind_at = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "Not/A/Real/Timezone")
+    from datetime import timedelta
+
+    assert result == remind_at + timedelta(days=1)
+
+
+def test_next_day_same_time_after_multiple_snoozes() -> None:
+    """Tomorrow always uses the current remind_at, regardless of snooze history."""
+    # Original was 10:00, user snoozed +1h twice → remind_at is now 12:00
+    remind_at = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+    result = _next_day_same_time(remind_at, "UTC")
+
+    expected = datetime(2026, 6, 2, 12, 0, 0, tzinfo=UTC)
+    assert result == expected
+
+
+# ── cb_remind_snooze: tomorrow button ───────────────────────────────────────
+
+
+async def test_cb_remind_snooze_tomorrow_uses_remind_at_not_now() -> None:
+    """Tomorrow snooze reads remind_at from the DB record, not datetime.now()."""
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:tomorrow:{reminder_id}", user_id=5)
+
+    # remind_at was set to 10:00 UTC
+    existing = MagicMock(spec=Reminder)
+    existing.remind_at = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.get_by_id_for_user = AsyncMock(return_value=existing)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
+
+    svc.get_by_id_for_user.assert_awaited_once_with(uuid.UUID(reminder_id), 5)
+    call_kwargs = svc.snooze.call_args[1]
+    # Tomorrow at same time: 2026-06-02 10:00 UTC
+
+    expected = datetime(2026, 6, 2, 10, 0, 0, tzinfo=UTC)
+    assert call_kwargs["remind_at"] == expected
+    # Confirmation uses the "tomorrow" message
+    assert "🌙" in cb.message.answer.call_args[0][0]
+
+
+async def test_cb_remind_snooze_tomorrow_not_found_sends_not_found() -> None:
+    """If reminder is not owned, Tomorrow sends 'not found' message."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:tomorrow:{reminder_id}", user_id=5)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.get_by_id_for_user = AsyncMock(return_value=None)
+    svc.snooze = AsyncMock()
+
+    await cb_remind_snooze(cb, reminder_service=svc, lang="ru")
+
+    svc.snooze.assert_not_awaited()
+    cb.message.answer.assert_awaited_once()
+    assert "не найдено" in cb.message.answer.call_args[0][0].lower()
+
+
+async def test_cb_remind_snooze_tomorrow_with_user_tz() -> None:
+    """Tomorrow calculation respects user's timezone from UserSettingsService."""
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:tomorrow:{reminder_id}", user_id=42)
+
+    # 07:00 UTC = 10:00 MSK (UTC+3)
+    existing = MagicMock(spec=Reminder)
+    existing.remind_at = datetime(2026, 6, 1, 7, 0, 0, tzinfo=UTC)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.get_by_id_for_user = AsyncMock(return_value=existing)
+    svc.snooze = AsyncMock(return_value=True)
+
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await cb_remind_snooze(cb, reminder_service=svc, user_settings_service=settings_svc, lang="ru")
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    call_kwargs = svc.snooze.call_args[1]
+    # Next day at 10:00 MSK = 07:00 UTC
+
+    expected = datetime(2026, 6, 2, 7, 0, 0, tzinfo=UTC)
+    assert call_kwargs["remind_at"] == expected
+    # Confirmation shows "MSK" in the formatted time
+    assert "MSK" in cb.message.answer.call_args[0][0]
+
+
+async def test_cb_remind_snooze_tomorrow_after_reactivation_uses_reactivated_remind_at() -> None:
+    """After reactivation, Tomorrow uses the reactivated remind_at, not the original."""
+    from bot.models.reminder import Reminder
+
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze:tomorrow:{reminder_id}", user_id=5)
+
+    # After reactivation, remind_at was set to "now" by cb_remind_reactivate
+    reactivated_remind_at = datetime(2026, 6, 3, 14, 0, 0, tzinfo=UTC)
+    existing = MagicMock(spec=Reminder)
+    existing.remind_at = reactivated_remind_at
+
+    svc = MagicMock(spec=ReminderService)
+    svc.get_by_id_for_user = AsyncMock(return_value=existing)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await cb_remind_snooze(cb, reminder_service=svc, lang="en")
+
+    call_kwargs = svc.snooze.call_args[1]
+
+    expected = datetime(2026, 6, 4, 14, 0, 0, tzinfo=UTC)
+    assert call_kwargs["remind_at"] == expected
