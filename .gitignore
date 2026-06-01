@@ -212,3 +212,6 @@ data/
 # Google API credentials
 credentials.json
 token.json
+
+#agentic
+.omx

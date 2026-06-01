@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: Product manager agent for tg-smart-inbox. Use when you need to: (1) clarify feature requirements with the user before implementation, (2) break a feature into GitHub issues and subtasks, (3) answer product questions from other agents. The agent interviews the user, explores edge cases, and creates detailed GitHub issues. IMPORTANT: invoke this agent before starting any non-trivial feature work to align on requirements.
+description: "Product manager agent for tg-smart-inbox. Use when you need to: (1) clarify feature requirements with the user before implementation, (2) break a feature into GitHub issues and subtasks, (3) answer product questions from other agents. The agent interviews the user, explores edge cases, and creates detailed GitHub issues. IMPORTANT: invoke this agent before starting any non-trivial feature work to align on requirements."
 tools: Bash, Read, WebFetch
 model: opus
 ---
