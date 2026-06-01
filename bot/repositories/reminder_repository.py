@@ -119,3 +119,11 @@ class ReminderRepository:
         reminder.remind_at = remind_at
         await self._session.flush()
         return reminder
+
+    async def reset_auto_archive_at(self, reminder_id: uuid.UUID) -> None:
+        """Clear auto_archive_at on a reminder to prevent auto-archiving; flush only."""
+        result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
+        reminder = result.scalar_one_or_none()
+        if reminder:
+            reminder.auto_archive_at = None
+            await self._session.flush()

@@ -57,7 +57,7 @@ Handlers **never** contain business logic, direct DB access, or external API cal
 |------|---------------|
 | `messages.py` | Entry point for all incoming text, photo, and document messages |
 | `links.py` | Callback buttons for saved links (summary, save, remind) |
-| `reminders.py` | Reminder dialog (time input FSM), snooze/acknowledge callbacks |
+| `reminders.py` | Reminder dialog (`ReminderStates.waiting_for_time` FSM), snooze/acknowledge callbacks, custom snooze dialog (`CustomSnoozeStates.waiting_for_custom_time` FSM entered via the «⏰ Other...» button) |
 | `commands.py` | Bot commands: `/start`, `/list`, `/reminders`, `/ideas`, `/reindex`, `/help`, `/cancel` |
 | `config.py` | `/config` command — extensible settings menu; currently dispatches to the timezone FSM |
 | `ideas.py` | `/ideas` command — display saved ideas |
@@ -77,7 +77,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error; exposes `is_configured` so callers can distinguish "Voyage AI key absent" from "transient outage" |
 | `link_service.py` | Save links to DB (with cached page text and extracted page title), reuse the cache when generating Claude summaries |
-| `reminder_service.py` | Create, cancel, snooze, acknowledge, mark auto-completed, and reactivate reminders |
+| `reminder_service.py` | Create, cancel, snooze, acknowledge, mark auto-completed, reactivate reminders, and reset `auto_archive_at` (used when the custom snooze FSM is entered) |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
 | `task_service.py` | Save tasks to DB |

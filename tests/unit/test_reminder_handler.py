@@ -7,13 +7,16 @@ from aiogram.types import CallbackQuery, Message, User
 
 from bot.exceptions import TimeParseError
 from bot.handlers.reminders import (
+    CustomSnoozeStates,
     ReminderStates,
     _next_day_same_time,
     build_snooze_keyboard,
     cb_remind_ack,
     cb_remind_reactivate,
     cb_remind_snooze,
+    cb_remind_snooze_other,
     cb_task_remind,
+    receive_custom_snooze_time,
     receive_reminder_time,
     task_remind_keyboard,
 )
@@ -773,11 +776,10 @@ async def test_cb_remind_reactivate_tolerates_edit_failure() -> None:
 # ── build_snooze_keyboard ───────────────────────────────────────────────────
 
 
-def test_build_snooze_keyboard_has_four_buttons() -> None:
-    """Active reminder keyboard contains exactly 4 buttons in one row."""
+def test_build_snooze_keyboard_has_four_buttons_in_first_row() -> None:
+    """Active reminder keyboard contains exactly 4 buttons in the first row."""
     reminder_id = str(uuid.uuid4())
     kb = build_snooze_keyboard(reminder_id, lang="ru")
-    assert len(kb.inline_keyboard) == 1
     row = kb.inline_keyboard[0]
     assert len(row) == 4
 
@@ -1000,3 +1002,289 @@ async def test_cb_remind_snooze_tomorrow_after_reactivation_uses_reactivated_rem
 
     expected = datetime(2026, 6, 4, 14, 0, 0, tzinfo=UTC)
     assert call_kwargs["remind_at"] == expected
+
+
+# ── build_snooze_keyboard: new Other... button ──────────────────────────────
+
+
+def test_build_snooze_keyboard_has_five_buttons_in_two_rows() -> None:
+    """Active reminder keyboard has 4 buttons in row 1, 1 button in row 2."""
+    reminder_id = str(uuid.uuid4())
+    kb = build_snooze_keyboard(reminder_id, lang="ru")
+    assert len(kb.inline_keyboard) == 2
+    assert len(kb.inline_keyboard[0]) == 4
+    assert len(kb.inline_keyboard[1]) == 1
+
+
+def test_build_snooze_keyboard_other_button_callback() -> None:
+    """Other... button has the correct callback_data."""
+    reminder_id = str(uuid.uuid4())
+    kb = build_snooze_keyboard(reminder_id, lang="ru")
+    other_btn = kb.inline_keyboard[1][0]
+    assert other_btn.callback_data == f"remind_snooze_other:{reminder_id}"
+
+
+def test_build_snooze_keyboard_other_button_label_ru() -> None:
+    """Russian Other... button uses the correct label."""
+    kb = build_snooze_keyboard("id", lang="ru")
+    assert kb.inline_keyboard[1][0].text == "⏰ Другое..."
+
+
+def test_build_snooze_keyboard_other_button_label_en() -> None:
+    """English Other... button uses the correct label."""
+    kb = build_snooze_keyboard("id", lang="en")
+    assert kb.inline_keyboard[1][0].text == "⏰ Other..."
+
+
+# ── cb_remind_snooze_other ──────────────────────────────────────────────────
+
+
+async def test_cb_remind_snooze_other_enters_fsm_and_resets_auto_archive() -> None:
+    """Pressing Other... enters FSM and clears auto_archive_at on the reminder."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze_other:{reminder_id}", user_id=7)
+    state = make_state()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reset_auto_archive_at = AsyncMock(return_value=True)
+
+    await cb_remind_snooze_other(cb, state, reminder_service=svc, lang="ru")
+
+    svc.reset_auto_archive_at.assert_awaited_once_with(uuid.UUID(reminder_id), 7)
+    state.set_state.assert_awaited_once_with(CustomSnoozeStates.waiting_for_custom_time)
+    state.update_data.assert_awaited_once()
+    stored = state.update_data.call_args[0][0]
+    assert stored["custom_snooze_reminder_id"] == reminder_id
+    assert stored["reminder_attempts"] == 0
+    cb.message.answer.assert_awaited_once()
+
+
+async def test_cb_remind_snooze_other_no_service_replies_unavailable() -> None:
+    """When reminder_service is None, reply with unavailable message."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze_other:{reminder_id}")
+    state = make_state()
+
+    await cb_remind_snooze_other(cb, state, reminder_service=None, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "недоступен" in cb.message.answer.call_args[0][0].lower()
+    state.set_state.assert_not_awaited()
+
+
+async def test_cb_remind_snooze_other_no_message_returns_early() -> None:
+    """When callback.message is None, return without doing anything."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze_other:{reminder_id}")
+    cb.message = None
+    state = make_state()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reset_auto_archive_at = AsyncMock()
+
+    await cb_remind_snooze_other(cb, state, reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.reset_auto_archive_at.assert_not_awaited()
+    state.set_state.assert_not_awaited()
+
+
+async def test_cb_remind_snooze_other_no_from_user_returns_early() -> None:
+    """When callback.from_user is None, return without doing anything."""
+    reminder_id = str(uuid.uuid4())
+    cb = make_callback_with_user(f"remind_snooze_other:{reminder_id}")
+    cb.from_user = None
+    state = make_state()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reset_auto_archive_at = AsyncMock()
+
+    await cb_remind_snooze_other(cb, state, reminder_service=svc)
+
+    cb.answer.assert_awaited_once()
+    svc.reset_auto_archive_at.assert_not_awaited()
+    state.set_state.assert_not_awaited()
+
+
+async def test_cb_remind_snooze_other_invalid_uuid_replies_not_found() -> None:
+    """An invalid UUID in callback data shows the 'not found' message."""
+    cb = make_callback_with_user("remind_snooze_other:not-a-uuid")
+    state = make_state()
+
+    svc = MagicMock(spec=ReminderService)
+    svc.reset_auto_archive_at = AsyncMock()
+
+    await cb_remind_snooze_other(cb, state, reminder_service=svc, lang="ru")
+
+    cb.message.answer.assert_awaited_once()
+    assert "не найдено" in cb.message.answer.call_args[0][0].lower()
+    state.set_state.assert_not_awaited()
+
+
+# ── receive_custom_snooze_time ──────────────────────────────────────────────
+
+
+async def test_receive_custom_snooze_time_success() -> None:
+    """Successful parse snoozes the reminder and sends confirmation."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("завтра в 10", user_id=1)
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 0})
+
+    remind_at = datetime(2026, 6, 2, 7, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    await receive_custom_snooze_time(msg, state, time_parser=time_parser, reminder_service=svc)
+
+    svc.snooze.assert_awaited_once()
+    call_kwargs = svc.snooze.call_args[1]
+    assert call_kwargs["reminder_id"] == uuid.UUID(reminder_id)
+    assert call_kwargs["user_id"] == 1
+    assert call_kwargs["remind_at"] == remind_at
+    state.clear.assert_awaited_once()
+    msg.answer.assert_awaited_once()
+    assert "⏰" in msg.answer.call_args[0][0]
+
+
+async def test_receive_custom_snooze_time_uses_user_timezone() -> None:
+    """User's timezone is used for parsing and formatting."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("завтра в 10", user_id=42)
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 0})
+
+    remind_at = datetime(2026, 6, 2, 7, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=True)
+
+    settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
+
+    await receive_custom_snooze_time(
+        msg,
+        state,
+        time_parser=time_parser,
+        reminder_service=svc,
+        user_settings_service=settings_svc,
+    )
+
+    settings_svc.get_timezone.assert_awaited_once_with(42)
+    assert time_parser.parse.call_args.kwargs["user_tz"] == "Europe/Moscow"
+    answer_text = msg.answer.call_args[0][0]
+    assert "MSK" in answer_text
+
+
+async def test_receive_custom_snooze_time_parse_error_increments_attempts() -> None:
+    """Failed parse increments attempts and stays in FSM."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("абракадабра")
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 0})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(side_effect=TimeParseError("unparseable"))
+
+    svc = MagicMock(spec=ReminderService)
+
+    await receive_custom_snooze_time(msg, state, time_parser=time_parser, reminder_service=svc)
+
+    state.clear.assert_not_called()
+    state.update_data.assert_awaited_once_with({"reminder_attempts": 1})
+    assert "1/3" in msg.answer.call_args[0][0]
+
+
+async def test_receive_custom_snooze_time_aborts_after_max_attempts() -> None:
+    """After 3 failed attempts, FSM closes with a final message."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("абракадабра")
+    # Already at 2 attempts — this is the 3rd (final)
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 2})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(side_effect=TimeParseError("unparseable"))
+
+    svc = MagicMock(spec=ReminderService)
+
+    await receive_custom_snooze_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
+
+    state.clear.assert_awaited_once()
+    assert "Не удалось" in msg.answer.call_args[0][0]
+    svc.snooze.assert_not_called()
+
+
+async def test_receive_custom_snooze_time_no_services() -> None:
+    """When services are None, clears state and replies unavailable."""
+    msg = make_message("через 3 часа")
+    state = make_state()
+
+    await receive_custom_snooze_time(msg, state, time_parser=None, reminder_service=None)
+
+    msg.answer.assert_awaited_once()
+    state.clear.assert_awaited_once()
+
+
+async def test_receive_custom_snooze_time_snooze_not_owned() -> None:
+    """When snooze returns False (not owned), show not found message."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("через 1 час", user_id=1)
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 0})
+
+    remind_at = datetime(2026, 6, 2, 10, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(return_value=False)
+
+    await receive_custom_snooze_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
+
+    state.clear.assert_awaited_once()
+    msg.answer.assert_awaited_once()
+    assert "не найдено" in msg.answer.call_args[0][0].lower()
+
+
+async def test_receive_custom_snooze_time_snooze_exception() -> None:
+    """When snooze raises an exception, reply with error and clear state."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("через 1 час", user_id=1)
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 0})
+
+    remind_at = datetime(2026, 6, 2, 10, 0, tzinfo=UTC)
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(return_value=remind_at)
+
+    svc = MagicMock(spec=ReminderService)
+    svc.snooze = AsyncMock(side_effect=Exception("DB error"))
+
+    await receive_custom_snooze_time(
+        msg, state, time_parser=time_parser, reminder_service=svc, lang="ru"
+    )
+
+    state.clear.assert_awaited_once()
+    msg.answer.assert_awaited_once()
+    assert "Не удалось" in msg.answer.call_args[0][0]
+
+
+async def test_receive_custom_snooze_time_past_time_error_counts_as_attempt() -> None:
+    """TimeParseError (including past-time) increments the attempt counter."""
+    reminder_id = str(uuid.uuid4())
+    msg = make_message("вчера в 10")
+    state = make_state({"custom_snooze_reminder_id": reminder_id, "reminder_attempts": 1})
+
+    time_parser = MagicMock(spec=TimeParser)
+    time_parser.parse = AsyncMock(side_effect=TimeParseError("time in the past"))
+
+    svc = MagicMock(spec=ReminderService)
+
+    await receive_custom_snooze_time(msg, state, time_parser=time_parser, reminder_service=svc)
+
+    state.clear.assert_not_called()
+    state.update_data.assert_awaited_once_with({"reminder_attempts": 2})

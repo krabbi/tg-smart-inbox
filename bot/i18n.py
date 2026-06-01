@@ -167,6 +167,24 @@ _RU: dict[str, str] = {
     "reminder_btn_ack": "✅ Принято",
     "reminder_btn_cancel": "❌ Отменить",
     "reminder_btn_reactivate": "🔄 Реактивировать",
+    "reminder_btn_snooze_other": "⏰ Другое...",
+    "reminder_custom_snooze_prompt": (
+        "На сколько отложить? (например: через 3 часа, завтра в 15:00)\nДля отмены — /cancel"
+    ),
+    "reminder_custom_snooze_time_in_past": (
+        "Указанное время уже прошло ({attempts}/{max_attempts}). "
+        "Попробуй: «завтра в 10», «через 2 часа», «в пятницу в 15:00»\n"
+        "Для отмены — /cancel"
+    ),
+    "reminder_custom_snooze_parse_retry": (
+        "Не смог понять время ({attempts}/{max_attempts}). "
+        "Попробуй: «завтра в 10», «через 2 часа», «в пятницу в 15:00»\n"
+        "Для отмены — /cancel"
+    ),
+    "reminder_custom_snooze_failed_final": (
+        "Не удалось разобрать время после нескольких попыток. Напоминание не изменено."
+    ),
+    "reminder_custom_snoozed": "⏰ Напомню {formatted}.",
     "reminder_snooze_1h_label": "1 час",
     "reminder_snooze_1d_label": "1 день",
     "reminder_snooze_24h_label": "24 часа",
@@ -456,6 +474,24 @@ _EN: dict[str, str] = {
     "reminder_btn_ack": "✅ Done",
     "reminder_btn_cancel": "❌ Cancel",
     "reminder_btn_reactivate": "🔄 Reactivate",
+    "reminder_btn_snooze_other": "⏰ Other...",
+    "reminder_custom_snooze_prompt": (
+        "How long to snooze? (e.g. in 3 hours, tomorrow at 3 pm)\nTo cancel — /cancel"
+    ),
+    "reminder_custom_snooze_time_in_past": (
+        "The specified time has already passed ({attempts}/{max_attempts}). "
+        'Try: "tomorrow at 10", "in 2 hours", "on Friday at 15:00"\n'
+        "To cancel — /cancel"
+    ),
+    "reminder_custom_snooze_parse_retry": (
+        "Couldn't understand the time ({attempts}/{max_attempts}). "
+        'Try: "tomorrow at 10", "in 2 hours", "on Friday at 15:00"\n'
+        "To cancel — /cancel"
+    ),
+    "reminder_custom_snooze_failed_final": (
+        "Couldn't parse the time after several attempts. The reminder was not changed."
+    ),
+    "reminder_custom_snoozed": "⏰ I'll remind you {formatted}.",
     "reminder_snooze_1h_label": "1 hour",
     "reminder_snooze_1d_label": "1 day",
     "reminder_snooze_24h_label": "24 hours",

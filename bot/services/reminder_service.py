@@ -107,6 +107,15 @@ class ReminderService:
         await self._session.commit()
         return True
 
+    async def reset_auto_archive_at(self, reminder_id: uuid.UUID, user_id: int) -> bool:
+        """Clear auto_archive_at for a user-owned reminder; return False if not owned."""
+        reminder = await self._repo.get_by_id_for_user(reminder_id, user_id)
+        if reminder is None:
+            return False
+        await self._repo.reset_auto_archive_at(reminder_id)
+        await self._session.commit()
+        return True
+
     async def reactivate_for_user(
         self, reminder_id: uuid.UUID, user_id: int, remind_at: datetime
     ) -> ReactivatedReminder | None:
