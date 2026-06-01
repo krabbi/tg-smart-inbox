@@ -217,7 +217,7 @@ async def test_handle_voice_routes_task_without_time_shows_remind_button() -> No
     mock_item = MagicMock()
     mock_item.id = "task-uuid"
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     await handle_voice(
         msg,
@@ -250,7 +250,7 @@ async def test_handle_voice_routes_task_with_time_auto_creates_reminder() -> Non
     mock_item = MagicMock()
     mock_item.id = item_id
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     remind_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
     time_parser = MagicMock(spec=TimeParser)
@@ -294,7 +294,7 @@ async def test_handle_voice_task_with_time_forwards_user_timezone_to_parser() ->
     mock_item = MagicMock()
     mock_item.id = item_id
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     remind_at = datetime(2026, 4, 12, 7, 0, tzinfo=UTC)
     time_parser = MagicMock(spec=TimeParser)
@@ -334,7 +334,7 @@ async def test_handle_voice_routes_note_and_confirms() -> None:
 
     mock_item = MagicMock()
     note_svc = MagicMock(spec=NoteService)
-    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item))
+    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item, indexed=True))
 
     await handle_voice(
         msg,

@@ -122,7 +122,7 @@ async def test_handle_text_task_without_time_shows_remind_button() -> None:
     mock_item = MagicMock()
     mock_item.id = "item-uuid"
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     await handle_text(msg, state=state, classifier=classifier, task_service=task_svc, lang="ru")
 
@@ -146,7 +146,7 @@ async def test_handle_text_task_with_time_auto_creates_reminder() -> None:
     mock_item = MagicMock()
     mock_item.id = uuid.uuid4()
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     remind_at = datetime(2026, 6, 2, 9, 0, tzinfo=UTC)
     time_parser = MagicMock(spec=TimeParser)
@@ -184,7 +184,7 @@ async def test_handle_text_task_with_time_forwards_user_timezone_to_parser() -> 
     mock_item = MagicMock()
     mock_item.id = uuid.uuid4()
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     remind_at = datetime(2026, 6, 2, 7, 0, tzinfo=UTC)
     time_parser = MagicMock(spec=TimeParser)
@@ -221,7 +221,7 @@ async def test_handle_text_task_with_time_parse_error_enters_fsm() -> None:
     mock_item = MagicMock()
     mock_item.id = uuid.uuid4()
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     time_parser = MagicMock(spec=TimeParser)
     time_parser.parse = AsyncMock(side_effect=TimeParseError("unparseable"))
@@ -254,7 +254,7 @@ async def test_handle_text_task_with_time_no_services_shows_button() -> None:
     mock_item = MagicMock()
     mock_item.id = "item-uuid"
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     await handle_text(
         msg,
@@ -281,7 +281,7 @@ async def test_handle_text_task_with_time_reminder_create_error_shows_button() -
     mock_item = MagicMock()
     mock_item.id = uuid.uuid4()
     task_svc = MagicMock(spec=TaskService)
-    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
     remind_at = datetime(2026, 6, 2, 9, 0, tzinfo=UTC)
     time_parser = MagicMock(spec=TimeParser)
@@ -331,7 +331,7 @@ async def test_handle_text_note_saves_and_confirms() -> None:
 
     mock_item = MagicMock()
     note_svc = MagicMock(spec=NoteService)
-    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item))
+    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item, indexed=True))
 
     await handle_text(msg, state=make_state(), classifier=classifier, note_service=note_svc)
     note_svc.save.assert_awaited_once()
@@ -436,6 +436,75 @@ async def test_handle_text_idea_not_indexed_warns_user() -> None:
     replies = [c[0][0] for c in msg.answer.call_args_list]
     assert any("Идея сохранена" in r for r in replies)
     assert any("Умный поиск временно недоступен" in r for r in replies)
+
+
+async def test_handle_text_idea_not_indexed_attaches_retry_keyboard() -> None:
+    """The embedding-unavailable notice for an idea must carry an ``reindex:idea:<uuid>`` button."""
+    msg = make_message("хочу сделать приложение")
+    classifier = make_classifier(MessageType.IDEA)
+
+    idea_svc = MagicMock(spec=IdeaService)
+    mock_idea = MagicMock()
+    mock_idea.id = uuid.uuid4()
+    mock_idea.tags = []
+    mock_idea.complexity = None
+    mock_idea.effort = None
+    saved = MagicMock(spec=SavedIdea)
+    saved.idea = mock_idea
+    saved.indexed = False
+    idea_svc.save_idea = AsyncMock(return_value=saved)
+
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, idea_service=idea_svc, lang="ru"
+    )
+
+    notice_call = msg.answer.call_args_list[-1]
+    keyboard = notice_call[1]["reply_markup"]
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].callback_data == f"reindex:idea:{mock_idea.id}"
+
+
+async def test_handle_text_task_not_indexed_attaches_retry_keyboard() -> None:
+    """A task saved while Voyage is down gets the per-record retry button on the notice."""
+    msg = make_message("купить молоко")
+    classifier = make_classifier(MessageType.TASK)
+    state = make_state()
+
+    mock_item = MagicMock()
+    mock_item.id = uuid.uuid4()
+    task_svc = MagicMock(spec=TaskService)
+    task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=False))
+
+    await handle_text(msg, state=state, classifier=classifier, task_service=task_svc, lang="ru")
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("Умный поиск временно недоступен" in r for r in replies)
+    notice_call = msg.answer.call_args_list[-1]
+    keyboard = notice_call[1]["reply_markup"]
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].callback_data == f"reindex:item:{mock_item.id}"
+
+
+async def test_handle_text_note_not_indexed_attaches_retry_keyboard() -> None:
+    """A note saved without an embedding surfaces the notice + retry button."""
+    msg = make_message("Байкал — самое глубокое озеро")
+    classifier = make_classifier(MessageType.NOTE)
+
+    mock_item = MagicMock()
+    mock_item.id = uuid.uuid4()
+    note_svc = MagicMock(spec=NoteService)
+    note_svc.save = AsyncMock(return_value=SavedNote(item=mock_item, indexed=False))
+
+    await handle_text(
+        msg, state=make_state(), classifier=classifier, note_service=note_svc, lang="ru"
+    )
+
+    replies = [c[0][0] for c in msg.answer.call_args_list]
+    assert any("Умный поиск временно недоступен" in r for r in replies)
+    notice_call = msg.answer.call_args_list[-1]
+    keyboard = notice_call[1]["reply_markup"]
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].callback_data == f"reindex:item:{mock_item.id}"
 
 
 # ── suggestion query detection ────────────────────────────────────────────────
@@ -544,7 +613,7 @@ async def test_multiple_tasks_without_time_no_fsm_blocking() -> None:
         mock_item = MagicMock()
         mock_item.id = f"item-{i}"
         task_svc = MagicMock(spec=TaskService)
-        task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item))
+        task_svc.save = AsyncMock(return_value=SavedTask(item=mock_item, indexed=True))
 
         await handle_text(msg, state=state, classifier=classifier, task_service=task_svc, lang="ru")
         msg.answer.assert_awaited_once()

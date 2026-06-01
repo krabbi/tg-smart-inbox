@@ -9,6 +9,7 @@ from bot.handlers import (
     ideas,
     links,
     messages,
+    reindex,
     reminders,
     search,
     timezone_setup,
@@ -38,6 +39,7 @@ def create_dispatcher(config: Config) -> Dispatcher:
     dp.include_router(links.router)
     dp.include_router(reminders.router)
     dp.include_router(ideas.router)
+    dp.include_router(reindex.router)
     dp.include_router(voice.router)
     dp.include_router(messages.router)
     return dp

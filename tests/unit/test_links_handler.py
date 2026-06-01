@@ -102,6 +102,19 @@ async def test_handle_link_message_warns_when_not_indexed() -> None:
     assert any("Умный поиск временно недоступен" in r for r in replies)
 
 
+async def test_handle_link_message_attaches_retry_keyboard_when_not_indexed() -> None:
+    """The unavailable notice for a link must carry an ``reindex:item:<uuid>`` button."""
+    message = make_message()
+    svc = make_link_service(indexed=False)
+    saved_item_id = svc.save.return_value.item.id  # type: ignore[union-attr]
+    await handle_link_message(message, "https://example.com", svc, "ru")
+
+    notice_call = message.answer.call_args_list[-1]
+    keyboard = notice_call[1].get("reply_markup")
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].callback_data == f"reindex:item:{saved_item_id}"
+
+
 async def test_cb_link_summary_edits_message() -> None:
     item_id = str(uuid.uuid4())
     cb = make_callback(f"link:summary:{item_id}", "🔗 Saved:\nhttps://example.com")
