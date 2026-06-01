@@ -92,16 +92,6 @@ class LinkService:
         return SomeResult(ok=True)
 ```
 
-Services commit after all repository calls succeed:
-
-```python
-async def process(self, url: str, user_id: int) -> LinkResult:
-    """Save link atomically."""
-    item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
-    await self._session.commit()   # service owns the transaction boundary
-    return LinkResult(...)
-```
-
 ---
 
 ## Repository pattern
@@ -186,29 +176,10 @@ async def handle_link(message: Message, link_service: LinkService) -> None: ...
 
 ## Error handling
 
-All domain exceptions live in `bot/exceptions.py`:
+All domain exceptions are defined in `bot/exceptions.py` (see also the Error Handling
+table in `docs/architecture.md`). Services raise them; handlers catch them:
 
 ```python
-class ClassificationError(Exception):
-    """Raised when Claude API fails to classify a message."""
-
-class DriveUploadError(Exception):
-    """Raised when Google Drive upload fails."""
-
-class ScrapingError(Exception):
-    """Raised when a URL cannot be fetched or parsed."""
-
-class TimeParseError(Exception):
-    """Raised when a natural language time expression cannot be parsed."""
-
-class TranscriptionError(Exception):
-    """Raised when Whisper API fails to transcribe audio."""
-```
-
-Services raise them; handlers catch them:
-
-```python
-# Handler catches:
 try:
     result = await classifier.classify(text)
 except ClassificationError:

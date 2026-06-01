@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _AUTO_ARCHIVE_DELAY = timedelta(hours=24)
 _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
-_REINDEX_THROTTLE_SECONDS = 0.3
+_REINDEX_THROTTLE_SECONDS = 22.0  # Voyage AI free tier: 3 RPM → ≥20s between requests
 
 
 def _snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
