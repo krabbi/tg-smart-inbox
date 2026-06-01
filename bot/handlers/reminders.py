@@ -36,10 +36,16 @@ class ReminderStates(StatesGroup):
     waiting_for_time = State()
 
 
+class CustomSnoozeStates(StatesGroup):
+    waiting_for_custom_time = State()
+
+
 _ITEM_ID_KEY = "reminder_item_id"
 _TASK_TEXT_KEY = "reminder_task_text"
 _ATTEMPTS_KEY = "reminder_attempts"
 _MAX_ATTEMPTS = 3
+
+_CUSTOM_SNOOZE_REMINDER_ID_KEY = "custom_snooze_reminder_id"
 
 
 def task_remind_keyboard(item_id: str, lang: str) -> InlineKeyboardMarkup:
@@ -57,7 +63,7 @@ def task_remind_keyboard(item_id: str, lang: str) -> InlineKeyboardMarkup:
 
 
 def build_snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
-    """Build the 4-button snooze/acknowledge keyboard for an active reminder notification."""
+    """Build the 5-button snooze/acknowledge keyboard for an active reminder notification."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -77,7 +83,13 @@ def build_snooze_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
                     text=t("reminder_btn_ack", lang),
                     callback_data=f"remind_ack:{reminder_id}",
                 ),
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("reminder_btn_snooze_other", lang),
+                    callback_data=f"remind_snooze_other:{reminder_id}",
+                ),
+            ],
         ]
     )
 
@@ -312,6 +324,105 @@ async def cb_remind_ack(
         parse_mode="HTML",
         reply_markup=None,
     )
+
+
+@router.callback_query(F.data.startswith("remind_snooze_other:"))
+async def cb_remind_snooze_other(
+    callback: CallbackQuery,
+    state: FSMContext,
+    reminder_service: ReminderService | None = None,
+    lang: str = "en",
+) -> None:
+    """Enter custom snooze FSM and reset auto_archive_at so auto-archiving cannot fire."""
+    await callback.answer()
+    if callback.message is None or callback.from_user is None:
+        return
+
+    reminder_id_str = (callback.data or "").removeprefix("remind_snooze_other:")
+
+    if reminder_service is None:
+        await callback.message.answer(t("reminder_service_unavailable", lang))
+        return
+
+    try:
+        reminder_id = uuid.UUID(reminder_id_str)
+    except ValueError:
+        await callback.message.answer(t("reminder_not_found_or_inactive", lang))
+        return
+
+    # Reset auto_archive_at so the background job cannot auto-archive the reminder
+    # while the user is typing their custom snooze time.
+    await reminder_service.reset_auto_archive_at(reminder_id, callback.from_user.id)
+
+    await state.update_data({_CUSTOM_SNOOZE_REMINDER_ID_KEY: reminder_id_str, _ATTEMPTS_KEY: 0})
+    await state.set_state(CustomSnoozeStates.waiting_for_custom_time)
+    await callback.message.answer(t("reminder_custom_snooze_prompt", lang))
+
+
+@router.message(CustomSnoozeStates.waiting_for_custom_time)
+async def receive_custom_snooze_time(
+    message: Message,
+    state: FSMContext,
+    time_parser: TimeParser | None = None,
+    reminder_service: ReminderService | None = None,
+    user_settings_service: UserSettingsService | None = None,
+    lang: str = "en",
+) -> None:
+    """Parse user's custom snooze time expression and snooze the reminder."""
+    if time_parser is None or reminder_service is None:
+        await message.answer(t("reminder_service_unavailable", lang))
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    reminder_id_str = data.get(_CUSTOM_SNOOZE_REMINDER_ID_KEY, "")
+    attempts = data.get(_ATTEMPTS_KEY, 0)
+
+    user_id = message.from_user.id if message.from_user else 0
+    user_tz = "UTC"
+    if user_settings_service is not None and user_id:
+        user_tz = await user_settings_service.get_timezone(user_id)
+
+    try:
+        remind_at = await time_parser.parse(
+            message.text or "", now=datetime.now(UTC), user_tz=user_tz
+        )
+    except TimeParseError:
+        attempts += 1
+        if attempts >= _MAX_ATTEMPTS:
+            await state.clear()
+            await message.answer(t("reminder_custom_snooze_failed_final", lang))
+            return
+        await state.update_data({_ATTEMPTS_KEY: attempts})
+        await message.answer(
+            t(
+                "reminder_custom_snooze_parse_retry",
+                lang,
+                attempts=attempts,
+                max_attempts=_MAX_ATTEMPTS,
+            )
+        )
+        return
+
+    try:
+        reminder_id = uuid.UUID(reminder_id_str)
+        ok = await reminder_service.snooze(
+            reminder_id=reminder_id,
+            user_id=user_id,
+            remind_at=remind_at,
+        )
+    except Exception:
+        logger.exception("Failed to apply custom snooze for reminder %s", reminder_id_str)
+        await message.answer(t("reminder_snooze_failed", lang))
+        await state.clear()
+        return
+
+    await state.clear()
+    if ok:
+        formatted = format_remind_at(remind_at, user_tz)
+        await message.answer(t("reminder_custom_snoozed", lang, formatted=formatted))
+    else:
+        await message.answer(t("reminder_not_found_or_inactive", lang))
 
 
 @router.callback_query(F.data.startswith("remind_reactivate:"))

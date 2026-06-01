@@ -237,3 +237,32 @@ async def test_reactivate_for_user_returns_result_with_none_item_when_item_missi
     assert result.reminder is updated
     assert result.item is None
     session.commit.assert_awaited_once()
+
+
+async def test_reset_auto_archive_at_clears_and_commits() -> None:
+    """reset_auto_archive_at delegates to repo and commits when reminder is owned."""
+    svc, repo, _, session = make_service()
+    reminder_id = uuid.uuid4()
+    reminder = MagicMock(spec=Reminder)
+    repo.get_by_id_for_user = AsyncMock(return_value=reminder)
+    repo.reset_auto_archive_at = AsyncMock()
+
+    result = await svc.reset_auto_archive_at(reminder_id=reminder_id, user_id=1)
+
+    assert result is True
+    repo.get_by_id_for_user.assert_awaited_once_with(reminder_id, 1)
+    repo.reset_auto_archive_at.assert_awaited_once_with(reminder_id)
+    session.commit.assert_awaited_once()
+
+
+async def test_reset_auto_archive_at_returns_false_when_not_owned() -> None:
+    """reset_auto_archive_at returns False and does not commit when reminder is not owned."""
+    svc, repo, _, session = make_service()
+    repo.get_by_id_for_user = AsyncMock(return_value=None)
+    repo.reset_auto_archive_at = AsyncMock()
+
+    result = await svc.reset_auto_archive_at(reminder_id=uuid.uuid4(), user_id=999)
+
+    assert result is False
+    repo.reset_auto_archive_at.assert_not_awaited()
+    session.commit.assert_not_awaited()

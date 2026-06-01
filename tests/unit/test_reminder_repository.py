@@ -316,3 +316,28 @@ async def test_reactivate_nonexistent_id_returns_none(db_session: AsyncSession) 
     repo = ReminderRepository(db_session)
     result = await repo.reactivate(uuid.uuid4(), datetime(2026, 6, 1, tzinfo=UTC))
     assert result is None
+
+
+async def test_reset_auto_archive_at_clears_the_field(db_session: AsyncSession) -> None:
+    """reset_auto_archive_at sets auto_archive_at to None on an existing reminder."""
+    item = Item(user_id=1, type=ItemType.task, content="task")
+    db_session.add(item)
+    await db_session.flush()
+
+    repo = ReminderRepository(db_session)
+    r = await repo.create(item_id=item.id, remind_at=datetime(2026, 6, 1, tzinfo=UTC))
+    r.is_sent = True
+    r.auto_archive_at = datetime(2026, 6, 2, tzinfo=UTC)
+    await db_session.commit()
+
+    await repo.reset_auto_archive_at(r.id)
+    await db_session.commit()
+    await db_session.refresh(r)
+
+    assert r.auto_archive_at is None
+
+
+async def test_reset_auto_archive_at_nonexistent_id_does_nothing(db_session: AsyncSession) -> None:
+    """reset_auto_archive_at does not raise when the reminder is not found."""
+    repo = ReminderRepository(db_session)
+    await repo.reset_auto_archive_at(uuid.uuid4())  # should not raise
