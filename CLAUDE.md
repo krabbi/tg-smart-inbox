@@ -87,6 +87,13 @@ All three must pass before pushing. CI rejects PRs that fail any of these.
 
 ---
 
+## Language policy
+
+All artifacts (issues, PR descriptions, code comments, docstrings, git commits) — **English**.
+Respond to the operator in the language they write in.
+
+---
+
 ## Commit convention
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/). Reference the issue number.
@@ -147,7 +154,7 @@ bot/
     messages.py         # main router: text, photo, document
     links.py            # link action callbacks
     reminders.py        # reminder FSM + snooze/ack callbacks
-    commands.py         # /start /list /reminders /cancel
+    commands.py         # /start /help /list /reminders /ideas /reindex /cancel
     config.py           # /config settings menu (extensible sub-commands)
     ideas.py            # /ideas command
     search.py           # /search FSM — mode picker (plain/semantic) + pagination
@@ -197,6 +204,7 @@ tests/
 docs/
   architecture.md
   user_guide.md
+  operations.md           # running locally, Docker, CI/CD
 .claude/
   agents/               # subagent definitions
   coding-patterns.md    # handler/service/repo code examples
