@@ -605,11 +605,20 @@ families:
   `ReminderRepository.mark_auto_completed`. They must never be called with a
   user-supplied ID.
 
+  `ReminderRepository` also exposes mutation methods (`cancel`, `acknowledge`,
+  `mark_auto_completed`, `reactivate`, `reset_auto_archive_at`) that operate by
+  reminder ID without a `user_id` filter — these are **system-only** and are
+  called exclusively by `ReminderService` after it has already verified
+  ownership via `get_by_id_for_user`. Handlers never invoke these methods
+  directly; they always go through the service-layer counterparts
+  (`cancel_for_user`, `acknowledge`, `snooze`, `reset_auto_archive_at`,
+  `reactivate_for_user`) which enforce the ownership check before delegating.
+
 The split prevents callback handlers from being able to read or mutate another
 user's data even when an attacker forges a valid-looking record ID. Integration
 tests in `tests/integration/test_repository_user_isolation.py` create rows for
-two distinct users and verify that the user-scoped queries never return or
-modify the other user's rows.
+two distinct users and verify that the user-scoped queries and service-layer
+mutations never return or modify the other user's rows.
 
 ---
 
