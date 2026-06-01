@@ -368,13 +368,6 @@ async def cb_cancel_reminder(
 # pre-run "(first 200 will be processed)" suffix and the run itself stay in sync.
 _REINDEX_MAX_ITEMS = 200
 
-# In-memory per-user concurrency lock. The bot runs as a single process and one
-# pass already saturates Voyage AI's rate budget, so a set in module state is
-# enough — no Redis/DB lock required. A user spamming /reindex during an active
-# run is told to wait; the entry is removed in a ``finally`` block so a crash in
-# the service never leaves a user permanently locked out.
-_REINDEX_RUNNING: set[int] = set()
-
 
 @router.message(Command("reindex"))
 async def cmd_reindex(
@@ -397,25 +390,24 @@ async def cmd_reindex(
     if not user_id:
         return
 
-    if user_id in _REINDEX_RUNNING:
+    if not ReindexService.try_start_user_reindex(user_id):
         await message.answer(t("reindex.all.already_running", lang))
         return
 
-    total = await reindex_service.count_unindexed_for_user(user_id)
-    if total == 0:
-        await message.answer(t("reindex.all.already_indexed", lang))
-        return
-
-    in_progress_text = t("reindex.all.in_progress", lang, count=total)
-    if total > _REINDEX_MAX_ITEMS:
-        in_progress_text += t("reindex.all.in_progress_truncated_suffix", lang)
-    await message.answer(in_progress_text)
-
-    _REINDEX_RUNNING.add(user_id)
     try:
+        total = await reindex_service.count_unindexed_for_user(user_id)
+        if total == 0:
+            await message.answer(t("reindex.all.already_indexed", lang))
+            return
+
+        in_progress_text = t("reindex.all.in_progress", lang, count=total)
+        if total > _REINDEX_MAX_ITEMS:
+            in_progress_text += t("reindex.all.in_progress_truncated_suffix", lang)
+        await message.answer(in_progress_text)
+
         summary = await reindex_service.reindex_all_for_user(user_id, max_items=_REINDEX_MAX_ITEMS)
     finally:
-        _REINDEX_RUNNING.discard(user_id)
+        ReindexService.finish_user_reindex(user_id)
 
     if summary.succeeded == 0 and summary.failed > 0:
         await message.answer(t("reindex.all.unavailable", lang))

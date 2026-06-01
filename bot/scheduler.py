@@ -16,6 +16,7 @@ from bot.repositories.item_repository import ItemRepository
 from bot.repositories.reminder_repository import ReminderRepository
 from bot.repositories.user_settings import UserSettingsRepository
 from bot.services.embedding_service import EmbeddingService
+from bot.services.reindex_service import ReindexService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
@@ -117,39 +118,46 @@ async def _reindex_missing_embeddings(
     config: Config,
 ) -> None:
     """Populate embeddings for Items and Ideas that lack one. Runs in batches, skips failures."""
-    embedding_service = EmbeddingService(config)
-    async with session_factory() as session:
-        item_repo = ItemRepository(session)
-        idea_repo = IdeaRepository(session)
+    if not ReindexService.try_start_scheduler_reindex():
+        logger.info("Skipping scheduler reindex because another reindex run is active")
+        return
 
-        items = await item_repo.get_missing_embedding(limit=_REINDEX_BATCH_SIZE)
-        for item in items:
-            try:
-                vector = await embedding_service.generate_for_item(item)
-                if vector is None:
-                    continue
-                await item_repo.update_embedding(item.id, vector)
-                await session.commit()
-                # Throttle to ~3 req/sec to stay below Voyage AI rate limits.
-                await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
-            except Exception:
-                logger.exception("Reindex failed for item %s", item.id)
-                await session.rollback()
+    try:
+        embedding_service = EmbeddingService(config)
+        async with session_factory() as session:
+            item_repo = ItemRepository(session)
+            idea_repo = IdeaRepository(session)
 
-        idea_rows = await idea_repo.get_missing_embedding(limit=_REINDEX_BATCH_SIZE)
-        for item, idea in idea_rows:
-            try:
-                idea.item = item
-                vector = await embedding_service.generate_for_idea(idea)
-                if vector is None:
-                    continue
-                await idea_repo.update_embedding(idea.id, vector)
-                await session.commit()
-                # Throttle to ~3 req/sec to stay below Voyage AI rate limits.
-                await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
-            except Exception:
-                logger.exception("Reindex failed for idea %s", idea.id)
-                await session.rollback()
+            items = await item_repo.get_missing_embedding(limit=_REINDEX_BATCH_SIZE)
+            for item in items:
+                try:
+                    vector = await embedding_service.generate_for_item(item)
+                    if vector is None:
+                        continue
+                    await item_repo.update_embedding(item.id, vector)
+                    await session.commit()
+                    # Voyage AI free tier allows 3 RPM; keep scheduler safely below it.
+                    await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
+                except Exception:
+                    logger.exception("Reindex failed for item %s", item.id)
+                    await session.rollback()
+
+            idea_rows = await idea_repo.get_missing_embedding(limit=_REINDEX_BATCH_SIZE)
+            for item, idea in idea_rows:
+                try:
+                    idea.item = item
+                    vector = await embedding_service.generate_for_idea(idea)
+                    if vector is None:
+                        continue
+                    await idea_repo.update_embedding(idea.id, vector)
+                    await session.commit()
+                    # Voyage AI free tier allows 3 RPM; keep scheduler safely below it.
+                    await asyncio.sleep(_REINDEX_THROTTLE_SECONDS)
+                except Exception:
+                    logger.exception("Reindex failed for idea %s", idea.id)
+                    await session.rollback()
+    finally:
+        ReindexService.finish_scheduler_reindex()
 
 
 def start_scheduler(
@@ -160,7 +168,7 @@ def start_scheduler(
     """Create and start the APScheduler that fires reminders every 60 seconds.
 
     When ``config`` is provided, a background reindex job populates missing embeddings
-    every ten minutes and once at startup.
+    every ten minutes.
     """
     scheduler = AsyncIOScheduler()
     reminder_kwargs = {"bot": bot, "session_factory": session_factory}
@@ -181,7 +189,6 @@ def start_scheduler(
             _reindex_missing_embeddings,
             trigger="interval",
             minutes=_REINDEX_INTERVAL_MINUTES,
-            next_run_time=datetime.now(UTC),
             kwargs={"session_factory": session_factory, "config": config},
         )
     scheduler.start()

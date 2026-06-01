@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
-from bot.handlers import commands as commands_module
 from bot.handlers.commands import (
     _list_keyboard,
     _parse_type_suffix,
@@ -618,8 +617,8 @@ def make_embedding_service(configured: bool = True) -> MagicMock:
 
 
 def _clear_reindex_lock() -> None:
-    """Reset the module-level concurrency lock between tests."""
-    commands_module._REINDEX_RUNNING.clear()
+    """Reset the shared reindex concurrency lock between tests."""
+    ReindexService._reset_running_state()
 
 
 async def test_cmd_reindex_no_services_replies_not_configured() -> None:
@@ -738,7 +737,7 @@ async def test_cmd_reindex_rejects_concurrent_run() -> None:
     emb = make_embedding_service(configured=True)
 
     # Simulate the user already having an active reindex run.
-    commands_module._REINDEX_RUNNING.add(42)
+    assert ReindexService.try_start_user_reindex(42)
     try:
         await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="ru")
     finally:
@@ -763,7 +762,24 @@ async def test_cmd_reindex_releases_lock_on_exception() -> None:
         raised = True
 
     assert raised, "the original exception must propagate"
-    assert 99 not in commands_module._REINDEX_RUNNING
+    assert not ReindexService.is_user_reindex_running(99)
+
+
+async def test_cmd_reindex_rejects_scheduler_run_in_progress() -> None:
+    _clear_reindex_lock()
+    msg = make_message(user_id=42)
+    reindex_svc = make_reindex_service(count=10)
+    emb = make_embedding_service(configured=True)
+
+    assert ReindexService.try_start_scheduler_reindex()
+    try:
+        await cmd_reindex(msg, reindex_service=reindex_svc, embedding_service=emb, lang="en")
+    finally:
+        _clear_reindex_lock()
+
+    assert "already running" in msg.answer.call_args[0][0]
+    reindex_svc.count_unindexed_for_user.assert_not_awaited()
+    reindex_svc.reindex_all_for_user.assert_not_awaited()
 
 
 async def test_cmd_reindex_silent_when_no_user_id() -> None:

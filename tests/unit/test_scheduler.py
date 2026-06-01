@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.scheduler import _auto_archive_reminders, _send_due_reminders, start_scheduler
+from bot.services.reindex_service import ReindexService
 
 
 def make_session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -423,6 +424,24 @@ def test_start_scheduler_registers_reindex_job_when_config_given() -> None:
     assert len(scheduler.get_jobs()) == 3
 
 
+def test_start_scheduler_reindex_job_waits_for_first_interval() -> None:
+    from bot.config import Config
+
+    bot = MagicMock()
+    factory = MagicMock()
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+    with (
+        patch.object(AsyncIOScheduler, "add_job") as mock_add_job,
+        patch.object(AsyncIOScheduler, "start"),
+    ):
+        start_scheduler(bot, factory, config)
+
+    reindex_job_kwargs = mock_add_job.call_args_list[2].kwargs
+    assert reindex_job_kwargs["trigger"] == "interval"
+    assert reindex_job_kwargs["minutes"] == 10
+    assert "next_run_time" not in reindex_job_kwargs
+
+
 def test_start_scheduler_does_not_register_a_legacy_auto_resend_job() -> None:
     """The 5-minute auto-resend behaviour must be gone — no such job is registered."""
     import bot.scheduler as scheduler_mod
@@ -486,6 +505,43 @@ async def test_reindex_missing_embeddings_processes_items_and_ideas() -> None:
         mock_svc.generate_for_idea.assert_awaited_once_with(idea)
         mock_item_repo.update_embedding.assert_awaited_once_with(item.id, [0.1, 0.2])
         mock_idea_repo.update_embedding.assert_awaited_once_with(idea.id, [0.3, 0.4])
+
+
+async def test_reindex_missing_embeddings_skips_when_user_reindex_is_running() -> None:
+    from bot.config import Config
+    from bot.scheduler import _reindex_missing_embeddings
+
+    ReindexService._reset_running_state()
+    assert ReindexService.try_start_user_reindex(42)
+    factory = MagicMock(spec=async_sessionmaker)
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    try:
+        with patch("bot.scheduler.EmbeddingService") as mock_svc_cls:
+            await _reindex_missing_embeddings(factory, config)
+    finally:
+        ReindexService._reset_running_state()
+
+    factory.assert_not_called()
+    mock_svc_cls.assert_not_called()
+
+
+async def test_reindex_missing_embeddings_releases_scheduler_lock_on_outer_error() -> None:
+    from bot.config import Config
+    from bot.scheduler import _reindex_missing_embeddings
+
+    ReindexService._reset_running_state()
+    factory = MagicMock(side_effect=RuntimeError("session failed"))
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    raised = False
+    try:
+        await _reindex_missing_embeddings(factory, config)
+    except RuntimeError:
+        raised = True
+
+    assert raised
+    assert not ReindexService.is_reindex_running()
 
 
 async def test_reindex_missing_embeddings_skips_failed_record_and_continues() -> None:

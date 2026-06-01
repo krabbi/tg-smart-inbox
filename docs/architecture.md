@@ -621,7 +621,7 @@ modify the other user's rows.
 |-----|----------|----------|-------------|
 | Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_archive_at = now + 24h`. |
 | Auto-archive | 60 seconds | `_auto_archive_reminders` | Finds reminders where `auto_archive_at <= now` and none of the close flags are set. Marks them `is_auto_completed = True`, clears the timer, and sends a final message with a single `🔄 Реактивировать` button. There are no intermediate auto-resends — between the first delivery and the auto-archive close, the user is silent for a full 24h. |
-| Reindex embeddings | 10 minutes + at startup | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Sleeps 0.3 s after every successful embedding to stay under Voyage AI's rate limit (~3 req/s). Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
+| Reindex embeddings | 10 minutes | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Sleeps 22 s after every successful embedding to stay under Voyage AI's free-tier rate limit. Skips the run when a user-triggered `/reindex` is already active. Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
 
 Each scheduler job opens its own DB session.
 
@@ -703,13 +703,18 @@ message without exiting the dialog, so the user can retry or `/cancel`.
 `ReindexService` (`bot/services/reindex_service.py`) regenerates embeddings for
 records that were saved while Voyage AI was unreachable. Unlike the background
 `_reindex_missing_embeddings` scheduler job — which sweeps the global backlog
-every ten minutes — `ReindexService` is scoped to a single Telegram user and is
-triggered from the `/reindex` command handler (`bot/handlers/commands.py` →
-`cmd_reindex`).
+every ten minutes — `ReindexService` bulk runs are scoped to a single Telegram
+user and are triggered from the `/reindex` command handler
+(`bot/handlers/commands.py` → `cmd_reindex`).
 
-The `/reindex` handler keeps an in-memory `set[int]` of user IDs currently
-running a pass and rejects re-entry with `ℹ️ Переиндексация уже выполняется,
-дождись окончания.` until the set entry is cleared in a `try/finally`. It also
+`ReindexService` owns the shared in-memory lock for bulk reindexing. A
+user-triggered `/reindex` reserves that user's ID; the scheduler reserves a
+global scheduler slot. Only one bulk reindex source can own the slot at a time.
+The scheduler skips its whole run while any user-triggered bulk run is active,
+and `/reindex` replies with `ℹ️ Переиндексация уже выполняется, дождись
+окончания.` while another command run or the scheduler already owns the slot.
+Entries are cleared in `try/finally` blocks so failures do not leave a stale lock.
+The handler also
 calls `EmbeddingService.is_configured` first and replies `ℹ️ Умный поиск не
 настроен в этом инстансе бота.` when Voyage AI is not wired in this deployment,
 to distinguish that case from a transient outage.
