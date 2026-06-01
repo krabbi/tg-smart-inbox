@@ -69,7 +69,12 @@ class ItemRepository:
         return await self._session.get(Item, item_id)
 
     async def get_missing_embedding(self, *, limit: int = 50) -> list[Item]:
-        """Return Items without a stored embedding, oldest first (batch for reindex)."""
+        """Return Items without a stored embedding, oldest first (batch for reindex).
+
+        SYSTEM-ONLY method: not scoped by ``user_id`` — returns records from all users.
+        Only the background scheduler job calls this. Never pass user-controlled IDs here;
+        use ``list_without_embedding`` for user-triggered reindex operations.
+        """
         result = await self._session.execute(
             select(Item)
             .where(Item.embedding.is_(None))

@@ -477,6 +477,238 @@ async def test_reminder_models_have_correct_owner_via_join(db_session: AsyncSess
     assert await rem_repo.get_by_id_for_user(rem_a.id, USER_B) is None
 
 
+# --- ReminderService service-layer cross-user mutations ----------------------
+#
+# These tests verify that service-layer operations that perform ownership checks
+# before calling system-only repository mutation methods cannot affect another
+# user's reminders when given a foreign reminder ID.
+
+
+async def test_reminder_service_reactivate_refuses_foreign_owner(
+    db_session: AsyncSession,
+) -> None:
+    """reactivate_for_user must return None and not mutate state for a foreign reminder."""
+    item_repo = ItemRepository(db_session)
+    rem_repo = ReminderRepository(db_session)
+    svc = ReminderService(session=db_session, repo=rem_repo, item_repo=item_repo)
+
+    item_a = await item_repo.create(user_id=USER_A, type=ItemType.task, content="A task")
+    await db_session.commit()
+    rem_a = await rem_repo.create(item_id=item_a.id, remind_at=datetime(2030, 1, 1, tzinfo=UTC))
+    # Mark the reminder as sent + auto_completed so reactivate has something to reverse.
+    rem_a.is_sent = True
+    rem_a.is_auto_completed = True
+    await db_session.commit()
+
+    # USER_B attempts to reactivate USER_A's reminder using the correct UUID.
+    result = await svc.reactivate_for_user(
+        reminder_id=rem_a.id,
+        user_id=USER_B,
+        remind_at=datetime(2030, 6, 1, tzinfo=UTC),
+    )
+
+    assert result is None
+
+    # The reminder must still be in its original auto_completed state.
+    fresh = await rem_repo.get_by_id_for_user(rem_a.id, USER_A)
+    assert fresh is not None
+    assert fresh.is_auto_completed is True
+    assert fresh.is_sent is True
+
+
+async def test_reminder_service_reset_auto_archive_refuses_foreign_owner(
+    db_session: AsyncSession,
+) -> None:
+    """reset_auto_archive_at must not clear the timer on a reminder owned by another user."""
+    item_repo = ItemRepository(db_session)
+    rem_repo = ReminderRepository(db_session)
+    svc = ReminderService(session=db_session, repo=rem_repo, item_repo=item_repo)
+
+    item_a = await item_repo.create(user_id=USER_A, type=ItemType.task, content="A task")
+    await db_session.commit()
+    rem_a = await rem_repo.create(item_id=item_a.id, remind_at=datetime(2030, 1, 1, tzinfo=UTC))
+    archive_time = datetime(2030, 1, 2, tzinfo=UTC)
+    await rem_repo.set_auto_archive_at(rem_a, archive_time)
+    await db_session.commit()
+
+    # USER_B must not be able to clear USER_A's auto_archive_at.
+    result = await svc.reset_auto_archive_at(rem_a.id, USER_B)
+    assert result is False
+
+    # The auto_archive_at on USER_A's reminder must be unchanged.
+    fresh = await rem_repo.get_by_id_for_user(rem_a.id, USER_A)
+    assert fresh is not None
+    assert fresh.auto_archive_at is not None
+
+    # USER_A can still reset their own.
+    result = await svc.reset_auto_archive_at(rem_a.id, USER_A)
+    assert result is True
+
+    fresh = await rem_repo.get_by_id_for_user(rem_a.id, USER_A)
+    assert fresh is not None
+    assert fresh.auto_archive_at is None
+
+
+# --- ListService cross-user isolation ----------------------------------------
+
+
+async def test_list_service_list_recent_isolation(db_session: AsyncSession) -> None:
+    """list_recent must never return items owned by a different user."""
+    from bot.services.list_service import ListService
+
+    item_repo = ItemRepository(db_session)
+    svc = ListService(item_repo)
+
+    await item_repo.create(user_id=USER_A, type=ItemType.note, content="A note 1")
+    await item_repo.create(user_id=USER_A, type=ItemType.note, content="A note 2")
+    await item_repo.create(user_id=USER_B, type=ItemType.note, content="B note")
+    await db_session.commit()
+
+    page_a = await svc.list_recent(USER_A, page=0)
+    page_b = await svc.list_recent(USER_B, page=0)
+
+    assert {it.user_id for it in page_a.items} == {USER_A}
+    assert {it.user_id for it in page_b.items} == {USER_B}
+    assert page_a.total == 2
+    assert page_b.total == 1
+
+
+async def test_list_service_search_isolation(db_session: AsyncSession) -> None:
+    """search must never return items owned by a different user, even on a shared keyword."""
+    from bot.services.list_service import ListService
+
+    item_repo = ItemRepository(db_session)
+    svc = ListService(item_repo)
+
+    await item_repo.create(user_id=USER_A, type=ItemType.note, content="shared keyword A")
+    await item_repo.create(user_id=USER_B, type=ItemType.note, content="shared keyword B")
+    await db_session.commit()
+
+    results_a = await svc.search(USER_A, "shared")
+    results_b = await svc.search(USER_B, "shared")
+
+    assert {it.user_id for it in results_a} == {USER_A}
+    assert {it.user_id for it in results_b} == {USER_B}
+    assert len(results_a) == 1
+    assert len(results_b) == 1
+
+
+# --- ReindexService cross-user isolation (integration) -----------------------
+#
+# The user-triggered reindex path (reindex_item / reindex_idea) uses
+# ``*Repository.get_by_id_for_user`` so a forged callback UUID for another
+# user's record returns NOT_FOUND without touching that record.
+
+
+async def test_reindex_service_reindex_item_refuses_foreign_owner(
+    db_session: AsyncSession,
+) -> None:
+    """reindex_item must return NOT_FOUND when the item belongs to another user."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.services.embedding_service import EmbeddingService
+    from bot.services.reindex_service import ReindexResult, ReindexService
+
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item_a = await item_repo.create(user_id=USER_A, type=ItemType.note, content="A note")
+    await db_session.commit()
+
+    mock_embedding = MagicMock(spec=EmbeddingService)
+    mock_embedding.generate = AsyncMock(return_value=[0.1] * 4)
+
+    svc = ReindexService(
+        embedding_service=mock_embedding,
+        item_repository=item_repo,
+        idea_repository=idea_repo,
+        session=db_session,
+    )
+
+    # USER_B uses the correct UUID but does not own the item.
+    result = await svc.reindex_item(item_a.id, user_id=USER_B)
+    assert result is ReindexResult.NOT_FOUND
+
+    # No embedding was written.
+    mock_embedding.generate.assert_not_awaited()
+
+
+async def test_reindex_service_reindex_idea_refuses_foreign_owner(
+    db_session: AsyncSession,
+) -> None:
+    """reindex_idea must return NOT_FOUND when the idea belongs to another user."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.services.embedding_service import EmbeddingService
+    from bot.services.reindex_service import ReindexResult, ReindexService
+
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item_a = await item_repo.create(user_id=USER_A, type=ItemType.idea, content="A idea")
+    idea_a = await idea_repo.save(item_id=item_a.id, tags=["test"])
+    await db_session.commit()
+
+    mock_embedding = MagicMock(spec=EmbeddingService)
+    mock_embedding.generate = AsyncMock(return_value=[0.1] * 4)
+
+    svc = ReindexService(
+        embedding_service=mock_embedding,
+        item_repository=item_repo,
+        idea_repository=idea_repo,
+        session=db_session,
+    )
+
+    # USER_B uses the correct UUID but does not own the idea.
+    result = await svc.reindex_idea(idea_a.id, user_id=USER_B)
+    assert result is ReindexResult.NOT_FOUND
+
+    mock_embedding.generate.assert_not_awaited()
+
+
+async def test_reindex_service_reindex_all_for_user_does_not_touch_other_user(
+    db_session: AsyncSession,
+) -> None:
+    """reindex_all_for_user must only process the requesting user's unindexed records."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from bot.services.embedding_service import EmbeddingService
+    from bot.services.reindex_service import ReindexService
+
+    item_repo = ItemRepository(db_session)
+    idea_repo = IdeaRepository(db_session)
+
+    item_a = await item_repo.create(user_id=USER_A, type=ItemType.note, content="A note")
+    await item_repo.create(user_id=USER_B, type=ItemType.note, content="B note")
+    await db_session.commit()
+
+    mock_embedding = MagicMock(spec=EmbeddingService)
+    mock_embedding.generate = AsyncMock(return_value=[0.5] * 1024)
+
+    svc = ReindexService(
+        embedding_service=mock_embedding,
+        item_repository=item_repo,
+        idea_repository=idea_repo,
+        session=db_session,
+    )
+
+    summary = await svc.reindex_all_for_user(USER_A)
+
+    # Only USER_A's item was indexed.
+    assert summary.succeeded == 1
+    assert summary.total_found == 1
+
+    # USER_B's item must still have no embedding.
+    assert await item_repo.count_without_embedding(USER_B) == 1
+    # USER_A's item now has an embedding.
+    assert await item_repo.count_without_embedding(USER_A) == 0
+
+    # The vector stored on USER_A's item must not appear on USER_B's item.
+    fresh_a = await item_repo.get_by_id_for_user(item_a.id, USER_A)
+    assert fresh_a is not None
+    assert fresh_a.embedding is not None
+
+
 # Reference the unused import so static checkers don't flag uuid; kept here in
 # case future tests need to fabricate forged callback IDs.
 _ = uuid.uuid4

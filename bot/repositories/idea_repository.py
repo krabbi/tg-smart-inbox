@@ -62,7 +62,12 @@ class IdeaRepository:
         return result.scalar_one()
 
     async def update_embedding(self, idea_id: uuid.UUID, embedding: list[float]) -> None:
-        """Persist the vector embedding on an existing Idea; caller commits."""
+        """Persist the vector embedding on an existing Idea; caller commits.
+
+        SYSTEM-ONLY method: not bounded by ``user_id`` because the only callers are the
+        background reindex job and post-create indexing inside services that already
+        own the freshly inserted Idea. Never expose to user-controlled idea IDs.
+        """
         idea = await self._session.get(Idea, idea_id)
         if idea is None:
             return
@@ -70,7 +75,12 @@ class IdeaRepository:
         await self._session.flush()
 
     async def get_missing_embedding(self, *, limit: int = 50) -> list[tuple[Item, Idea]]:
-        """Return Ideas without a stored embedding as (Item, Idea) pairs for reindex."""
+        """Return Ideas without a stored embedding as (Item, Idea) pairs for reindex.
+
+        SYSTEM-ONLY method: not scoped by ``user_id`` — returns records from all users.
+        Only the background scheduler job calls this. Never pass user-controlled IDs here;
+        use ``list_without_embedding`` for user-triggered reindex operations.
+        """
         result = await self._session.execute(
             select(Item, Idea)
             .join(Idea, Idea.item_id == Item.id)

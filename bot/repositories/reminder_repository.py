@@ -60,7 +60,12 @@ class ReminderRepository:
         return result.scalar_one_or_none()
 
     async def cancel(self, reminder_id: uuid.UUID) -> None:
-        """Mark a reminder as cancelled and clear the auto-archive timer."""
+        """Mark a reminder as cancelled and clear the auto-archive timer.
+
+        SYSTEM-ONLY method: no ``user_id`` filter — ownership must be verified by the
+        caller before invoking this. Only ``ReminderService.cancel_for_user`` may call
+        this; it always checks ``get_by_id_for_user`` first.
+        """
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder:
@@ -88,7 +93,12 @@ class ReminderRepository:
         return list(result.scalars().all())
 
     async def acknowledge(self, reminder_id: uuid.UUID) -> None:
-        """Mark a reminder as acknowledged and clear the auto-archive timer."""
+        """Mark a reminder as acknowledged and clear the auto-archive timer.
+
+        SYSTEM-ONLY method: no ``user_id`` filter — ownership must be verified by the
+        caller before invoking this. Only ``ReminderService.acknowledge`` and
+        ``ReminderService.snooze`` may call this; both check ``get_by_id_for_user`` first.
+        """
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder:
@@ -97,7 +107,13 @@ class ReminderRepository:
             await self._session.flush()
 
     async def mark_auto_completed(self, reminder_id: uuid.UUID) -> None:
-        """Mark a reminder as auto-completed and clear the auto-archive timer."""
+        """Mark a reminder as auto-completed and clear the auto-archive timer.
+
+        SYSTEM-ONLY method: no ``user_id`` filter — called exclusively by
+        ``ReminderService.mark_auto_completed`` (scheduler path). The scheduler
+        fetches reminders via ``get_due_auto_archive`` and acts on the result set
+        directly; ownership is implicit from the scheduled query, not a user input.
+        """
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder:
@@ -106,7 +122,12 @@ class ReminderRepository:
             await self._session.flush()
 
     async def reactivate(self, reminder_id: uuid.UUID, remind_at: datetime) -> Reminder | None:
-        """Reset an auto-completed reminder to active state; return the row or None."""
+        """Reset an auto-completed reminder to active state; return the row or None.
+
+        SYSTEM-ONLY method: no ``user_id`` filter — ownership must be verified by the
+        caller before invoking this. Only ``ReminderService.reactivate_for_user`` may
+        call this; it always checks ``get_by_id_for_user`` first.
+        """
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder is None:
@@ -121,7 +142,12 @@ class ReminderRepository:
         return reminder
 
     async def reset_auto_archive_at(self, reminder_id: uuid.UUID) -> None:
-        """Clear auto_archive_at on a reminder to prevent auto-archiving; flush only."""
+        """Clear auto_archive_at on a reminder to prevent auto-archiving; flush only.
+
+        SYSTEM-ONLY method: no ``user_id`` filter — ownership must be verified by the
+        caller before invoking this. Only ``ReminderService.reset_auto_archive_at`` may
+        call this; it always checks ``get_by_id_for_user`` first.
+        """
         result = await self._session.execute(select(Reminder).where(Reminder.id == reminder_id))
         reminder = result.scalar_one_or_none()
         if reminder:
