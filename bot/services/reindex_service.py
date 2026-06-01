@@ -3,6 +3,7 @@ import enum
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +47,9 @@ class ReindexSummary:
 class ReindexService:
     """Regenerate missing embeddings for one user's Items and Ideas."""
 
+    _running_user_ids: ClassVar[set[int]] = set()
+    _scheduler_running: ClassVar[bool] = False
+
     def __init__(
         self,
         embedding_service: EmbeddingService,
@@ -57,6 +61,48 @@ class ReindexService:
         self._items = item_repository
         self._ideas = idea_repository
         self._session = session
+
+    @classmethod
+    def try_start_user_reindex(cls, user_id: int) -> bool:
+        """Reserve the shared reindex slot for a user-triggered bulk run."""
+        if cls._scheduler_running or cls._running_user_ids:
+            return False
+        cls._running_user_ids.add(user_id)
+        return True
+
+    @classmethod
+    def finish_user_reindex(cls, user_id: int) -> None:
+        """Release a user-triggered bulk reindex reservation."""
+        cls._running_user_ids.discard(user_id)
+
+    @classmethod
+    def try_start_scheduler_reindex(cls) -> bool:
+        """Reserve the shared reindex slot for the background scheduler."""
+        if cls._scheduler_running or cls._running_user_ids:
+            return False
+        cls._scheduler_running = True
+        return True
+
+    @classmethod
+    def finish_scheduler_reindex(cls) -> None:
+        """Release the background scheduler reindex reservation."""
+        cls._scheduler_running = False
+
+    @classmethod
+    def is_user_reindex_running(cls, user_id: int) -> bool:
+        """Return True when the given user currently has a bulk reindex run."""
+        return user_id in cls._running_user_ids
+
+    @classmethod
+    def is_reindex_running(cls) -> bool:
+        """Return True when any bulk reindex path is currently active."""
+        return cls._scheduler_running or bool(cls._running_user_ids)
+
+    @classmethod
+    def _reset_running_state(cls) -> None:
+        """Reset in-memory reindex locks for tests."""
+        cls._running_user_ids.clear()
+        cls._scheduler_running = False
 
     async def count_unindexed_for_user(self, user_id: int) -> int:
         """Return total Items + Ideas without an embedding for one user.

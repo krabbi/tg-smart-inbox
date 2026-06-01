@@ -79,6 +79,46 @@ def make_service() -> tuple[
     return svc, item_repo, idea_repo, embedding, session.commit
 
 
+# --- shared reindex lock -----------------------------------------------------
+
+
+def test_reindex_lock_allows_one_bulk_run_at_a_time() -> None:
+    ReindexService._reset_running_state()
+
+    assert ReindexService.try_start_user_reindex(42)
+    assert ReindexService.is_user_reindex_running(42)
+    assert ReindexService.is_reindex_running()
+    assert not ReindexService.try_start_user_reindex(42)
+    assert not ReindexService.try_start_user_reindex(99)
+
+    ReindexService.finish_user_reindex(42)
+
+    assert not ReindexService.is_reindex_running()
+
+
+def test_reindex_lock_blocks_scheduler_while_user_run_active() -> None:
+    ReindexService._reset_running_state()
+
+    assert ReindexService.try_start_user_reindex(42)
+
+    assert not ReindexService.try_start_scheduler_reindex()
+
+    ReindexService.finish_user_reindex(42)
+    ReindexService._reset_running_state()
+
+
+def test_reindex_lock_blocks_user_while_scheduler_run_active() -> None:
+    ReindexService._reset_running_state()
+
+    assert ReindexService.try_start_scheduler_reindex()
+    assert ReindexService.is_reindex_running()
+
+    assert not ReindexService.try_start_user_reindex(42)
+
+    ReindexService.finish_scheduler_reindex()
+    assert not ReindexService.is_reindex_running()
+
+
 # --- count_unindexed_for_user -----------------------------------------------
 
 
