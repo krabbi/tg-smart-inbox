@@ -19,10 +19,21 @@ class AuthMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        """Pass through allowed users; silently drop all others."""
+        """Pass through allowed users; silently drop all others.
+
+        Anonymous events (no ``from_user``) are always dropped, regardless of
+        whether an allowlist is configured, because every subsequent handler
+        requires a valid ``user_id`` to scope DB operations correctly.
+        """
+        user_id = self._extract_user_id(event)
         if self._allowed:
-            user_id = self._extract_user_id(event)
+            # Allowlist mode: only listed user IDs may proceed.
             if user_id is None or user_id not in self._allowed:
+                return None
+        else:
+            # Open mode: any authenticated user may proceed, but anonymous
+            # events (channel posts, etc.) are still silently discarded.
+            if user_id is None:
                 return None
         return await handler(event, data)
 

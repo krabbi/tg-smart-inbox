@@ -115,7 +115,7 @@ class DependencyMiddleware(BaseMiddleware):
             # Resolve the caller's language once per update and inject it as ``lang``
             # so every handler can localize its reply via ``t(key, lang)``. Fall back
             # to the default language when no user context is available or settings
-            # are missing (e.g. first-time users).
+            # are missing (e.g. first-time users before /start).
             user_id = _extract_user_id(event)
             if user_id is not None:
                 data["lang"] = await user_settings_service.get_language(user_id)

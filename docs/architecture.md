@@ -579,10 +579,30 @@ Call sites:
 `AuthMiddleware` (`bot/middlewares/auth.py`) runs on every update before any handler.
 
 - If `ALLOWED_USER_IDS` is set in config: only those Telegram user IDs can interact with the bot.
-  All other users are silently ignored (no response, no error).
-- If `ALLOWED_USER_IDS` is empty: all users are allowed (open access).
+  All other users are silently ignored (no response, no error). This is **allowlist mode** — it
+  fails closed by default.
+- If `ALLOWED_USER_IDS` is empty: any authenticated Telegram user may interact with the bot.
+  This is **open mode** — no registration or invitation required.
 
-This is a whitelist, not a blocklist — it fails closed by default.
+In both modes, Telegram events with no `from_user` (e.g. anonymous channel posts) are silently
+dropped before reaching any handler. Every handler requires a valid `user_id` to scope DB
+operations to the correct user, so anonymous events can never reach user-owned data.
+
+### First-use settings creation
+
+When a user sends their first message the bot auto-creates a `UserSettings` row with sensible
+defaults (timezone `UTC`, language derived from `from_user.language_code`). This happens in two
+places:
+
+- **`/start` handler** (`bot/handlers/commands.py`): calls
+  `UserSettingsService.ensure_user_settings()` on the welcome-message path (i.e. when a timezone
+  was already set or the service is not wired). For brand-new users the timezone FSM is launched
+  instead; the settings row is created later when the user completes the FSM via `set_timezone`.
+- **`handle_text` handler** (`bot/handlers/messages.py`): calls `ensure_user_settings()` at the
+  top of every text message before any user-owned work begins, covering users who send their first
+  message without running `/start` first.
+
+`ensure_user_settings` is idempotent — if the row already exists it is returned unchanged.
 
 ### Per-user data isolation
 
@@ -812,7 +832,7 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `TELEGRAM_BOT_TOKEN` | Yes | — | Telegram Bot API token |
 | `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///data/bot.db` | SQLAlchemy async DB URL |
-| `ALLOWED_USER_IDS` | No | `[]` (open) | Comma-separated Telegram user IDs |
+| `ALLOWED_USER_IDS` | No | `[]` (open) | Comma-separated Telegram user IDs. Non-empty → allowlist mode (only listed IDs allowed). Empty → open mode (any Telegram user allowed). In both modes all data is isolated per user. |
 | `GROQ_API_KEY` | No | `""` | Groq API key (enables voice transcription) |
 | `GOOGLE_DRIVE_CREDENTIALS_FILE` | No | `credentials.json` | Path (inside the container) to **OAuth 2.0 client secrets JSON** (downloaded from Google Cloud Console → "OAuth 2.0 Client IDs", Desktop app). Used once on first run to obtain user credentials via browser consent. The `prod` docker-compose profile mounts the host file of the same name (placed next to `docker-compose.yml`) read-only at `/app/credentials.json`. |
 | `GOOGLE_DRIVE_TOKEN_FILE` | No | `token.json` | Path (inside the container) where the obtained user token (with refresh token) is persisted between runs. Auto-refreshed on subsequent runs. The `prod` docker-compose profile mounts the host file of the same name (placed next to `docker-compose.yml`) read-write at `/app/token.json` so the token survives container restarts and the Google OAuth library can rewrite it after a refresh. |

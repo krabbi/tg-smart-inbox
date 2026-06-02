@@ -137,3 +137,38 @@ async def test_unknown_user_callback_is_blocked() -> None:
 
     handler.assert_not_awaited()
     assert result is None
+
+
+async def test_open_mode_anonymous_message_is_dropped() -> None:
+    """In open mode (empty allowlist) events with no from_user are silently dropped."""
+    config = Config(
+        telegram_bot_token="fake-token",
+        anthropic_api_key="sk-ant-fake",
+        allowed_user_ids=[],
+    )
+    middleware = AuthMiddleware(config)
+    handler = AsyncMock()
+    message = MagicMock(spec=Message)
+    message.from_user = None
+
+    result = await middleware(handler, message, {})
+
+    handler.assert_not_awaited()
+    assert result is None
+
+
+async def test_open_mode_authenticated_user_passes_through() -> None:
+    """In open mode any user with a valid from_user is allowed."""
+    config = Config(
+        telegram_bot_token="fake-token",
+        anthropic_api_key="sk-ant-fake",
+        allowed_user_ids=[],
+    )
+    middleware = AuthMiddleware(config)
+    handler = AsyncMock(return_value="ok")
+    message = make_message(99999)
+
+    result = await middleware(handler, message, {})
+
+    handler.assert_awaited_once_with(message, {})
+    assert result == "ok"

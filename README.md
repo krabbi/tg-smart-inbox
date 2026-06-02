@@ -139,7 +139,7 @@ The following variables are **required** for the `prod` profile:
 | `POSTGRES_PASSWORD` | Password for the local Postgres container; must be set or `docker compose` refuses to start |
 | `TELEGRAM_BOT_TOKEN` | Bot API token from [@BotFather](https://t.me/BotFather) |
 | `ANTHROPIC_API_KEY` | Claude API key — used for classification, summarization, idea tagging |
-| `ALLOWED_USER_IDS` | Comma-separated Telegram user IDs allowed to use the bot (whitelist) |
+| `ALLOWED_USER_IDS` | Comma-separated Telegram user IDs (allowlist mode). Leave empty for open access — any Telegram user may interact with the bot. All data is always isolated per user regardless of this setting. |
 | `VOYAGE_API_KEY` | Voyage AI key — required for semantic search and embedding indexing |
 | `GHCR_USER` | Your GitHub username — used by Watchtower to authenticate against `ghcr.io` |
 | `GHCR_TOKEN` | GitHub Personal Access Token with the **`read:packages`** scope |
@@ -221,7 +221,10 @@ Copy `.env.example` to `.env` and fill in:
 TELEGRAM_BOT_TOKEN=your_token_here
 ANTHROPIC_API_KEY=your_key_here
 
-# Comma-separated Telegram user IDs allowed to use the bot (leave empty for open access)
+# Access control: comma-separated Telegram user IDs.
+# Non-empty → allowlist mode: only the listed IDs may use the bot.
+# Empty (or omitted) → open mode: any Telegram user may use the bot.
+# In both modes all data (items, reminders, settings, search) is isolated per user.
 ALLOWED_USER_IDS=123456789,987654321
 
 # PostgreSQL password used by docker-compose

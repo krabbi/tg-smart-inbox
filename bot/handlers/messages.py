@@ -200,6 +200,13 @@ async def handle_text(
     user_id = message.from_user.id if message.from_user else 0
     logger.info("Received text from user %s (forwarded=%s): %.80s", user_id, is_forwarded, text)
 
+    # Ensure per-user settings exist before any user-owned work begins.
+    # This covers the case where a user sends their first message without /start.
+    # `ensure_user_settings` is idempotent — a no-op for returning users.
+    if user_settings_service is not None and user_id:
+        language_code = message.from_user.language_code if message.from_user else None
+        await user_settings_service.ensure_user_settings(user_id, language_code)
+
     if classifier is None:
         await message.answer(t("classifier_unavailable", lang))
         return
