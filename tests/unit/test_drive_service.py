@@ -438,3 +438,35 @@ def test_get_or_create_subfolder_sync_short_circuits_on_cache_hit() -> None:
 def test_all_categories_have_folder_mappings() -> None:
     for cat in ("receipt", "document", "screenshot", "photo", "meme", "other"):
         assert cat in _CATEGORY_FOLDERS
+
+
+async def test_upload_file_quota_exhaustion_raises_drive_upload_error() -> None:
+    """Drive 403 quota-exhaustion error is wrapped as DriveUploadError with a clear message."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    # Folder lookups succeed so the upload attempt is reached.
+    files_mock.list.return_value.execute.return_value = {"files": [{"id": "folder-id"}]}
+    # Simulate Drive API quota error on the file create call.
+    files_mock.create.return_value.execute.side_effect = Exception(
+        "HttpError 403: User rate limit exceeded"
+    )
+
+    with pytest.raises(DriveUploadError, match="Drive upload failed"):
+        await svc.upload_file(b"bytes", "photo.jpg", "photo", user_id=42)
+
+
+async def test_upload_file_quota_error_message_is_user_facing() -> None:
+    """DriveUploadError raised on quota exhaustion carries the original error detail."""
+    svc, mock_api = make_service_with_mock_api()
+    files_mock = mock_api.files.return_value
+    files_mock.list.return_value.execute.return_value = {"files": [{"id": "folder-id"}]}
+    quota_exc = Exception("rateLimitExceeded")
+    files_mock.create.return_value.execute.side_effect = quota_exc
+
+    with pytest.raises(DriveUploadError) as exc_info:
+        await svc.upload_file(b"bytes", "doc.pdf", "document", user_id=7)
+
+    # The handler converts DriveUploadError to a user-facing message; verify the
+    # exception carries enough context for logging and the handler to act on.
+    assert "Drive upload failed" in str(exc_info.value)
+    assert exc_info.value.__cause__ is quota_exc
