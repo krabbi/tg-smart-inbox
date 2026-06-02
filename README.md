@@ -271,9 +271,11 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 - [x] Ideas with AI tags, complexity, and effort estimates
 - [x] Reminder snooze (+1h / +1d) and acknowledgement
 - [x] Auto-resend if reminder is not acknowledged within 5 minutes
+- [x] Multi-user support: per-user data isolation, allowlist access control, first-use onboarding
+- [x] Google Drive media upload with per-user folder isolation (v1: shared bot-owner Drive quota)
+- [ ] Google Drive v2: per-user OAuth so files land in each user's own Drive
 - [ ] Morning digest with curated content
 - [ ] Web dashboard for browsing saved items
-- [ ] Multi-user support
 
 ## License
 
