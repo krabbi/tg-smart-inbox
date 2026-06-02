@@ -20,9 +20,12 @@ from bot.utils.text import extract_url as _extract_url
 from bot.utils.text import has_time_expression as _has_time_expression
 
 
-def make_message(text: str, user_id: int = 1, forwarded: bool = False) -> Message:
+def make_message(
+    text: str, user_id: int = 1, forwarded: bool = False, language_code: str | None = "en"
+) -> Message:
     user = MagicMock(spec=User)
     user.id = user_id
+    user.language_code = language_code
     msg = MagicMock(spec=Message)
     msg.from_user = user
     msg.text = text
@@ -194,6 +197,7 @@ async def test_handle_text_task_with_time_forwards_user_timezone_to_parser() -> 
     reminder_svc.create = AsyncMock()
 
     settings_svc = MagicMock(spec=UserSettingsService)
+    settings_svc.ensure_user_settings = AsyncMock()
     settings_svc.get_timezone = AsyncMock(return_value="Europe/Moscow")
 
     await handle_text(

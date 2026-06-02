@@ -37,10 +37,16 @@ def _make_config(
     )
 
 
-def make_message(text: str | None = None, user_id: int = 123, forwarded: bool = False) -> Message:
+def make_message(
+    text: str | None = None,
+    user_id: int = 123,
+    forwarded: bool = False,
+    language_code: str | None = "en",
+) -> Message:
     """Create a minimal mock Message."""
     user = MagicMock(spec=User)
     user.id = user_id
+    user.language_code = language_code
     message = MagicMock(spec=Message)
     message.from_user = user
     message.text = text
@@ -73,10 +79,11 @@ def _make_fsm_state() -> MagicMock:
 
 
 def _make_tz_service(has_tz: bool = True) -> MagicMock:
-    """Build a mock UserSettingsService with `has_timezone` wired."""
+    """Build a mock UserSettingsService with `has_timezone` and `ensure_user_settings` wired."""
     svc = MagicMock(spec=UserSettingsService)
     svc.has_timezone = AsyncMock(return_value=has_tz)
     svc.set_timezone = AsyncMock()
+    svc.ensure_user_settings = AsyncMock()
     return svc
 
 
@@ -360,3 +367,92 @@ async def test_handle_document_drops_anonymous_message_without_calling_service()
 
     media_service.process.assert_not_awaited()
     message.answer.assert_not_awaited()
+
+
+# ── /start onboarding & settings creation ────────────────────────────────────
+
+
+async def test_cmd_start_ensures_settings_for_returning_user() -> None:
+    """/start calls ensure_user_settings for a returning user (timezone already set)."""
+    message = make_message()
+    state = _make_fsm_state()
+    svc = _make_tz_service(has_tz=True)
+
+    await cmd_start(message, state=state, user_settings_service=svc, lang="ru")
+
+    svc.ensure_user_settings.assert_awaited_once_with(
+        message.from_user.id, message.from_user.language_code
+    )
+    message.answer.assert_awaited_once()
+
+
+async def test_cmd_start_does_not_call_ensure_settings_for_new_user() -> None:
+    """/start does NOT call ensure_user_settings for a brand-new user (no timezone yet).
+
+    For new users the settings row is created by set_timezone at the end of the
+    timezone FSM, not by /start directly — so has_timezone() can continue to
+    correctly distinguish 'never configured' from 'explicitly chose UTC'.
+    """
+    message = make_message()
+    state = _make_fsm_state()
+    svc = _make_tz_service(has_tz=False)
+
+    await cmd_start(message, state=state, user_settings_service=svc, lang="ru")
+
+    svc.ensure_user_settings.assert_not_awaited()
+    # The timezone picker was launched instead.
+    state.set_state.assert_awaited()
+
+
+async def test_cmd_start_does_not_call_ensure_settings_when_service_missing() -> None:
+    """/start is safe when user_settings_service is not wired (DI misconfiguration)."""
+    message = make_message()
+    state = _make_fsm_state()
+
+    # Should not raise; welcome message is sent anyway.
+    await cmd_start(message, state=state, user_settings_service=None, lang="en")
+
+    message.answer.assert_awaited_once()
+
+
+# ── handle_text settings auto-creation ───────────────────────────────────────
+
+
+async def test_handle_text_calls_ensure_user_settings_before_saving() -> None:
+    """handle_text creates per-user settings on the very first message."""
+    from aiogram.fsm.context import FSMContext
+
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+
+    message = make_message(text="buy milk")
+    message.from_user.language_code = "ru"
+
+    svc = MagicMock(spec=UserSettingsService)
+    svc.ensure_user_settings = AsyncMock()
+
+    await handle_text(message, state=state, user_settings_service=svc, lang="ru")
+
+    svc.ensure_user_settings.assert_awaited_once_with(
+        message.from_user.id, message.from_user.language_code
+    )
+
+
+async def test_handle_text_skips_ensure_settings_without_user() -> None:
+    """handle_text does not attempt settings creation when from_user is absent."""
+    from aiogram.fsm.context import FSMContext
+
+    state = MagicMock(spec=FSMContext)
+    state.update_data = AsyncMock()
+    state.set_state = AsyncMock()
+
+    message = make_message(text="hello")
+    message.from_user = None
+
+    svc = MagicMock(spec=UserSettingsService)
+    svc.ensure_user_settings = AsyncMock()
+
+    await handle_text(message, state=state, user_settings_service=svc, lang="en")
+
+    svc.ensure_user_settings.assert_not_awaited()

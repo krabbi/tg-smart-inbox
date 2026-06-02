@@ -157,17 +157,25 @@ async def cmd_start(
 ) -> None:
     """Handle /start — run timezone setup on first run, else show the welcome message."""
     user_id = message.from_user.id if message.from_user else 0
+    language_code = message.from_user.language_code if message.from_user else None
 
-    # First-run path: no stored settings row → no user-confirmed timezone yet.
-    # `get_timezone()` returns the default ("UTC") both when the row is missing and when
-    # the user explicitly picked UTC, so we query the repo directly via the service's
-    # underlying repository only if the service is actually wired — otherwise fall back
-    # to the welcome message so the bot still replies when DI is misconfigured.
     if user_settings_service is not None and user_id:
         has_tz = await user_settings_service.has_timezone(user_id)
         if not has_tz:
+            # Brand-new user: no settings row yet, so no timezone has been confirmed.
+            # Launch the three-step timezone picker.  The settings row is created by
+            # `set_timezone` once the user completes the FSM — we intentionally do NOT
+            # call `ensure_user_settings` here so that `has_timezone` continues to
+            # distinguish "never configured" from "explicitly chose UTC".
             await start_timezone_setup(message, state, lang)
             return
+
+        # Settings row already exists (timezone was previously set).
+        # Ensure the row is present — this is a no-op for returning users and
+        # creates it with sensible defaults for users who reach the welcome screen
+        # on a path other than the timezone FSM (e.g. the row was deleted and
+        # the user typed /start again after their timezone was externally cleared).
+        await user_settings_service.ensure_user_settings(user_id, language_code)
 
     await message.answer(t("welcome", lang), reply_markup=_help_keyboard(lang))
 
