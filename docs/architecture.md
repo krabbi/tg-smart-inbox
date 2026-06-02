@@ -365,14 +365,43 @@ does not persist across messages. Promoting `DriveService` to a long-lived
 singleton so the cache survives across requests is tracked as a separate
 follow-up task.
 
+### Multi-user model (v1)
+
+The v1 model uses a **single bot-owner Google Drive integration**:
+
+- One OAuth token (`token.json`) authenticates the bot against Drive on behalf
+  of the bot operator's Google account.
+- All users' files share that single Drive quota.
+- Isolation is enforced at the folder level only — each Telegram user gets
+  their own `user_{telegram_id}` subtree (see folder layout above). The numeric
+  Telegram ID is used as the folder name; no display name or other PII appears
+  in Drive paths.
+- The bot operator can see all users' subfolders in the shared Drive root.
+  No per-user visibility controls exist in v1.
+
+### Deferred v2 items
+
+The following Drive capabilities are **explicitly out of scope for v1** and
+tracked as future work:
+
+- **Per-user Google OAuth credentials** — each Telegram user authenticates
+  with their own Google account so files land in their personal Drive.
+- **Per-user upload quotas / rate limiting** — prevent one user from
+  exhausting the shared quota.
+- **Admin visibility controls** — restrict the bot operator's view of
+  individual users' subfolders.
+
 ### Failure modes
 
 - Missing or empty `token.json` → `DriveUploadError` with a hint to run
   `scripts/drive_auth.py`.
 - Token refresh failure (network down, revoked refresh token) →
   `DriveUploadError` wrapping the original exception.
-- Any Drive API error during upload → `DriveUploadError` (raised by
-  `upload_file`).
+- Any Drive API error during upload (including quota exhaustion /
+  `rateLimitExceeded`) → `DriveUploadError` raised by `upload_file`.
+  The handler (`handle_photo` / `handle_document`) catches `DriveUploadError`
+  and replies with a user-facing error message; the raw exception detail is
+  logged for operator visibility.
 
 `MediaService.process` is the only caller; it forwards the user's Telegram
 ID into `upload_file` as the `user_id=` keyword argument so files always
