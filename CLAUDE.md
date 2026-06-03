@@ -200,8 +200,11 @@ alembic/                # migrations
 web/
   __init__.py           # empty package marker
   main.py               # create_app() factory — CORS, lifespan, route registration
-  auth.py               # verify_jwt_token() stub (full impl in #177)
+  auth.py               # verify_telegram_login, create_jwt, decode_jwt, verify_jwt_token
   dependencies.py       # get_db_session, get_current_user FastAPI deps
+  routers/
+    __init__.py         # empty package marker
+    auth.py             # POST /api/auth/telegram, GET /api/auth/me
 tests/
   conftest.py           # fake_config, db_session fixtures
   unit/

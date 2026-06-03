@@ -2,14 +2,13 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot.config import Config, get_config
 from bot.db import init_db
-from web.dependencies import get_current_user
+from web.routers import auth as auth_router
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -65,10 +64,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         """Return service liveness status."""
         return {"status": "ok"}
 
-    # Auth probe — protected; returns the current user's JWT payload.
-    @app.get("/api/auth/me")
-    async def auth_me(current_user: Annotated[dict, Depends(get_current_user)]) -> dict:
-        """Return the authenticated user's token payload."""
-        return current_user
+    # Auth endpoints: POST /api/auth/telegram and GET /api/auth/me.
+    app.include_router(auth_router.router)
 
     return app
