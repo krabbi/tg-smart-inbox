@@ -259,6 +259,10 @@ EMBEDDING_DIM=1024
 # The bot process starts without it.
 JWT_SECRET=change_me_to_a_long_random_string
 WEB_PORT=8000
+# Comma-separated list of allowed CORS origins for the web UI companion.
+# Non-empty → credentialed requests are allowed from these origins only (production).
+# Empty (default) → wildcard "*" without credentials is used (dev convenience).
+CORS_ORIGINS=https://your-frontend-domain.example.com
 
 # Required for the `prod` docker-compose profile only — used by Watchtower to
 # pull ghcr.io/krabbi/tg-smart-inbox:latest. GHCR_TOKEN must have read:packages.

@@ -80,6 +80,58 @@ def test_cors_headers_present(app: FastAPI) -> None:
     assert "access-control-allow-origin" in response.headers
 
 
+def test_cors_wildcard_no_credentials_when_no_origins_configured(web_config: Config) -> None:
+    """When cors_origins is empty, allow_origins=* and allow_credentials=False (dev mode)."""
+    web_config.cors_origins = []
+    with patch("web.main.init_db"):
+        dev_app = create_app(web_config)
+    with TestClient(dev_app, raise_server_exceptions=True) as client:
+        response = client.get("/api/health", headers={"Origin": "http://localhost:3000"})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "*"
+    # Credentials must NOT be true when wildcard is used.
+    assert response.headers.get("access-control-allow-credentials") != "true"
+
+
+def test_cors_specific_origin_with_credentials_when_origins_configured() -> None:
+    """When cors_origins is set, allow_credentials=True and only listed origins are reflected."""
+    allowed_origin = "https://app.example.com"
+    config = Config(
+        telegram_bot_token="1234567890:AAFakeTokenForTestingPurposesOnly",
+        anthropic_api_key="sk-ant-fake",
+        database_url="sqlite+aiosqlite:///:memory:",
+        jwt_secret="test-secret-key-for-unit-tests",
+        allowed_user_ids=[],
+        cors_origins=[allowed_origin],
+    )
+    with patch("web.main.init_db"):
+        prod_app = create_app(config)
+    with TestClient(prod_app, raise_server_exceptions=True) as client:
+        response = client.get("/api/health", headers={"Origin": allowed_origin})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == allowed_origin
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_cors_unlisted_origin_not_reflected_when_origins_configured() -> None:
+    """When cors_origins is set, an unlisted origin does not get an Allow-Origin header."""
+    config = Config(
+        telegram_bot_token="1234567890:AAFakeTokenForTestingPurposesOnly",
+        anthropic_api_key="sk-ant-fake",
+        database_url="sqlite+aiosqlite:///:memory:",
+        jwt_secret="test-secret-key-for-unit-tests",
+        allowed_user_ids=[],
+        cors_origins=["https://app.example.com"],
+    )
+    with patch("web.main.init_db"):
+        prod_app = create_app(config)
+    with TestClient(prod_app, raise_server_exceptions=True) as client:
+        response = client.get("/api/health", headers={"Origin": "https://evil.example.com"})
+    assert response.status_code == 200
+    # Starlette omits the header entirely for disallowed origins.
+    assert response.headers.get("access-control-allow-origin") != "https://evil.example.com"
+
+
 async def test_health_endpoint_async(app: FastAPI) -> None:
     """GET /api/health returns 200 via async HTTPX client."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

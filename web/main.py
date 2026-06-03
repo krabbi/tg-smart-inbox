@@ -39,15 +39,25 @@ def create_app(config: Config | None = None) -> FastAPI:
     # Store config on app.state so dependencies can read it.
     app.state.config = config
 
-    # CORS — allow origins from config; fall back to wildcard for dev convenience.
-    cors_origins: list[str] = getattr(config, "cors_origins", None) or ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS — when explicit origins are configured, allow credentialed requests from
+    # those origins only.  In dev mode (no origins configured) use a wildcard but
+    # disable credentials: the CORS spec forbids Allow-Origin: * with credentials.
+    if config.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Health-check endpoint — no auth required.
     @app.get("/api/health")

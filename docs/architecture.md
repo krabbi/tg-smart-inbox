@@ -882,6 +882,10 @@ uvicorn web.main:create_app --factory
 
 `JWT_SECRET` must be set in the environment; `create_app()` raises `ValueError` otherwise.
 
+`CORS_ORIGINS` controls which browser origins may make credentialed requests.
+Set it to a comma-separated list of allowed origins (e.g. `https://app.example.com`) in production.
+When empty (the default), the CORS middleware uses `allow_origins=["*"]` with `allow_credentials=False` — suitable for local development only.
+
 ### Registered endpoints
 
 | Method | Path | Auth | Description |
@@ -922,6 +926,7 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `GHCR_TOKEN` | Prod only | — | GitHub Personal Access Token with the `read:packages` scope. Used by Watchtower to pull `ghcr.io/krabbi/tg-smart-inbox:latest`. Required when running the `prod` profile. |
 | `JWT_SECRET` | Web only | `None` | Secret key used to sign JWT tokens by the web UI companion service (`web/main.py`). Not required for the bot process — the web app factory validates its presence at startup. |
 | `WEB_PORT` | No | `8000` | Port the FastAPI web service listens on. Has no effect on the bot process. |
+| `CORS_ORIGINS` | No | `[]` | Comma-separated list of allowed CORS origins for the web UI companion (e.g. `https://app.example.com`). Non-empty → credentialed requests allowed from listed origins only. Empty → wildcard `*` without credentials (dev convenience). |
 
 ---
 
