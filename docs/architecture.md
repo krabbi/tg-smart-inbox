@@ -871,7 +871,7 @@ It shares the same database as the bot via `bot/db.py` — no second engine is c
 |------|---------------|
 | `web/__init__.py` | Empty package marker |
 | `web/main.py` | `create_app(config)` factory — builds the FastAPI app, wires CORS middleware, registers routers, and initialises the DB session factory via `bot.db.init_db` in the lifespan handler |
-| `web/auth.py` | `verify_jwt_token(token) -> dict` — stub replaced by the full PyJWT implementation in issue #177; always raises HTTP 401 until then |
+| `web/auth.py` | Three public functions: `verify_telegram_login(data, bot_token) -> bool` — validates a Telegram Login Widget payload (HMAC-SHA256 + 24h expiry check); `create_jwt(telegram_id, secret, ttl_seconds) -> str` — issues a signed HS256 JWT with `sub` = str(telegram_id); `decode_jwt(token, secret) -> dict` — decodes and validates a JWT, raising `jwt.InvalidTokenError` on failure. `verify_jwt_token(token, secret) -> dict` is a thin wrapper used by FastAPI dependencies that raises `jwt.InvalidTokenError` when `secret` is `None`. |
 | `web/dependencies.py` | Shared FastAPI dependencies: `get_db_session` (yields `AsyncSession`) and `get_current_user` (validates Bearer JWT, enforces `ALLOWED_USER_IDS` allowlist) |
 
 ### Starting the web service
