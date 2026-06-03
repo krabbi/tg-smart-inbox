@@ -1,8 +1,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import bot.scheduler as scheduler_mod
 from bot.scheduler import _auto_archive_reminders, _send_due_reminders, start_scheduler
 from bot.services.reindex_service import ReindexService
 
@@ -420,8 +422,8 @@ def test_start_scheduler_registers_reindex_job_when_config_given() -> None:
     config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
     with patch.object(AsyncIOScheduler, "start"):
         scheduler = start_scheduler(bot, factory, config)
-    # Reminders + auto-archive + reindex = 3 jobs
-    assert len(scheduler.get_jobs()) == 3
+    # Reminders + auto-archive + reindex + backfill = 4 jobs
+    assert len(scheduler.get_jobs()) == 4
 
 
 def test_start_scheduler_reindex_job_waits_for_first_interval() -> None:
@@ -1026,3 +1028,314 @@ async def test_reindex_missing_embeddings_skips_none_vectors() -> None:
         await _reindex_missing_embeddings(factory, config)
 
         mock_item_repo.update_embedding.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _backfill_link_summaries tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=False)
+def reset_backfill_flag():
+    """Ensure the module-level _backfill_running flag is reset after each test."""
+    scheduler_mod._backfill_running = False
+    yield
+    scheduler_mod._backfill_running = False
+
+
+async def test_backfill_link_summaries_processes_items(reset_backfill_flag) -> None:
+    """Items returned by get_missing_summary get a summary generated and persisted."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _backfill_link_summaries
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "https://example.com"
+    item.scraped_text = "full page text here"
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.LinkService") as mock_link_svc_cls,
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+        patch("bot.scheduler.asyncio.sleep", new=AsyncMock()),
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_summary = AsyncMock(return_value=[item])
+        mock_item_repo.update_summary = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        from bot.services.link_service import LinkSummary
+
+        mock_link_svc = MagicMock()
+        mock_link_svc._try_summarize = AsyncMock(
+            return_value=LinkSummary(
+                title="Example Title", body="A great summary.", url="https://example.com"
+            )
+        )
+        mock_link_svc_cls.return_value = mock_link_svc
+
+        factory = make_session_factory(session)
+        await _backfill_link_summaries(factory, config)
+
+    mock_item_repo.get_missing_summary.assert_awaited_once_with(
+        limit=scheduler_mod._BACKFILL_BATCH_SIZE
+    )
+    mock_link_svc._try_summarize.assert_awaited_once_with(item.content, item.scraped_text, "en")
+    mock_item_repo.update_summary.assert_awaited_once_with(item.id, "A great summary.")
+    session.commit.assert_awaited()
+
+
+async def test_backfill_link_summaries_no_items_is_quiet_noop(reset_backfill_flag) -> None:
+    """When no items need a summary the job returns quietly without any API call."""
+    from bot.config import Config
+    from bot.scheduler import _backfill_link_summaries
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.LinkService") as mock_link_svc_cls,
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_summary = AsyncMock(return_value=[])
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_link_svc = MagicMock()
+        mock_link_svc_cls.return_value = mock_link_svc
+
+        factory = make_session_factory(session)
+        await _backfill_link_summaries(factory, config)
+
+    mock_link_svc._try_summarize.assert_not_called()
+    session.commit.assert_not_awaited()
+
+
+async def test_backfill_link_summaries_skips_when_already_running(reset_backfill_flag) -> None:
+    """When _backfill_running is True the job returns without opening a session."""
+    from bot.config import Config
+    from bot.scheduler import _backfill_link_summaries
+
+    scheduler_mod._backfill_running = True
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+    factory = MagicMock(spec=async_sessionmaker)
+
+    await _backfill_link_summaries(factory, config)
+
+    factory.assert_not_called()
+
+
+async def test_backfill_link_summaries_skips_when_no_anthropic_key(reset_backfill_flag) -> None:
+    """When anthropic_api_key is empty the job is a no-op."""
+    from bot.config import Config
+    from bot.scheduler import _backfill_link_summaries
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="")
+    factory = MagicMock(spec=async_sessionmaker)
+
+    await _backfill_link_summaries(factory, config)
+
+    factory.assert_not_called()
+
+
+async def test_backfill_link_summaries_per_record_error_continues(reset_backfill_flag) -> None:
+    """A per-item exception is logged and skipped; subsequent items are still processed."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _backfill_link_summaries
+
+    bad_item = MagicMock(spec=Item)
+    bad_item.id = uuid.uuid4()
+    bad_item.content = "https://bad.com"
+    bad_item.scraped_text = "bad page"
+
+    good_item = MagicMock(spec=Item)
+    good_item.id = uuid.uuid4()
+    good_item.content = "https://good.com"
+    good_item.scraped_text = "good page"
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.LinkService") as mock_link_svc_cls,
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+        patch("bot.scheduler.asyncio.sleep", new=AsyncMock()),
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_summary = AsyncMock(return_value=[bad_item, good_item])
+        mock_item_repo.update_summary = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        from bot.services.link_service import LinkSummary
+
+        mock_link_svc = MagicMock()
+        mock_link_svc._try_summarize = AsyncMock(
+            side_effect=[
+                Exception("Claude API error"),
+                LinkSummary(title="Good", body="Good summary.", url="https://good.com"),
+            ]
+        )
+        mock_link_svc_cls.return_value = mock_link_svc
+
+        factory = make_session_factory(session)
+        # Must not raise.
+        await _backfill_link_summaries(factory, config)
+
+    # The good item was still processed.
+    mock_item_repo.update_summary.assert_awaited_once_with(good_item.id, "Good summary.")
+    session.rollback.assert_awaited()
+
+
+async def test_backfill_link_summaries_skips_none_summary(reset_backfill_flag) -> None:
+    """When _try_summarize returns None the item is skipped without update or commit."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _backfill_link_summaries
+
+    item = MagicMock(spec=Item)
+    item.id = uuid.uuid4()
+    item.content = "https://example.com"
+    item.scraped_text = "page text"
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.LinkService") as mock_link_svc_cls,
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_summary = AsyncMock(return_value=[item])
+        mock_item_repo.update_summary = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        mock_link_svc = MagicMock()
+        mock_link_svc._try_summarize = AsyncMock(return_value=None)
+        mock_link_svc_cls.return_value = mock_link_svc
+
+        factory = make_session_factory(session)
+        await _backfill_link_summaries(factory, config)
+
+    mock_item_repo.update_summary.assert_not_awaited()
+    session.commit.assert_not_awaited()
+
+
+async def test_backfill_link_summaries_throttles_between_items(reset_backfill_flag) -> None:
+    """A sleep is inserted after each successfully summarized item."""
+    import uuid
+
+    from bot.config import Config
+    from bot.models.item import Item
+    from bot.scheduler import _BACKFILL_THROTTLE_SECONDS, _backfill_link_summaries
+
+    items = []
+    for _ in range(3):
+        it = MagicMock(spec=Item)
+        it.id = uuid.uuid4()
+        it.content = "https://example.com"
+        it.scraped_text = "page text"
+        items.append(it)
+
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+
+    with (
+        patch("bot.scheduler.ItemRepository") as mock_item_repo_cls,
+        patch("bot.scheduler.LinkService") as mock_link_svc_cls,
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+        patch("bot.scheduler.asyncio.sleep", new=AsyncMock()) as mock_sleep,
+    ):
+        mock_item_repo = MagicMock()
+        mock_item_repo.get_missing_summary = AsyncMock(return_value=items)
+        mock_item_repo.update_summary = AsyncMock()
+        mock_item_repo_cls.return_value = mock_item_repo
+
+        from bot.services.link_service import LinkSummary
+
+        mock_link_svc = MagicMock()
+        mock_link_svc._try_summarize = AsyncMock(
+            return_value=LinkSummary(title="T", body="B", url="https://example.com")
+        )
+        mock_link_svc_cls.return_value = mock_link_svc
+
+        factory = make_session_factory(session)
+        await _backfill_link_summaries(factory, config)
+
+    assert mock_sleep.await_count == 3
+    mock_sleep.assert_any_await(_BACKFILL_THROTTLE_SECONDS)
+
+
+async def test_backfill_link_summaries_releases_flag_on_error(reset_backfill_flag) -> None:
+    """The _backfill_running flag is cleared even when session_factory raises."""
+    from bot.config import Config
+    from bot.scheduler import _backfill_link_summaries
+
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+    factory = MagicMock(side_effect=RuntimeError("db down"))
+
+    with (
+        patch("bot.scheduler.ClaudeClient"),
+        patch("bot.scheduler.Scraper"),
+    ):
+        raised = False
+        try:
+            await _backfill_link_summaries(factory, config)
+        except RuntimeError:
+            raised = True
+
+    assert raised
+    assert scheduler_mod._backfill_running is False
+
+
+def test_start_scheduler_registers_backfill_job_when_config_given() -> None:
+    from bot.config import Config
+
+    bot = MagicMock()
+    factory = MagicMock()
+    config = Config(telegram_bot_token="fake", anthropic_api_key="sk-ant-fake")
+    with patch.object(AsyncIOScheduler, "start"):
+        scheduler = start_scheduler(bot, factory, config)
+    # send_due + auto_archive + reindex + backfill = 4 jobs
+    assert len(scheduler.get_jobs()) == 4
+
+
+def test_start_scheduler_does_not_register_backfill_job_without_config() -> None:
+    bot = MagicMock()
+    factory = MagicMock()
+    with patch.object(AsyncIOScheduler, "start"):
+        scheduler = start_scheduler(bot, factory)
+    # send_due + auto_archive = 2 jobs (no config-dependent jobs)
+    assert len(scheduler.get_jobs()) == 2

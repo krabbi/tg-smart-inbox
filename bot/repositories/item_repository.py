@@ -83,6 +83,39 @@ class ItemRepository:
         )
         return list(result.scalars().all())
 
+    async def get_missing_summary(self, *, limit: int = 50) -> list[Item]:
+        """Return link Items with cached text but no summary, oldest first (batch for backfill).
+
+        SYSTEM-ONLY method: not scoped by ``user_id`` — returns records from all users.
+        Only the background summary-backfill scheduler job calls this.
+        Items where ``scraped_text IS NULL`` are excluded — no source text means no summary
+        can be generated without an extra HTTP round trip.
+        """
+        result = await self._session.execute(
+            select(Item)
+            .where(
+                Item.type == ItemType.link,
+                Item.summary.is_(None),
+                Item.scraped_text.is_not(None),
+            )
+            .order_by(Item.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def update_summary(self, item_id: uuid.UUID, summary: str) -> None:
+        """Persist a generated summary on an existing Item; caller commits.
+
+        SYSTEM-ONLY method: not bounded by ``user_id`` because the only caller is the
+        background summary-backfill scheduler job which already owns the Item via a
+        system-scoped query. Never expose to user-controlled item IDs.
+        """
+        item = await self._session.get(Item, item_id)
+        if item is None:
+            return
+        item.summary = summary
+        await self._session.flush()
+
     async def list_without_embedding(self, user_id: int, limit: int) -> list[Item]:
         """Return one user's Items without a stored embedding, oldest first, capped at limit."""
         result = await self._session.execute(

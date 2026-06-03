@@ -15,9 +15,12 @@ from bot.repositories.idea_repository import IdeaRepository
 from bot.repositories.item_repository import ItemRepository
 from bot.repositories.reminder_repository import ReminderRepository
 from bot.repositories.user_settings import UserSettingsRepository
+from bot.services.claude_client import ClaudeClient
 from bot.services.embedding_service import EmbeddingService
+from bot.services.link_service import LinkService
 from bot.services.reindex_service import ReindexService
 from bot.services.reminder_service import ReminderService
+from bot.services.scraper import Scraper
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
 from bot.utils.text import format_item_display_with_summary
@@ -28,6 +31,14 @@ _AUTO_ARCHIVE_DELAY = timedelta(hours=24)
 _REINDEX_BATCH_SIZE = 50
 _REINDEX_INTERVAL_MINUTES = 10
 _REINDEX_THROTTLE_SECONDS = 22.0  # Voyage AI free tier: 3 RPM → ≥20s between requests
+
+_BACKFILL_BATCH_SIZE = 20
+_BACKFILL_INTERVAL_MINUTES = 10
+# Claude API has generous rate limits; 5s between calls keeps scheduler impact low.
+_BACKFILL_THROTTLE_SECONDS = 5.0
+
+# Simple boolean flag — only one backfill run should be active at a time.
+_backfill_running: bool = False
 
 
 def _reactivate_keyboard(reminder_id: str, lang: str) -> InlineKeyboardMarkup:
@@ -160,6 +171,68 @@ async def _reindex_missing_embeddings(
         ReindexService.finish_scheduler_reindex()
 
 
+async def _backfill_link_summaries(
+    session_factory: async_sessionmaker[AsyncSession],
+    config: Config,
+) -> None:
+    """Generate summaries for link Items that have cached text but no summary.
+
+    Runs in batches, skips per-record failures, and throttles Claude calls.
+    A module-level boolean guard prevents overlapping runs.
+    When Claude is not configured on this instance the job is a quiet no-op.
+    No Telegram message is ever sent.
+    """
+    global _backfill_running  # noqa: PLW0603
+
+    if _backfill_running:
+        logger.info("Skipping summary backfill because another backfill run is active")
+        return
+
+    if not config.anthropic_api_key:
+        logger.info("Summary backfill: Claude not configured, skipping")
+        return
+
+    _backfill_running = True
+    try:
+        claude = ClaudeClient(config)
+        # Scraper is constructed but never used — summaries are generated from the
+        # already-cached scraped_text, so no HTTP requests are made in this path.
+        scraper = Scraper()
+        async with session_factory() as session:
+            item_repo = ItemRepository(session)
+            link_svc = LinkService(
+                session=session,
+                item_repo=item_repo,
+                scraper=scraper,
+                claude=claude,
+            )
+
+            items = await item_repo.get_missing_summary(limit=_BACKFILL_BATCH_SIZE)
+            if not items:
+                return
+
+            logger.info("Summary backfill: processing %d item(s)", len(items))
+            for item in items:
+                try:
+                    # scraped_text is guaranteed non-NULL by the repository query.
+                    summary = await link_svc._try_summarize(
+                        item.content,
+                        item.scraped_text,
+                        "en",  # type: ignore[arg-type]
+                    )
+                    if summary is None:
+                        logger.warning("Summary backfill: got None for item %s, skipping", item.id)
+                        continue
+                    await item_repo.update_summary(item.id, summary.body)
+                    await session.commit()
+                    await asyncio.sleep(_BACKFILL_THROTTLE_SECONDS)
+                except Exception:
+                    logger.exception("Summary backfill failed for item %s", item.id)
+                    await session.rollback()
+    finally:
+        _backfill_running = False
+
+
 def start_scheduler(
     bot: Bot,
     session_factory: async_sessionmaker[AsyncSession],
@@ -167,8 +240,8 @@ def start_scheduler(
 ) -> AsyncIOScheduler:
     """Create and start the APScheduler that fires reminders every 60 seconds.
 
-    When ``config`` is provided, a background reindex job populates missing embeddings
-    every ten minutes.
+    When ``config`` is provided, background jobs populate missing embeddings and
+    backfill link summaries every ten minutes.
     """
     scheduler = AsyncIOScheduler()
     reminder_kwargs = {"bot": bot, "session_factory": session_factory}
@@ -189,6 +262,12 @@ def start_scheduler(
             _reindex_missing_embeddings,
             trigger="interval",
             minutes=_REINDEX_INTERVAL_MINUTES,
+            kwargs={"session_factory": session_factory, "config": config},
+        )
+        scheduler.add_job(
+            _backfill_link_summaries,
+            trigger="interval",
+            minutes=_BACKFILL_INTERVAL_MINUTES,
             kwargs={"session_factory": session_factory, "config": config},
         )
     scheduler.start()

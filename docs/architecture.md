@@ -100,7 +100,7 @@ the transaction boundary.
 
 | File | Responsibility |
 |------|---------------|
-| `item_repository.py` | CRUD for `Item` records |
+| `item_repository.py` | CRUD for `Item` records; includes system-only `get_missing_summary` (link items with `scraped_text` but no `summary`) and `update_summary` (persists a generated summary) used by the backfill scheduler job |
 | `reminder_repository.py` | CRUD for `Reminder` records, due/auto-archive queries, reactivate |
 | `idea_repository.py` | CRUD for `Idea` records |
 | `user_settings.py` | CRUD for `UserSettings` records (per-user preferences) |
@@ -683,6 +683,7 @@ mutations never return or modify the other user's rows.
 | Due reminders | 60 seconds | `_send_due_reminders` | Finds reminders where `remind_at <= now`, not sent, not cancelled/acknowledged. Sends notification with snooze/ack keyboard. Sets `auto_archive_at = now + 24h`. |
 | Auto-archive | 60 seconds | `_auto_archive_reminders` | Finds reminders where `auto_archive_at <= now` and none of the close flags are set. Marks them `is_auto_completed = True`, clears the timer, and sends a final message with a single `🔄 Реактивировать` button. There are no intermediate auto-resends — between the first delivery and the auto-archive close, the user is silent for a full 24h. |
 | Reindex embeddings | 10 minutes | `_reindex_missing_embeddings` | Batches up to 50 Items and 50 Ideas with `embedding IS NULL`, calls `EmbeddingService`, and persists the resulting vectors. Sleeps 22 s after every successful embedding to stay under Voyage AI's free-tier rate limit. Skips the run when a user-triggered `/reindex` is already active. Failures per record are logged and skipped. Registered only when `start_scheduler()` is called with a `Config`. |
+| Backfill link summaries | 10 minutes | `_backfill_link_summaries` | Batches up to 20 `ItemType.link` rows where `summary IS NULL AND scraped_text IS NOT NULL`, generates a summary for each via `LinkService._try_summarize` (no HTTP — uses the cached `scraped_text`), and persists it onto the `Item`. Sleeps 5 s between Claude calls to stay within the API budget. Per-record failures are logged and skipped; the run continues with the next item. A module-level boolean guard prevents overlapping runs. Is a quiet no-op when `anthropic_api_key` is not configured. No Telegram message is ever sent. Registered only when `start_scheduler()` is called with a `Config`. |
 
 Each scheduler job opens its own DB session.
 
