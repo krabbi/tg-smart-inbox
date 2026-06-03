@@ -100,7 +100,7 @@ the transaction boundary.
 
 | File | Responsibility |
 |------|---------------|
-| `item_repository.py` | CRUD for `Item` records; includes system-only `get_missing_summary` (link items with `scraped_text` but no `summary`) and `update_summary` (persists a generated summary) used by the backfill scheduler job |
+| `item_repository.py` | CRUD for `Item` records; includes system-only `get_missing_summary` (link items with `scraped_text` but no `summary`) and `update_summary` (persists a generated summary) used by the backfill scheduler job. User-scoped pagination via `get_recent`, `get_recent_by_type`, `count_by_user`, `count_by_user_and_type`; full-text search via `search(user_id, query, *, limit, offset)` and `count_search(user_id, query)`. |
 | `reminder_repository.py` | CRUD for `Reminder` records, due/auto-archive queries, reactivate |
 | `idea_repository.py` | CRUD for `Idea` records |
 | `user_settings.py` | CRUD for `UserSettings` records (per-user preferences) |
@@ -875,6 +875,7 @@ It shares the same database as the bot via `bot/db.py` — no second engine is c
 | `web/dependencies.py` | Shared FastAPI dependencies: `get_db_session` (yields `AsyncSession`) and `get_current_user` (validates Bearer JWT, enforces `ALLOWED_USER_IDS` allowlist) |
 | `web/routers/__init__.py` | Empty package marker for the routers sub-package |
 | `web/routers/auth.py` | Auth router mounted at `/api/auth`: `POST /api/auth/telegram` (verifies Telegram Login Widget payload, enforces allowlist, issues JWT) and `GET /api/auth/me` (protected by `get_current_user`, returns JWT claims) |
+| `web/routers/items.py` | Items router mounted at `/api/items`: `GET /api/items` (paginated list with optional `type` filter and full-text search via `?q=`) and `GET /api/items/{id}` (full item detail). Both endpoints require a valid Bearer JWT and scope all queries to the authenticated user's `telegram_id`. |
 
 ### Starting the web service
 
@@ -895,6 +896,8 @@ When empty (the default), the CORS middleware uses `allow_origins=["*"]` with `a
 | GET | `/api/health` | None | Liveness check — returns `{"status": "ok"}` |
 | POST | `/api/auth/telegram` | None | Verify Telegram Login Widget payload; returns `{"token": "<jwt>"}`. HTTP 401 on invalid/expired hash, HTTP 403 when user not in allowlist. |
 | GET | `/api/auth/me` | Bearer JWT | Returns the authenticated user's JWT claims (`sub`, `exp`). HTTP 401 without a valid token. |
+| GET | `/api/items` | Bearer JWT | Paginated list of the authenticated user's items. Query params: `page` (default 1), `type` (`task\|note\|link\|idea\|media`), `q` (full-text search). Returns `{"items": [...], "page": N, "total_pages": N}`. HTTP 400 on unknown type. |
+| GET | `/api/items/{id}` | Bearer JWT | Full detail for a single item owned by the authenticated user. Returns `id`, `type`, `content`, `title`, `description`, `scraped_text`, `created_at`. HTTP 404 if not found or owned by another user. HTTP 400 if `id` is not a valid UUID. |
 
 ### Dependency injection
 

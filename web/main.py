@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from bot.config import Config, get_config
 from bot.db import init_db
 from web.routers import auth as auth_router
+from web.routers import items as items_router
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -66,5 +67,8 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     # Auth endpoints: POST /api/auth/telegram and GET /api/auth/me.
     app.include_router(auth_router.router)
+
+    # Items endpoints: GET /api/items and GET /api/items/{id}.
+    app.include_router(items_router.router)
 
     return app
