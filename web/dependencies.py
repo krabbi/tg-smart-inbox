@@ -45,7 +45,10 @@ async def get_current_user(
 
     # Enforce allowlist when ALLOWED_USER_IDS is configured.
     if config is not None and config.allowed_user_ids:
-        telegram_id = payload.get("telegram_id")
+        try:
+            telegram_id = int(payload.get("sub", ""))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=403, detail="Forbidden") from exc
         if telegram_id not in config.allowed_user_ids:
             raise HTTPException(status_code=403, detail="Forbidden")
 
