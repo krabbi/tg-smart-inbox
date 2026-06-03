@@ -216,7 +216,7 @@ async def test_receive_reminder_time_with_url_clears_state_and_delegates_to_link
     state.clear.assert_awaited_once()
     time_parser.parse.assert_not_awaited()
     reminder_svc.create.assert_not_awaited()
-    link_svc.save.assert_awaited_once_with(url, 1)
+    link_svc.save.assert_awaited_once_with(url, 1, lang="en")
     # Link flow replies with the "saved" message + keyboard
     msg.answer.assert_awaited_once()
     assert "reply_markup" in msg.answer.call_args[1]

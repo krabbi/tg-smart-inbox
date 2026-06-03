@@ -85,7 +85,7 @@ async def test_handle_link_message_saves_and_replies() -> None:
     message = make_message()
     svc = make_link_service()
     await handle_link_message(message, "https://example.com", svc, "ru")
-    svc.save.assert_awaited_once_with("https://example.com", 1)
+    svc.save.assert_awaited_once_with("https://example.com", 1, lang="ru")
     message.answer.assert_awaited_once()
     call_kwargs = message.answer.call_args[1]
     assert "reply_markup" in call_kwargs

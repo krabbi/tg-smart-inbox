@@ -34,6 +34,9 @@ def has_time_expression(text: str) -> bool:
     return bool(_TIME_RE.search(text))
 
 
+_SUMMARY_INLINE_MAX_CHARS = 200
+
+
 def format_item_display(item: Item) -> str:
     """Return the user-facing display string for an Item.
 
@@ -49,3 +52,25 @@ def format_item_display(item: Item) -> str:
     if item.type == ItemType.media and item.description:
         return f"{item.description} ({item.content})"
     return item.content
+
+
+def format_item_display_with_summary(item: Item) -> str:
+    """Return the display string for an Item with an inline short summary for links.
+
+    For link items that have a non-empty stored ``summary``, appends a truncated
+    version (up to ``_SUMMARY_INLINE_MAX_CHARS`` chars) on a new line below the
+    ``{title} ({url})`` header line.  When ``summary`` is absent or blank the
+    output is identical to :func:`format_item_display` — no placeholder text.
+
+    Non-link items are rendered exactly as :func:`format_item_display`.
+    """
+    base = format_item_display(item)
+    if item.type != ItemType.link:
+        return base
+    summary: str | None = getattr(item, "summary", None)
+    if not summary or not summary.strip():
+        return base
+    short = summary.strip()
+    if len(short) > _SUMMARY_INLINE_MAX_CHARS:
+        short = short[:_SUMMARY_INLINE_MAX_CHARS].rstrip() + "…"
+    return f"{base}\n{short}"
