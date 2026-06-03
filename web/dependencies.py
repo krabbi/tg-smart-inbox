@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,10 +35,15 @@ async def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    payload = verify_jwt_token(credentials.credentials)
+    config = getattr(request.app.state, "config", None)
+    secret: str | None = getattr(config, "jwt_secret", None)
+
+    try:
+        payload = verify_jwt_token(credentials.credentials, secret)
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
     # Enforce allowlist when ALLOWED_USER_IDS is configured.
-    config = getattr(request.app.state, "config", None)
     if config is not None and config.allowed_user_ids:
         telegram_id = payload.get("telegram_id")
         if telegram_id not in config.allowed_user_ids:
