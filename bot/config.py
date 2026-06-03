@@ -29,6 +29,12 @@ class Config(BaseSettings):
     # Matches the voyage-3.5 output size (Voyage AI).
     embedding_dim: int = 1024
 
+    # Web UI companion (optional — only required when running the web service).
+    # JWT_SECRET is validated at web app startup (web/main.py), not here, so the
+    # bot process can start without it.
+    jwt_secret: str | None = None
+    web_port: int = 8000
+
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
     def parse_user_ids(cls, v: object) -> object:

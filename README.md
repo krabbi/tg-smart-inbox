@@ -254,6 +254,12 @@ VOYAGE_API_KEY=your_voyage_key_here
 # Must match the size of the pgvector columns — changing it requires an Alembic migration.
 EMBEDDING_DIM=1024
 
+# Optional: web UI companion service.
+# JWT_SECRET is required only when running the web service (web/main.py validates it).
+# The bot process starts without it.
+JWT_SECRET=change_me_to_a_long_random_string
+WEB_PORT=8000
+
 # Required for the `prod` docker-compose profile only — used by Watchtower to
 # pull ghcr.io/krabbi/tg-smart-inbox:latest. GHCR_TOKEN must have read:packages.
 GHCR_USER=your_github_username_here

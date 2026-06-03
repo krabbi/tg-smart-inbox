@@ -879,6 +879,8 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `EMBEDDING_DIM` | No | `1024` | Dimensionality of embeddings produced by the embedding provider. Must match the `vector(N)` column size — changing it requires an Alembic migration. |
 | `GHCR_USER` | Prod only | — | GitHub username used by Watchtower to authenticate against `ghcr.io` and pull the bot image. Required when running the `prod` profile in `docker-compose.yml`. |
 | `GHCR_TOKEN` | Prod only | — | GitHub Personal Access Token with the `read:packages` scope. Used by Watchtower to pull `ghcr.io/krabbi/tg-smart-inbox:latest`. Required when running the `prod` profile. |
+| `JWT_SECRET` | Web only | `None` | Secret key used to sign JWT tokens by the web UI companion service (`web/main.py`). Not required for the bot process — the web app factory validates its presence at startup. |
+| `WEB_PORT` | No | `8000` | Port the FastAPI web service listens on. Has no effect on the bot process. |
 
 ---
 
