@@ -20,7 +20,7 @@ from bot.services.reindex_service import ReindexService
 from bot.services.reminder_service import ReminderService
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
-from bot.utils.text import format_item_display
+from bot.utils.text import format_item_display_with_summary
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def _send_due_reminders(
                         "reminder_notification",
                         user_lang,
                         formatted=formatted,
-                        content=format_item_display(item),
+                        content=format_item_display_with_summary(item),
                     ),
                     reply_markup=build_snooze_keyboard(str(reminder.id), user_lang),
                 )
@@ -104,7 +104,7 @@ async def _auto_archive_reminders(
                     text=t(
                         "reminder_auto_completed",
                         user_lang,
-                        content=format_item_display(item),
+                        content=format_item_display_with_summary(item),
                     ),
                     reply_markup=_reactivate_keyboard(str(reminder.id), user_lang),
                 )

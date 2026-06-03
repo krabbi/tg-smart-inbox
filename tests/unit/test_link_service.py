@@ -37,6 +37,7 @@ def make_link_service(
     mock_item.content = "https://example.com"
     mock_item.scraped_text = None
     mock_item.title = None
+    mock_item.summary = None
 
     mock_repo = MagicMock(spec=ItemRepository)
     mock_repo.create = AsyncMock(return_value=mock_item)
@@ -100,6 +101,7 @@ async def test_save_without_embedding_service_returns_not_indexed() -> None:
     mock_item.type = ItemType.link
     mock_item.scraped_text = None
     mock_item.title = None
+    mock_item.summary = None
     mock_repo.create = AsyncMock(return_value=mock_item)
 
     mock_scraper = MagicMock(spec=Scraper)
@@ -369,6 +371,7 @@ async def test_summarize_uses_cached_scraped_text_and_skips_http() -> None:
     """With a cached Item the scraper must not be invoked."""
     cached = MagicMock(spec=Item)
     cached.scraped_text = "already have this page"
+    cached.summary = None
     svc, repo = make_link_service(cached_item=cached)
 
     item_id = uuid.uuid4()
@@ -386,6 +389,7 @@ async def test_summarize_falls_back_to_scraper_when_cache_is_empty() -> None:
     """When the Item exists but has no cached text, fetch fresh and write it back."""
     cached = MagicMock(spec=Item)
     cached.scraped_text = None
+    cached.summary = None
     svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
 
     item_id = uuid.uuid4()
@@ -421,6 +425,7 @@ async def test_summarize_rolls_back_when_cache_write_fails() -> None:
     """If persisting the cache blows up, the summary still returns successfully."""
     cached = MagicMock(spec=Item)
     cached.scraped_text = None
+    cached.summary = None
     svc, repo = make_link_service(cached_item=cached, scraper_text="fresh body")
     repo.update_scraped_text_for_user = AsyncMock(side_effect=RuntimeError("DB down"))  # type: ignore[attr-defined]
 
@@ -435,6 +440,7 @@ async def test_summarize_raises_scraping_error_when_no_cache_and_fetch_fails() -
     """Cache miss plus unreachable page propagates ScrapingError as before."""
     cached = MagicMock(spec=Item)
     cached.scraped_text = None
+    cached.summary = None
     svc, _ = make_link_service(cached_item=cached)
     svc._scraper.fetch_text = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
 
@@ -469,3 +475,140 @@ async def test_summarize_does_not_overwrite_other_users_cache_on_miss() -> None:
     repo.update_scraped_text_for_user.assert_awaited_once_with(item_id, 42, "fresh body")  # type: ignore[attr-defined]
     # Repo returned False, so no other user's row was modified.
     assert repo.update_scraped_text_for_user.return_value is False  # type: ignore[attr-defined]
+
+
+# ── summary persistence at save time ─────────────────────────────────────────
+
+
+async def test_save_persists_summary_when_scraped_text_is_available() -> None:
+    """When scraping succeeds, the summary is generated and stored on the item."""
+    svc, _ = make_link_service(
+        scraper_text="some page text",
+        claude_response="Title\n\nThis is the summary body.",
+    )
+    saved = await svc.save("https://example.com", user_id=1)
+    # Claude was called; the summary body is written to item.summary.
+    assert saved.item.summary == "This is the summary body."
+
+
+async def test_save_skips_summary_when_no_scraped_text() -> None:
+    """When scraping returns nothing, no Claude call is made and summary stays None."""
+    svc, _ = make_link_service(scraper_text="")
+    saved = await svc.save("https://example.com", user_id=1)
+    svc._claude.complete.assert_not_awaited()  # type: ignore[attr-defined]
+    assert saved.item.summary is None
+
+
+async def test_save_still_succeeds_when_summary_generation_fails() -> None:
+    """A Claude error during summary generation must not break the save."""
+    svc, _ = make_link_service(scraper_text="page text")
+    svc._claude.complete = AsyncMock(side_effect=Exception("Claude down"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item is not None
+    assert saved.item.summary is None
+    svc._session.commit.assert_awaited()  # type: ignore[attr-defined]
+
+
+async def test_save_still_succeeds_when_scraper_fails_no_summary() -> None:
+    """Scraper failure means no page text and thus no summary attempt."""
+    svc, _ = make_link_service()
+    svc._scraper.fetch = AsyncMock(side_effect=ScrapingError("timeout"))  # type: ignore[attr-defined]
+
+    saved = await svc.save("https://example.com", user_id=1)
+
+    assert saved.item.summary is None
+    svc._claude.complete.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+async def test_save_passes_lang_to_summary_generation() -> None:
+    """The lang argument controls the language passed to the Claude summary prompt."""
+    svc, _ = make_link_service(
+        scraper_text="page text",
+        claude_response="Titre\n\nRésumé en français.",
+    )
+    await svc.save("https://example.com", user_id=1, lang="en")
+
+    svc._claude.complete.assert_awaited()  # type: ignore[attr-defined]
+    sent_prompt = svc._claude.complete.await_args.args[0]  # type: ignore[attr-defined]
+    assert "English" in sent_prompt
+
+
+# ── summarize: stored-summary fast path ──────────────────────────────────────
+
+
+async def test_summarize_uses_stored_summary_and_skips_claude() -> None:
+    """When the stored summary exists, Claude must not be called."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "page text"
+    cached.summary = "Stored body text."
+    cached.title = "Stored Title"
+    svc, repo = make_link_service(cached_item=cached)
+
+    item_id = uuid.uuid4()
+    result = await svc.summarize("https://example.com", user_id=1, item_id=item_id)
+
+    svc._claude.complete.assert_not_awaited()  # type: ignore[attr-defined]
+    svc._scraper.fetch_text.assert_not_awaited()  # type: ignore[attr-defined]
+    assert result.title == "Stored Title"
+    assert result.body == "Stored body text."
+    assert result.url == "https://example.com"
+
+
+async def test_summarize_uses_url_as_title_when_item_title_is_none() -> None:
+    """Stored summary but no title → URL used as the title."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "page text"
+    cached.summary = "Some body."
+    cached.title = None
+    svc, _ = make_link_service(cached_item=cached)
+
+    result = await svc.summarize("https://example.com", user_id=1, item_id=uuid.uuid4())
+
+    assert result.title == "https://example.com"
+    assert result.body == "Some body."
+
+
+async def test_summarize_falls_through_to_claude_when_stored_summary_is_empty() -> None:
+    """Empty stored summary must not short-circuit — regenerate via Claude."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "page text"
+    cached.summary = "   "  # whitespace only — treat as absent
+    cached.title = "Title"
+    svc, _ = make_link_service(cached_item=cached)
+
+    await svc.summarize("https://example.com", user_id=1, item_id=uuid.uuid4())
+
+    svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+async def test_summarize_single_get_by_id_call_when_summary_present() -> None:
+    """When the stored summary is used, only one DB lookup happens (no duplicate)."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "page text"
+    cached.summary = "Body."
+    cached.title = "Title"
+    svc, repo = make_link_service(cached_item=cached)
+
+    item_id = uuid.uuid4()
+    await svc.summarize("https://example.com", user_id=5, item_id=item_id)
+
+    repo.get_by_id_for_user.assert_awaited_once_with(item_id, 5)  # type: ignore[attr-defined]
+
+
+async def test_summarize_single_get_by_id_call_when_summary_absent_but_scraped_text_cached() -> (
+    None
+):
+    """No stored summary + scraped_text: one DB lookup, no HTTP request, one Claude call."""
+    cached = MagicMock(spec=Item)
+    cached.scraped_text = "cached page body"
+    cached.summary = None
+    svc, repo = make_link_service(cached_item=cached)
+
+    item_id = uuid.uuid4()
+    await svc.summarize("https://example.com", user_id=3, item_id=item_id)
+
+    repo.get_by_id_for_user.assert_awaited_once_with(item_id, 3)  # type: ignore[attr-defined]
+    svc._scraper.fetch_text.assert_not_awaited()  # type: ignore[attr-defined]
+    svc._claude.complete.assert_awaited_once()  # type: ignore[attr-defined]

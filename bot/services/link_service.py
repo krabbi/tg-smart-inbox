@@ -14,6 +14,13 @@ from bot.services.scraper import ScrapedPage, Scraper
 
 logger = logging.getLogger(__name__)
 
+
+class _Unset:
+    """Sentinel type used to distinguish 'not yet fetched' from 'fetched and got None'."""
+
+
+_UNSET = _Unset()
+
 _SUMMARIZE_PROMPT = """\
 You are a helpful assistant that summarizes web pages for a {language}-speaking user.
 
@@ -71,12 +78,13 @@ class LinkService:
         self._claude = claude
         self._embedding = embedding_service
 
-    async def save(self, url: str, user_id: int) -> SavedLink:
-        """Save a link as an Item, cache the page text/title, and attempt to index it.
+    async def save(self, url: str, user_id: int, lang: str = DEFAULT_LANGUAGE) -> SavedLink:
+        """Save a link as an Item, cache the page text/title/summary, and attempt to index it.
 
-        The save itself always succeeds. Scraping is best-effort: if the page cannot
-        be fetched, the link is still persisted without ``scraped_text``/``title``
-        and the user is not notified.
+        The save itself always succeeds.  Scraping and summary generation are both
+        best-effort: failures are logged and the link is still persisted without the
+        optional fields.  The ``lang`` argument controls the language of the generated
+        summary (matches the user's interface language).
         """
         item = await self._repo.create(user_id=user_id, type=ItemType.link, content=url)
         # Populate the cache before the first commit so all fields land in one write.
@@ -86,6 +94,15 @@ class LinkService:
                 item.scraped_text = page.text
             if page.title:
                 item.title = page.title
+
+        # Generate and persist the AI summary at save time so reminder notifications
+        # can show it inline without an extra Claude call.  Failures are silenced so
+        # they never prevent the link from being saved.
+        if item.scraped_text:
+            summary = await self._try_summarize(url, item.scraped_text, lang)
+            if summary is not None:
+                item.summary = summary.body
+
         await self._session.commit()
 
         indexed = await self._try_index(item)
@@ -100,6 +117,16 @@ class LinkService:
             return None
         except Exception:
             logger.exception("Unexpected error scraping %s", url)
+            return None
+
+    async def _try_summarize(self, url: str, page_text: str, lang: str) -> "LinkSummary | None":
+        """Generate a summary from already-scraped text; return None on any failure."""
+        try:
+            prompt = _SUMMARIZE_PROMPT.format(language=language_name(lang)) + page_text
+            raw = await self._claude.complete(prompt, max_tokens=_SUMMARIZE_MAX_TOKENS)
+            return self._parse_summary(raw, url)
+        except Exception:
+            logger.exception("Summary generation failed for %s at save time", url)
             return None
 
     async def _try_index(self, item: Item) -> bool:
@@ -129,14 +156,16 @@ class LinkService:
         item_id: uuid.UUID | None = None,
         lang: str = DEFAULT_LANGUAGE,
     ) -> LinkSummary:
-        """Fetch the page and generate a summary using Claude in the user's language.
+        """Return a summary for the given URL, preferring the stored summary.
 
         When ``item_id`` is provided and the Item belongs to ``user_id`` and already
-        has ``scraped_text`` cached, the cached text is reused and no HTTP request is
-        made. On a cache miss (or when ``item_id`` is missing/foreign) the page is
-        fetched via the scraper. The fresh text is written back to the cache only when
-        the Item belongs to ``user_id``, so a callback-supplied ID for another user's
-        Item never reads or writes that user's data.
+        has a stored ``summary``, it is returned immediately — no Claude call and no
+        HTTP request.
+
+        When no stored summary is available the page text is resolved (from
+        ``scraped_text`` cache or via a fresh HTTP fetch) and Claude generates the
+        summary on demand.  The cached ``scraped_text`` path avoids HTTP when present;
+        fresh text is written back to the cache for future calls.
 
         The ``lang`` argument is interpolated into the Claude prompt so the title and
         body are returned in the user's interface language (``"ru"`` or ``"en"``).
@@ -144,20 +173,44 @@ class LinkService:
         Raises ScrapingError if the page is unreachable and no cached text is available.
         Raises ClassificationError if Claude fails.
         """
-        page_text = await self._resolve_page_text(url, item_id, user_id)
+        # Fetch the item once up front when an item_id is given so we can check
+        # both the stored summary and the scraped_text cache without two DB round trips.
+        # _UNSET distinguishes "not yet fetched" from "fetched and got None".
+        prefetched: Item | None | _Unset = _UNSET
+        if item_id is not None:
+            prefetched = await self._repo.get_by_id_for_user(item_id, user_id)
+            if prefetched is not None and prefetched.summary and prefetched.summary.strip():
+                # Stored summary available — return immediately, no Claude call needed.
+                stored_title = prefetched.title or url
+                return LinkSummary(title=stored_title, body=prefetched.summary, url=url)
+
+        page_text = await self._resolve_page_text(url, item_id, user_id, prefetched=prefetched)
         prompt = _SUMMARIZE_PROMPT.format(language=language_name(lang)) + page_text
         raw = await self._claude.complete(prompt, max_tokens=_SUMMARIZE_MAX_TOKENS)
         return self._parse_summary(raw, url)
 
-    async def _resolve_page_text(self, url: str, item_id: uuid.UUID | None, user_id: int) -> str:
+    async def _resolve_page_text(
+        self,
+        url: str,
+        item_id: uuid.UUID | None,
+        user_id: int,
+        prefetched: "Item | None | _Unset" = _UNSET,
+    ) -> str:
         """Return cached ``scraped_text`` for the user's Item, or scrape and cache it.
 
         Cache reads and writes are scoped to ``user_id`` so a malicious callback
         carrying another user's item_id cannot leak that user's cached text or
         overwrite their cache with attacker-controlled content.
+
+        Pass ``prefetched`` when the caller has already loaded the Item to avoid a
+        redundant ``get_by_id_for_user`` round trip.  Use the ``_UNSET`` sentinel
+        (the default) when no prior fetch was attempted.
         """
         if item_id is not None:
-            item = await self._repo.get_by_id_for_user(item_id, user_id)
+            if isinstance(prefetched, _Unset):
+                item: Item | None = await self._repo.get_by_id_for_user(item_id, user_id)
+            else:
+                item = prefetched
             if item is not None and item.scraped_text:
                 return item.scraped_text
 

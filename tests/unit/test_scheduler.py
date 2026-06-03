@@ -715,6 +715,7 @@ async def test_send_due_reminders_uses_link_title_in_notification() -> None:
     item.type = ItemType.link
     item.title = "Cool Article"
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
@@ -761,6 +762,7 @@ async def test_send_due_reminders_link_without_title_shows_bare_url() -> None:
     item.type = ItemType.link
     item.title = None
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
@@ -807,6 +809,7 @@ async def test_auto_archive_link_uses_title_in_notification() -> None:
     item.type = ItemType.link
     item.title = "Old Article"
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "rid"
@@ -836,6 +839,148 @@ async def test_auto_archive_link_uses_title_in_notification() -> None:
 
     text = bot.send_message.call_args[1]["text"]
     assert "Old Article (https://example.com/old-article)" in text
+
+
+async def test_send_due_reminders_link_with_summary_shows_inline_summary() -> None:
+    """A link reminder with a stored summary shows the short summary in the notification."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 9
+    item.content = "https://example.com/article"
+    item.type = ItemType.link
+    item.title = "Cool Article"
+    item.description = None
+    item.summary = "This article explains everything you need to know about the topic."
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _send_due_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "Cool Article (https://example.com/article)" in text
+    assert "This article explains everything" in text
+
+
+async def test_send_due_reminders_link_without_summary_no_extra_line() -> None:
+    """A link reminder without a stored summary shows only the title/URL line."""
+    from datetime import UTC, datetime
+
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 10
+    item.content = "https://example.com/no-summary"
+    item.type = ItemType.link
+    item.title = "No Summary Article"
+    item.description = None
+    item.summary = None
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "fake-id"
+    reminder.item_id = "fake-item-id"
+    reminder.remind_at = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due = AsyncMock(return_value=[reminder])
+        mock_svc.mark_sent_with_auto_archive = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_timezone = AsyncMock(return_value="UTC")
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _send_due_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "No Summary Article (https://example.com/no-summary)" in text
+    # No extra summary line — the notification ends after the title/URL.
+    lines_after_header = text.split("\n")
+    assert not any("None" in line for line in lines_after_header)
+
+
+async def test_auto_archive_link_with_summary_shows_inline_summary() -> None:
+    """Auto-archive notifications for links with a summary include the short summary."""
+    from bot.models.item import Item, ItemType
+    from bot.models.reminder import Reminder
+
+    item = MagicMock(spec=Item)
+    item.user_id = 11
+    item.content = "https://example.com/archived"
+    item.type = ItemType.link
+    item.title = "Archived Article"
+    item.description = None
+    item.summary = "A short description of the archived article."
+
+    reminder = MagicMock(spec=Reminder)
+    reminder.id = "rid"
+    reminder.item_id = "iid"
+
+    session = MagicMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=item)
+
+    with (
+        patch("bot.scheduler.ReminderRepository"),
+        patch("bot.scheduler.ReminderService") as mock_svc_cls,
+        patch("bot.scheduler.UserSettingsService") as mock_settings_cls,
+    ):
+        mock_svc = MagicMock()
+        mock_svc.get_due_auto_archive = AsyncMock(return_value=[reminder])
+        mock_svc.mark_auto_completed = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+        mock_settings = MagicMock()
+        mock_settings.get_language = AsyncMock(return_value="en")
+        mock_settings_cls.return_value = mock_settings
+
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        factory = make_session_factory(session)
+
+        await _auto_archive_reminders(bot, factory)
+
+    text = bot.send_message.call_args[1]["text"]
+    assert "Archived Article (https://example.com/archived)" in text
+    assert "A short description of the archived article." in text
 
 
 async def test_reindex_missing_embeddings_skips_none_vectors() -> None:

@@ -76,7 +76,7 @@ own transaction boundaries — they call `session.commit()` after all repository
 | `classifier.py` | Classify incoming messages: LINK / TASK / NOTE / IDEA / MEDIA |
 | `claude_client.py` | Thin wrapper around the Anthropic API |
 | `embedding_service.py` | Generate vector embeddings for Items and Ideas; gracefully returns `None` on API error; exposes `is_configured` so callers can distinguish "Voyage AI key absent" from "transient outage" |
-| `link_service.py` | Save links to DB (with cached page text and extracted page title), reuse the cache when generating Claude summaries |
+| `link_service.py` | Save links to DB (with cached page text, extracted page title, and AI-generated summary persisted at save time); reuse stored summary or scraped-text cache when generating on-demand summaries |
 | `reminder_service.py` | Create, cancel, snooze, acknowledge, mark auto-completed, reactivate reminders, and reset `auto_archive_at` (used when the custom snooze FSM is entered) |
 | `time_parser.py` | Parse natural-language time expressions using Claude (timezone-aware) |
 | `idea_service.py` | Save ideas with AI-extracted tags, complexity/effort, and suggestions |
@@ -123,6 +123,7 @@ The central table that stores every piece of content the user saves.
 | `description` | Text (nullable) | Optional description (used for media) |
 | `title` | Text (nullable) | Article title for links (`og:title` → `<title>` → `None`); used by `/list`, `/search`, `/reminders` and reminder push notifications to render `{title} ({url})` instead of the bare URL |
 | `scraped_text` | Text (nullable) | Cached full page text for links (used to re-embed without re-scraping) |
+| `summary` | Text (nullable) | AI-generated summary for links — persisted at save time and shown inline in reminder notifications; `NULL` for older records and non-link items |
 | `embedding` | `vector(1024)` (nullable) | pgvector embedding for semantic search; ivfflat/cosine index |
 
 ### `reminders` table
@@ -165,8 +166,10 @@ Additional metadata for items with `type = idea`.
 Semantic search uses the [pgvector](https://github.com/pgvector/pgvector) PostgreSQL
 extension. The initial migration (`98444ad48da7`) adds the `embedding` columns and
 indexes; migration `c3e7f2a1d8b4` resizes them from `vector(1536)` to `vector(1024)`
-to match the Voyage AI model output. Migration `e9a4d2b6c815` adds the nullable
-`items.title` column used to display article headlines instead of bare URLs.
+to match the Voyage AI model output. Migration `e9a4d2b6c815` adds the nullable `items.title` column used to display
+article headlines instead of bare URLs. Migration `a1b2c3d4e5f6` adds the
+nullable `items.summary` column that stores the AI-generated link summary
+persisted at save time and shown inline in reminder notifications.
 Both `items` and `ideas` carry an `ivfflat` index with `vector_cosine_ops` (100 lists).
 
 On SQLite (used only in tests) the migration and ORM still create the columns, but
@@ -694,18 +697,23 @@ request with exponential backoff (waits 2 s, then 8 s) before giving up and retu
 
 At save time:
 
-- `LinkService.save()` creates the `Item`, calls `Scraper.fetch_text()` once and stores
-  the result in `Item.scraped_text` before the first commit (best-effort: a scraper
-  failure is logged at WARNING and the link is still persisted). After the commit,
-  the service attempts to generate and store the embedding. It returns a
-  `SavedLink(item, indexed)` tuple; the handler shows
-  `ℹ️ Умный поиск временно недоступен, запись сохранена без индексации.` when
-  `indexed` is `False`.
-- `LinkService.summarize(url, user_id=..., item_id=...)` reuses the cached
-  `scraped_text` when the Item belongs to ``user_id`` and has one — no HTTP
-  request is made. On a cache miss the scraper is called and the fresh text is
-  written back via `ItemRepository.update_scraped_text_for_user(item_id, user_id, ...)`,
-  which silently no-ops for foreign-owned IDs. Both the read
+- `LinkService.save()` creates the `Item`, scrapes the page (best-effort), and
+  generates the AI summary via Claude — all in one write before the first commit.
+  Scraping failure is logged at WARNING; summary generation failure is also logged
+  silently. In both cases the link is still persisted. After the commit the service
+  attempts to generate and store the embedding. It returns a `SavedLink(item, indexed)`
+  tuple; the handler shows `ℹ️ Умный поиск временно недоступен, запись сохранена без
+  индексации.` when `indexed` is `False`. The `lang` argument forwards the user's
+  interface language so the summary is generated in the correct language.
+- `LinkService.summarize(url, user_id=..., item_id=...)` first checks whether the
+  Item already has a stored `summary` — if so, it returns immediately without any
+  Claude call or HTTP request. When no stored summary is available, it resolves the
+  page text (from the `scraped_text` cache or via a fresh HTTP fetch) and calls
+  Claude on demand. Fresh text is written back to the cache via
+  `ItemRepository.update_scraped_text_for_user(item_id, user_id, ...)`, which silently
+  no-ops for foreign-owned IDs. Only one `get_by_id_for_user` call is made per
+  `summarize()` invocation regardless of the code path — the pre-fetched item is
+  passed through to avoid a redundant DB round trip. Both the read
   (`get_by_id_for_user`) and the write are scoped by `user_id` so a
   callback-supplied ID for another user's Item never leaks or corrupts data.
 - `IdeaService.save_idea()` persists the `Item` + `Idea`, commits, then attempts to

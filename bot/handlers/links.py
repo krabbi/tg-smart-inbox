@@ -106,7 +106,7 @@ async def handle_link_message(
 ) -> None:
     """Save a link and show action buttons. Called from the messages handler."""
     user_id = message.from_user.id if message.from_user else 0
-    saved = await link_service.save(url, user_id)
+    saved = await link_service.save(url, user_id, lang=lang)
     keyboard = _link_keyboard(str(saved.item.id), lang)
     await message.answer(t("link_saved", lang, url=url), reply_markup=keyboard)
     if not saved.indexed:

@@ -33,6 +33,9 @@ class Item(UUIDMixin, TimestampMixin, Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Full extracted page text for links — cached so we don't re-scrape for re-embedding.
     scraped_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI-generated summary for links — persisted at save time and shown inline in
+    # reminder notifications.  NULL for older records and non-link items.
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Vector embedding for semantic search; populated lazily by a background job.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 

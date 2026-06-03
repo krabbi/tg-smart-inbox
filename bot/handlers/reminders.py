@@ -20,7 +20,7 @@ from bot.services.reminder_service import ReminderService
 from bot.services.time_parser import TimeParser
 from bot.services.user_settings_service import UserSettingsService
 from bot.utils.datetime_utils import format_remind_at
-from bot.utils.text import extract_url, format_item_display
+from bot.utils.text import extract_url, format_item_display_with_summary
 
 # 24h window between sending a reminder and auto-archiving it if the user
 # hasn't pressed any of the snooze / ack / reactivate buttons. Mirrors the
@@ -499,7 +499,7 @@ async def cb_remind_reactivate(
             "reminder_notification",
             lang,
             formatted=formatted,
-            content=format_item_display(item),
+            content=format_item_display_with_summary(item),
         ),
         reply_markup=_snooze_keyboard(str(reminder.id), lang),
     )
