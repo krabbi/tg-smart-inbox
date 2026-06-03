@@ -1,5 +1,6 @@
 """Shared text-processing helpers."""
 
+import html
 import re
 
 from bot.models.item import Item, ItemType
@@ -66,11 +67,11 @@ def format_item_display_with_summary(item: Item) -> str:
     """
     base = format_item_display(item)
     if item.type != ItemType.link:
-        return base
+        return html.escape(base)
     summary: str | None = getattr(item, "summary", None)
     if not summary or not summary.strip():
-        return base
+        return html.escape(base)
     short = summary.strip()
     if len(short) > _SUMMARY_INLINE_MAX_CHARS:
         short = short[:_SUMMARY_INLINE_MAX_CHARS].rstrip() + "…"
-    return f"{base}\n{short}"
+    return f"{html.escape(base)}\n{html.escape(short)}"

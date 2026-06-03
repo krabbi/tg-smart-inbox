@@ -203,3 +203,48 @@ def test_format_item_display_with_summary_note_ignores_summary() -> None:
         summary="should not appear",
     )
     assert format_item_display_with_summary(note) == "my note"
+
+
+# ── HTML escaping (security) ──────────────────────────────────────────────────
+
+
+def test_format_item_display_with_summary_escapes_claude_summary() -> None:
+    """Claude-generated summary with HTML special chars is escaped to prevent broken markup."""
+    item = _make_item(
+        item_type=ItemType.link,
+        content="https://example.com",
+        title="Article",
+        summary="Score: 5 > 3 & 2 < 4, see <b>bold</b>",
+    )
+    result = format_item_display_with_summary(item)
+    lines = result.split("\n", 1)
+    assert "&gt;" in lines[1]
+    assert "&lt;" in lines[1]
+    assert "&amp;" in lines[1]
+    assert "<b>" not in lines[1]
+
+
+def test_format_item_display_with_summary_escapes_title_in_base() -> None:
+    """Scraped title containing HTML special chars is escaped in the base line."""
+    item = _make_item(
+        item_type=ItemType.link,
+        content="https://example.com",
+        title="A & B <strong>test</strong>",
+        summary=None,
+    )
+    result = format_item_display_with_summary(item)
+    assert "&amp;" in result
+    assert "&lt;" in result
+    assert "<strong>" not in result
+
+
+def test_format_item_display_with_summary_escapes_non_link_content() -> None:
+    """Non-link item content with HTML chars is escaped for safe HTML rendering."""
+    task = _make_item(
+        item_type=ItemType.task,
+        content="check if a < b && b > 0",
+    )
+    result = format_item_display_with_summary(task)
+    assert "&lt;" in result
+    assert "&gt;" in result
+    assert "&amp;&amp;" in result or "&&" not in result
