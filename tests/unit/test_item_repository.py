@@ -170,3 +170,105 @@ async def test_get_by_id_returns_none_for_unknown_id(db_session: AsyncSession) -
 
     repo = ItemRepository(db_session)
     assert await repo.get_by_id(uuid.uuid4()) is None
+
+
+# ---------------------------------------------------------------------------
+# get_missing_summary / update_summary
+# ---------------------------------------------------------------------------
+
+
+async def test_get_missing_summary_returns_link_items_with_scraped_text_and_no_summary(
+    db_session: AsyncSession,
+) -> None:
+    """Only LINK items that have scraped_text but no summary should be returned."""
+    repo = ItemRepository(db_session)
+    # Qualifies: link, scraped_text set, summary NULL
+    candidate = await repo.create(user_id=1, type=ItemType.link, content="https://a.com")
+    await db_session.commit()
+    candidate.scraped_text = "some page text"
+    await db_session.flush()
+    await db_session.commit()
+
+    results = await repo.get_missing_summary(limit=10)
+    assert any(r.id == candidate.id for r in results)
+
+
+async def test_get_missing_summary_excludes_items_without_scraped_text(
+    db_session: AsyncSession,
+) -> None:
+    """Items with scraped_text IS NULL must not be selected."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://b.com")
+    await db_session.commit()
+    # scraped_text remains NULL — should be excluded.
+
+    results = await repo.get_missing_summary(limit=10)
+    assert not any(r.id == item.id for r in results)
+
+
+async def test_get_missing_summary_excludes_items_with_existing_summary(
+    db_session: AsyncSession,
+) -> None:
+    """Items that already have a summary must not be selected."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://c.com")
+    await db_session.commit()
+    item.scraped_text = "page body"
+    item.summary = "already summarized"
+    await db_session.flush()
+    await db_session.commit()
+
+    results = await repo.get_missing_summary(limit=10)
+    assert not any(r.id == item.id for r in results)
+
+
+async def test_get_missing_summary_excludes_non_link_types(
+    db_session: AsyncSession,
+) -> None:
+    """Only ItemType.link items qualify — notes and tasks are excluded even with scraped_text."""
+    repo = ItemRepository(db_session)
+    note = await repo.create(user_id=1, type=ItemType.note, content="a note")
+    await db_session.commit()
+    note.scraped_text = "some text"
+    await db_session.flush()
+    await db_session.commit()
+
+    results = await repo.get_missing_summary(limit=10)
+    assert not any(r.id == note.id for r in results)
+
+
+async def test_get_missing_summary_respects_limit(db_session: AsyncSession) -> None:
+    """The ``limit`` parameter caps the result set."""
+    repo = ItemRepository(db_session)
+    for i in range(5):
+        item = await repo.create(user_id=1, type=ItemType.link, content=f"https://x{i}.com")
+        await db_session.commit()
+        item.scraped_text = f"text {i}"
+        await db_session.flush()
+        await db_session.commit()
+
+    results = await repo.get_missing_summary(limit=3)
+    assert len(results) == 3
+
+
+async def test_update_summary_persists_value(db_session: AsyncSession) -> None:
+    """update_summary writes the summary onto the Item row."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=1, type=ItemType.link, content="https://d.com")
+    await db_session.commit()
+
+    await repo.update_summary(item.id, "a nice summary")
+    await db_session.commit()
+
+    refreshed = await repo.get_by_id(item.id)
+    assert refreshed is not None
+    assert refreshed.summary == "a nice summary"
+
+
+async def test_update_summary_noop_for_missing_item(db_session: AsyncSession) -> None:
+    """Silently skip when the Item no longer exists."""
+    import uuid
+
+    repo = ItemRepository(db_session)
+    # Must not raise.
+    await repo.update_summary(uuid.uuid4(), "some text")
