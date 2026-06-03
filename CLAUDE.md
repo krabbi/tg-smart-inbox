@@ -197,6 +197,11 @@ bot/
     datetime_utils.py   # format_remind_at() — UTC → user tz formatting
     text.py             # extract_url() and helpers
 alembic/                # migrations
+web/
+  __init__.py           # empty package marker
+  main.py               # create_app() factory — CORS, lifespan, route registration
+  auth.py               # verify_jwt_token() stub (full impl in #177)
+  dependencies.py       # get_db_session, get_current_user FastAPI deps
 tests/
   conftest.py           # fake_config, db_session fixtures
   unit/

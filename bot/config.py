@@ -34,6 +34,10 @@ class Config(BaseSettings):
     # bot process can start without it.
     jwt_secret: str | None = None
     web_port: int = 8000
+    # Comma-separated list of allowed CORS origins for the web UI companion.
+    # Non-empty → credentialed requests allowed from these origins only.
+    # Empty (default) → wildcard "*" used without credentials (dev convenience).
+    cors_origins: list[str] = []
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
@@ -42,6 +46,13 @@ class Config(BaseSettings):
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
         if isinstance(v, int):
             return [v]
+        return v
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
 
