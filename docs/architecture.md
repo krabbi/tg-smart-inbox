@@ -860,6 +860,47 @@ to distinguish that case from a transient outage.
 
 ---
 
+## Web UI Companion (`web/`)
+
+A FastAPI application that exposes a REST API for the web UI companion.
+It shares the same database as the bot via `bot/db.py` — no second engine is created.
+
+### Package layout
+
+| File | Responsibility |
+|------|---------------|
+| `web/__init__.py` | Empty package marker |
+| `web/main.py` | `create_app(config)` factory — builds the FastAPI app, wires CORS middleware, registers routers, and initialises the DB session factory via `bot.db.init_db` in the lifespan handler |
+| `web/auth.py` | `verify_jwt_token(token) -> dict` — stub replaced by the full PyJWT implementation in issue #177; always raises HTTP 401 until then |
+| `web/dependencies.py` | Shared FastAPI dependencies: `get_db_session` (yields `AsyncSession`) and `get_current_user` (validates Bearer JWT, enforces `ALLOWED_USER_IDS` allowlist) |
+
+### Starting the web service
+
+```bash
+uvicorn web.main:create_app --factory
+```
+
+`JWT_SECRET` must be set in the environment; `create_app()` raises `ValueError` otherwise.
+
+### Registered endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/health` | None | Liveness check — returns `{"status": "ok"}` |
+| GET | `/api/auth/me` | Bearer JWT | Returns the authenticated user's token payload |
+
+### Dependency injection
+
+`get_current_user` reads the `Authorization: Bearer <token>` header, calls
+`web.auth.verify_jwt_token`, and optionally enforces the `ALLOWED_USER_IDS`
+whitelist when `config.allowed_user_ids` is non-empty (HTTP 403 for unlisted IDs).
+The config object is stored on `app.state.config` by `create_app`.
+
+`get_db_session` calls `bot.db.get_session_factory()` — the same factory the bot
+middleware uses — so both processes share a single connection pool when run together.
+
+---
+
 ## Configuration
 
 All configuration is via environment variables (or `.env` file). Managed by

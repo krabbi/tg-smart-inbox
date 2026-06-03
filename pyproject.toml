@@ -26,6 +26,9 @@ dependencies = [
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
     "pgvector>=0.2",
+    "fastapi>=0.111",
+    "PyJWT>=2.8",
+    "uvicorn>=0.29",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +44,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["bot*"]
+include = ["bot*", "web*"]
 
 [tool.ruff]
 line-length = 100
@@ -56,7 +59,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["bot"]
+source = ["bot", "web"]
 omit = ["bot/__main__.py"]
 
 [tool.coverage.report]
