@@ -715,6 +715,7 @@ async def test_send_due_reminders_uses_link_title_in_notification() -> None:
     item.type = ItemType.link
     item.title = "Cool Article"
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
@@ -761,6 +762,7 @@ async def test_send_due_reminders_link_without_title_shows_bare_url() -> None:
     item.type = ItemType.link
     item.title = None
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "fake-id"
@@ -807,6 +809,7 @@ async def test_auto_archive_link_uses_title_in_notification() -> None:
     item.type = ItemType.link
     item.title = "Old Article"
     item.description = None
+    item.summary = None
 
     reminder = MagicMock(spec=Reminder)
     reminder.id = "rid"
