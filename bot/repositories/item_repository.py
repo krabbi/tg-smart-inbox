@@ -185,8 +185,10 @@ class ItemRepository:
         )
         return result.scalar_one()
 
-    async def search(self, user_id: int, query: str, *, limit: int = 10) -> list[Item]:
-        """Search Items by content or description, case-insensitive."""
+    async def search(
+        self, user_id: int, query: str, *, limit: int = 10, offset: int = 0
+    ) -> list[Item]:
+        """Search Items by content or description, case-insensitive, with pagination."""
         pattern = f"%{query.lower()}%"
         result = await self._session.execute(
             select(Item)
@@ -199,8 +201,25 @@ class ItemRepository:
             )
             .order_by(Item.created_at.desc())
             .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def count_search(self, user_id: int, query: str) -> int:
+        """Return total number of Items matching the search query for a user."""
+        pattern = f"%{query.lower()}%"
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Item)
+            .where(
+                Item.user_id == user_id,
+                or_(
+                    func.lower(Item.content).like(pattern),
+                    func.lower(Item.description).like(pattern),
+                ),
+            )
+        )
+        return result.scalar_one()
 
     async def search_by_embedding(
         self, embedding: list[float], user_id: int, *, limit: int = 20
