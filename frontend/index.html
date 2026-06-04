@@ -128,7 +128,7 @@
       }
 
       /* --------------------------------------------------------------------- */
-      /* Unauthenticated: login placeholder                                    */
+      /* Unauthenticated: login card + Telegram widget                        */
       /* --------------------------------------------------------------------- */
       .login-container {
         display: flex;
@@ -137,24 +137,37 @@
         height: 100vh;
       }
 
-      .login-placeholder {
+      .login-card {
         text-align: center;
         padding: 2rem 3rem;
         background: #ffffff;
         border-radius: 0.75rem;
         box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
+        min-width: 280px;
       }
 
-      .login-placeholder h1 {
+      .login-title {
         margin: 0 0 0.5rem;
         font-size: 1.5rem;
         color: #1e293b;
       }
 
-      .login-placeholder p {
+      .login-subtitle {
         margin: 0 0 1.25rem;
         color: #64748b;
         font-size: 0.95rem;
+      }
+
+      .login-loading {
+        margin: 0 0 1rem;
+        color: #3b82f6;
+        font-size: 0.9rem;
+      }
+
+      #telegram-login-widget {
+        display: flex;
+        justify-content: center;
+        min-height: 40px;
       }
     </style>
   </head>

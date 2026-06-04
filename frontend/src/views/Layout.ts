@@ -2,19 +2,20 @@
  * Layout.ts — Top-level shell view for the Foldkit SPA.
  *
  * Renders one of two states:
- *   - Unauthenticated: a login-required placeholder (actual Telegram Login
- *     Widget is added in #188).
+ *   - Unauthenticated: delegates to Login.view(model), which renders the
+ *     Telegram Login Widget card.
  *   - Authenticated: a sidebar (category tabs) on the left and a content
- *     area on the right. The content area is a placeholder <slot> that child
- *     views (#188, #189, #190) will populate.
+ *     area on the right. The content area holds a placeholder until child
+ *     views are wired in.
  *
- * view() is a pure function — it takes the Model and a dispatch callback and
- * returns an HTML string. The runtime in Main.ts sets innerHTML and wires the
- * click listeners produced by attachListeners().
+ * view() is a pure function — it takes the Model and returns an HTML string.
+ * The runtime in Main.ts sets innerHTML and wires the click listeners produced
+ * by attachListeners().
  */
 
 import type { Model, Route } from "../Model.ts";
 import type { Msg } from "../Messages.ts";
+import { view as loginView, attachLoginListeners } from "./Login.ts";
 
 // ---------------------------------------------------------------------------
 // Sidebar tab configuration
@@ -39,19 +40,12 @@ const TABS: TabConfig[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Render the unauthenticated state — a centred login-required placeholder.
- * The actual Telegram Login Widget will be injected here in #188.
+ * Render the unauthenticated state — the Telegram Login Widget card.
+ * Delegates to Login.view() so that widget-specific markup is co-located
+ * with its listener wiring in Login.ts.
  */
-function viewUnauthenticated(): string {
-  return `
-    <div class="login-container">
-      <div class="login-placeholder">
-        <h1>tg-smart-inbox</h1>
-        <p>Login required</p>
-        <div id="login-widget-slot"></div>
-      </div>
-    </div>
-  `.trim();
+function viewUnauthenticated(model: Model): string {
+  return loginView(model);
 }
 
 /**
@@ -66,7 +60,7 @@ function viewTab(tab: TabConfig, isActive: boolean): string {
 
 /**
  * Render the authenticated shell: sidebar on the left, content area on the right.
- * The content area holds a placeholder until child views are wired in #188/#189/#190.
+ * The content area holds a placeholder until child views are wired in.
  */
 function viewAuthenticated(model: Model): string {
   const tabsHtml = TABS.map((tab) =>
@@ -114,7 +108,7 @@ export function view(model: Model): string {
   const bodyHtml =
     model.auth.tag === "authenticated"
       ? viewAuthenticated(model)
-      : viewUnauthenticated();
+      : viewUnauthenticated(model);
 
   return `${errorHtml}${bodyHtml}`;
 }
@@ -129,6 +123,7 @@ export function view(model: Model): string {
 export function attachListeners(
   root: HTMLElement,
   dispatch: (msg: Msg) => void,
+  model: Model,
 ): void {
   // Sidebar tab buttons — each carries data-route
   root.querySelectorAll<HTMLButtonElement>("button[data-route]").forEach((btn) => {
@@ -148,4 +143,9 @@ export function attachListeners(
         dispatch({ type: "ClearError" });
       });
     });
+
+  // Telegram Login Widget global callback — only needed when unauthenticated
+  if (model.auth.tag === "unauthenticated") {
+    attachLoginListeners(dispatch);
+  }
 }

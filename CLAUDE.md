@@ -215,6 +215,7 @@ frontend/
     Messages.ts         # Msg union: auth, navigation, global events
     views/
       Layout.ts         # top-level shell: sidebar + content area (or login placeholder)
+      Login.ts              # Telegram Login Widget card — view() + attachLoginListeners()
     api/
       client.ts         # Command<Msg> type, JWT helpers, apiRequest()
       types.ts          # TypeScript mirrors of FastAPI response schemas

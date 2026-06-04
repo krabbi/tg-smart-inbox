@@ -14,10 +14,11 @@
 
 import { getJwt, setJwt, clearJwt, type Command } from "./api/client.ts";
 import { apiRequest } from "./api/client.ts";
-import type { MeResponse } from "./api/types.ts";
+import type { MeResponse, TelegramLoginPayload } from "./api/types.ts";
 import { initialModel, type Model } from "./Model.ts";
 import type { Msg } from "./Messages.ts";
 import { view, attachListeners } from "./views/Layout.ts";
+import { postTelegramAuth } from "./api/auth.ts";
 
 // ---------------------------------------------------------------------------
 // update — pure function: (Model, Msg) → Model
@@ -118,6 +119,63 @@ function validateStoredJwt(): Command<Msg> {
   );
 }
 
+/**
+ * Build a Command<Msg> that POSTs the Telegram Login Widget payload to the
+ * backend and then fetches /api/auth/me with the returned JWT to obtain the
+ * full user object.
+ *
+ * Flow:
+ *   POST /api/auth/telegram  → token
+ *   GET  /api/auth/me        → user  → dispatch AuthSuccess(token, user)
+ *
+ * Error mapping:
+ *   403  → AuthFailed("Access denied — you are not on the allowed list")
+ *   any  → AuthFailed("Login failed — invalid or expired data, please try again")
+ */
+function telegramAuthCommand(payload: TelegramLoginPayload): Command<Msg> {
+  return {
+    run(dispatch) {
+      postTelegramAuth(payload).run((authMsg) => {
+        if (authMsg.type === "AuthSuccess") {
+          // Store the JWT so the follow-up GET /api/auth/me can attach it.
+          setJwt(authMsg.token);
+          apiRequest<Msg, MeResponse>(
+            "/api/auth/me",
+            { method: "GET" },
+            (data) => ({ type: "AuthSuccess", token: authMsg.token, user: data }),
+            (err) => {
+              if (err.type === "AccessDenied") {
+                return {
+                  type: "AuthFailed",
+                  reason: "Access denied — you are not on the allowed list",
+                };
+              }
+              return {
+                type: "AuthFailed",
+                reason: "Login failed — invalid or expired data, please try again",
+              };
+            },
+          ).run(dispatch);
+        } else {
+          // authMsg.type === "AuthError"
+          const err = authMsg.err;
+          if (err.type === "AccessDenied") {
+            dispatch({
+              type: "AuthFailed",
+              reason: "Access denied — you are not on the allowed list",
+            });
+          } else {
+            dispatch({
+              type: "AuthFailed",
+              reason: "Login failed — invalid or expired data, please try again",
+            });
+          }
+        }
+      });
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Runtime — minimal Foldkit-style loop
 // ---------------------------------------------------------------------------
@@ -136,12 +194,16 @@ function mount(rootId: string): void {
 
   function render(): void {
     root!.innerHTML = view(model);
-    attachListeners(root!, dispatch);
+    attachListeners(root!, dispatch, model);
   }
 
   function dispatch(msg: Msg): void {
     model = update(model, msg);
     render();
+    // Fire side-effecting commands that cannot live in the pure update().
+    if (msg.type === "TelegramLoginSuccess") {
+      runCommand(telegramAuthCommand(msg.payload));
+    }
   }
 
   function runCommand(cmd: Command<Msg>): void {
