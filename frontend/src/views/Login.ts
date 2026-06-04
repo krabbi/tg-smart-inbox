@@ -23,6 +23,11 @@ import type { Model } from "../Model.ts";
 // ---------------------------------------------------------------------------
 
 const BOT_USERNAME: string = import.meta.env["VITE_BOT_USERNAME"] ?? "";
+if (BOT_USERNAME === "") {
+  console.warn(
+    "Login.ts: VITE_BOT_USERNAME is not set — Telegram Login Widget will not work.",
+  );
+}
 
 // ---------------------------------------------------------------------------
 // View
@@ -36,12 +41,6 @@ const BOT_USERNAME: string = import.meta.env["VITE_BOT_USERNAME"] ?? "";
  * The data-onauth attribute names the global callback defined below.
  */
 export function view(model: Model): string {
-  if (BOT_USERNAME === "") {
-    console.warn(
-      "Login.ts: VITE_BOT_USERNAME is not set — Telegram Login Widget will not work.",
-    );
-  }
-
   const loadingHtml = model.isLoading
     ? `<p class="login-loading">Signing in&hellip;</p>`
     : "";

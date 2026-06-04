@@ -2,15 +2,15 @@
  * Layout.ts — Top-level shell view for the Foldkit SPA.
  *
  * Renders one of two states:
- *   - Unauthenticated: a login-required placeholder (actual Telegram Login
- *     Widget is added in #188).
+ *   - Unauthenticated: delegates to Login.view(model), which renders the
+ *     Telegram Login Widget card.
  *   - Authenticated: a sidebar (category tabs) on the left and a content
- *     area on the right. The content area is a placeholder <slot> that child
- *     views (#188, #189, #190) will populate.
+ *     area on the right. The content area holds a placeholder until child
+ *     views are wired in.
  *
- * view() is a pure function — it takes the Model and a dispatch callback and
- * returns an HTML string. The runtime in Main.ts sets innerHTML and wires the
- * click listeners produced by attachListeners().
+ * view() is a pure function — it takes the Model and returns an HTML string.
+ * The runtime in Main.ts sets innerHTML and wires the click listeners produced
+ * by attachListeners().
  */
 
 import type { Model, Route } from "../Model.ts";
@@ -60,7 +60,7 @@ function viewTab(tab: TabConfig, isActive: boolean): string {
 
 /**
  * Render the authenticated shell: sidebar on the left, content area on the right.
- * The content area holds a placeholder until child views are wired in #188/#189/#190.
+ * The content area holds a placeholder until child views are wired in.
  */
 function viewAuthenticated(model: Model): string {
   const tabsHtml = TABS.map((tab) =>

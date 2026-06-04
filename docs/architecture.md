@@ -933,7 +933,7 @@ proxied to `http://localhost:8000` during local development.
 | `frontend/src/Main.ts` | App entry point. Wires `Model`, `update`, and `view`. On init: no JWT → render login placeholder; JWT present → call `GET /api/auth/me` to validate; 401 response → `clearJwt()` + `SessionExpired` message. |
 | `frontend/src/Model.ts` | Defines `AuthState` (`unauthenticated` / `authenticated`), `Route` (`"all" \| "tasks" \| "notes" \| "links" \| "ideas" \| "reminders"`), and the top-level `Model` interface (`auth`, `currentRoute`, `isLoading`, `error`). |
 | `frontend/src/Messages.ts` | `Msg` union type — every event is a plain tagged-union value: `TelegramLoginSuccess`, `AuthSuccess`, `AuthFailed`, `SessionExpired`, `AccessDenied`, `MeLoaded`, `NavigateTo`, `ClearError`. |
-| `frontend/src/views/Layout.ts` | Top-level shell view. Unauthenticated → login-required placeholder (`#login-widget-slot`). Authenticated → sidebar with category tabs + `#view-slot` content area. Exports `view(model)` (returns HTML string) and `attachListeners(root, dispatch)` (wires click handlers after innerHTML is set). |
+| `frontend/src/views/Layout.ts` | Top-level shell view. Unauthenticated → delegates to `Login.view(model)` (Telegram Login Widget card). Authenticated → sidebar with category tabs + `#view-slot` content area. Exports `view(model)` (returns HTML string) and `attachListeners(root, dispatch, model)` (wires click handlers and, when unauthenticated, registers the `window.onTelegramAuth` callback via `Login.attachLoginListeners`). |
 | `frontend/src/api/client.ts` | Base HTTP fetch wrapper. Defines `Command<Msg>` (deferred side-effect primitive), JWT localStorage helpers (`getJwt`, `setJwt`, `clearJwt`), and `apiRequest` — handles 401 (clears JWT, dispatches `SessionExpired`), 403 (`AccessDenied`), network errors. |
 | `frontend/src/api/types.ts` | TypeScript types mirroring FastAPI response schemas: `TelegramLoginPayload`, `AuthTokenResponse`, `MeResponse`, `ItemSummary`, `ItemDetail`, `ItemListResponse`, `BulkDeleteResponse`, `ReminderResponse`, `ReminderAction`, `SettingsResponse`, `PatchSettingsRequest`. |
 | `frontend/src/api/auth.ts` | Commands for auth endpoints: `postTelegramAuth(payload)` → `AuthMsg`, `getMe()` → `AuthMsg`. |
@@ -947,7 +947,7 @@ The runtime in `Main.ts` is a minimal hand-rolled loop — no framework package 
 
 1. `mount(rootId)` finds the root element, sets up `dispatch` and `render`.
 2. `dispatch(msg)` calls `update(model, msg)` → new model, then `render()`.
-3. `render()` sets `root.innerHTML = view(model)` then calls `attachListeners(root, dispatch)`.
+3. `render()` sets `root.innerHTML = view(model)` then calls `attachListeners(root, dispatch, model)`.
 4. Side effects are `Command<Msg>` values returned by API helpers; the runtime calls `cmd.run(dispatch)`.
 
 ### JWT lifecycle
@@ -982,6 +982,7 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `WEB_PORT` | No | `8000` | Port the FastAPI web service listens on. Has no effect on the bot process. |
 | `CORS_ORIGINS` | No | `[]` | Comma-separated list of allowed CORS origins for the web UI companion (e.g. `https://app.example.com`). Non-empty → credentialed requests allowed from listed origins only. Empty → wildcard `*` without credentials (dev convenience). |
 | `VITE_API_BASE_URL` | Frontend only | `""` | Base URL for API requests from the Vite/TypeScript frontend (`frontend/`). Set in `frontend/.env.local` for local development (e.g. `http://localhost:8000`). In production the nginx proxy forwards `/api/` so the default empty string works. Not read by the Python bot or web service. |
+| `VITE_BOT_USERNAME` | Frontend only | `""` | Telegram bot username (without `@`) used by the Login Widget in `frontend/src/views/Login.ts` (the `data-telegram-login` attribute). Set in `frontend/.env.local` for local development or in the CI/CD build environment. If unset the widget renders with an empty attribute and Telegram will reject the embed. Not read by the Python bot or web service. |
 
 ---
 

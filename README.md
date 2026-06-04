@@ -269,6 +269,12 @@ CORS_ORIGINS=https://your-frontend-domain.example.com
 # In production the nginx proxy forwards /api/ so the default empty string works.
 VITE_API_BASE_URL=http://localhost:8000
 
+# Optional: frontend Vite env var — Telegram bot username (without @) used by the
+# Login Widget. Set this in frontend/.env.local or in the CI/CD build environment.
+# If unset, the widget renders with an empty data-telegram-login attribute and
+# Telegram will reject the embed.
+VITE_BOT_USERNAME=your_bot_username_here
+
 # Required for the `prod` docker-compose profile only — used by Watchtower to
 # pull ghcr.io/krabbi/tg-smart-inbox:latest. GHCR_TOKEN must have read:packages.
 GHCR_USER=your_github_username_here
