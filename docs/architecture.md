@@ -876,6 +876,7 @@ It shares the same database as the bot via `bot/db.py` — no second engine is c
 | `web/routers/__init__.py` | Empty package marker for the routers sub-package |
 | `web/routers/auth.py` | Auth router mounted at `/api/auth`: `POST /api/auth/telegram` (verifies Telegram Login Widget payload, enforces allowlist, issues JWT) and `GET /api/auth/me` (protected by `get_current_user`, returns JWT claims) |
 | `web/routers/items.py` | Items router mounted at `/api/items`: `GET /api/items` (paginated list with optional `type` filter and full-text search via `?q=`), `GET /api/items/{id}` (full item detail), `DELETE /api/items/{id}` (delete a single item), and `DELETE /api/items` (bulk delete by id list). All endpoints require a valid Bearer JWT and scope all queries to the authenticated user's `telegram_id`. |
+| `web/routers/reminders.py` | Reminders router mounted at `/api/reminders`: `GET /api/reminders` (list upcoming — non-sent, non-cancelled — reminders for the authenticated user, ordered soonest-first; returns UTC ISO8601 times), `PATCH /api/reminders/{id}` (acknowledge, cancel, or snooze a reminder; snooze accepts `+1h`, `+24h`, or `next_day`; returns HTTP 400 for unknown action or invalid snooze option, HTTP 404 for missing or foreign reminder). All endpoints require a valid Bearer JWT. |
 | `web/services/item_service.py` | `ItemService` — delete operations (`delete_item`, `bulk_delete_items`) that own the transaction boundary (`commit()`); called by the items router. |
 
 ### Starting the web service
