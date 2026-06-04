@@ -11,3 +11,5 @@ htmlcov
 tests/
 data/
 *.db
+credentials.json
+token.json
