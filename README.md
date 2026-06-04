@@ -264,6 +264,11 @@ WEB_PORT=8000
 # Empty (default) → wildcard "*" without credentials is used (dev convenience).
 CORS_ORIGINS=https://your-frontend-domain.example.com
 
+# Optional: frontend Vite env var — base URL for API requests from the web UI.
+# Set this in frontend/.env.local for local development (e.g. http://localhost:8000).
+# In production the nginx proxy forwards /api/ so the default empty string works.
+VITE_API_BASE_URL=http://localhost:8000
+
 # Required for the `prod` docker-compose profile only — used by Watchtower to
 # pull ghcr.io/krabbi/tg-smart-inbox:latest. GHCR_TOKEN must have read:packages.
 GHCR_USER=your_github_username_here
