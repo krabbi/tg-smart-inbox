@@ -278,13 +278,11 @@ def test_list_items_search_scoped_to_user(seeded_app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_list_items_pagination_total_pages_calculated_correctly(
+async def test_list_items_pagination_total_pages_calculated_correctly(
     app_with_db: FastAPI, db_session: AsyncSession
 ) -> None:
     """total_pages is ceil(total / PAGE_SIZE); with 21 items and PAGE_SIZE=20 → 2 pages."""
-    import asyncio
-
-    asyncio.get_event_loop().run_until_complete(_seed_many(db_session, USER_ID, 21))
+    await _seed_many(db_session, USER_ID, 21)
 
     with TestClient(app_with_db, raise_server_exceptions=True) as client:
         response = client.get("/api/items")
@@ -294,13 +292,11 @@ def test_list_items_pagination_total_pages_calculated_correctly(
     assert len(body["items"]) == 20
 
 
-def test_list_items_page_2_returns_remaining_items(
+async def test_list_items_page_2_returns_remaining_items(
     app_with_db: FastAPI, db_session: AsyncSession
 ) -> None:
     """Page 2 returns the remaining items when total > PAGE_SIZE."""
-    import asyncio
-
-    asyncio.get_event_loop().run_until_complete(_seed_many(db_session, USER_ID, 21))
+    await _seed_many(db_session, USER_ID, 21)
 
     with TestClient(app_with_db, raise_server_exceptions=True) as client:
         response = client.get("/api/items", params={"page": 2})
@@ -326,13 +322,11 @@ def test_list_items_empty_db_returns_one_total_page(app_with_db: FastAPI) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_get_item_returns_200_with_full_detail(
+async def test_get_item_returns_200_with_full_detail(
     seeded_app: FastAPI, db_session: AsyncSession
 ) -> None:
     """GET /api/items/{id} returns HTTP 200 with full item detail for own item."""
-    import asyncio
-
-    items = asyncio.get_event_loop().run_until_complete(_seed_many(db_session, USER_ID, 1))
+    items = await _seed_many(db_session, USER_ID, 1)
     item_id = str(items[0].id)
 
     with TestClient(seeded_app, raise_server_exceptions=True) as client:
@@ -358,20 +352,14 @@ def test_get_item_returns_404_for_unknown_id(seeded_app: FastAPI) -> None:
     assert response.status_code == 404
 
 
-def test_get_item_returns_404_for_other_users_item(
+async def test_get_item_returns_404_for_other_users_item(
     app_with_db: FastAPI, db_session: AsyncSession
 ) -> None:
     """GET /api/items/{id} returns HTTP 404 for an item belonging to another user."""
-    import asyncio
-
     repo = ItemRepository(db_session)
-
-    async def _create_other_user_item() -> str:
-        item = await repo.create(user_id=OTHER_USER_ID, type=ItemType.note, content="secret note")
-        await db_session.commit()
-        return str(item.id)
-
-    other_item_id = asyncio.get_event_loop().run_until_complete(_create_other_user_item())
+    item = await repo.create(user_id=OTHER_USER_ID, type=ItemType.note, content="secret note")
+    await db_session.commit()
+    other_item_id = str(item.id)
 
     with TestClient(app_with_db, raise_server_exceptions=True) as client:
         response = client.get(f"/api/items/{other_item_id}")

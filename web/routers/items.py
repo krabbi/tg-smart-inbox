@@ -4,7 +4,7 @@ import math
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,7 +102,7 @@ def _item_to_detail(item: Item) -> ItemDetail:
 async def list_items(
     current_user: Annotated[dict, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
-    type: str | None = None,
+    item_type: Annotated[str | None, Query(alias="type")] = None,
     page: int = 1,
     q: str | None = None,
 ) -> ItemListResponse:
@@ -119,21 +119,23 @@ async def list_items(
     offset = (page - 1) * PAGE_SIZE
 
     # Validate the optional type filter.
-    item_type: ItemType | None = None
-    if type is not None:
-        item_type = _ITEM_TYPE_MAP.get(type.lower())
-        if item_type is None:
+    resolved_type: ItemType | None = None
+    if item_type is not None:
+        resolved_type = _ITEM_TYPE_MAP.get(item_type.lower())
+        if resolved_type is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid type '{type}'. Must be one of: {', '.join(_ITEM_TYPE_MAP)}",
+                detail=f"Invalid type '{item_type}'. Must be one of: {', '.join(_ITEM_TYPE_MAP)}",
             )
 
     if q:
         items = await repo.search(user_id, q, limit=PAGE_SIZE, offset=offset)
         total = await repo.count_search(user_id, q)
-    elif item_type is not None:
-        items = await repo.get_recent_by_type(user_id, item_type, limit=PAGE_SIZE, offset=offset)
-        total = await repo.count_by_user_and_type(user_id, item_type)
+    elif resolved_type is not None:
+        items = await repo.get_recent_by_type(
+            user_id, resolved_type, limit=PAGE_SIZE, offset=offset
+        )
+        total = await repo.count_by_user_and_type(user_id, resolved_type)
     else:
         items = await repo.get_recent(user_id, limit=PAGE_SIZE, offset=offset)
         total = await repo.count_by_user(user_id)
