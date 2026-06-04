@@ -392,3 +392,161 @@ def test_create_app_registers_items_detail_route(web_config: Config) -> None:
         test_app = create_app(web_config)
     routes = {route.path for route in test_app.routes}  # type: ignore[attr-defined]
     assert "/api/items/{item_id}" in routes
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/items/{id} — single delete
+# ---------------------------------------------------------------------------
+
+
+def test_delete_item_without_token_returns_401(web_config: Config) -> None:
+    """DELETE /api/items/{id} without Authorization header returns HTTP 401."""
+    with patch("web.main.init_db"):
+        bare_app = create_app(web_config)
+    with TestClient(bare_app, raise_server_exceptions=True) as client:
+        response = client.delete(f"/api/items/{uuid.uuid4()}")
+    assert response.status_code == 401
+
+
+async def test_delete_item_returns_204_and_item_is_gone(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """DELETE /api/items/{id} for own item returns HTTP 204 and item is no longer retrievable."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=USER_ID, type=ItemType.note, content="to be deleted")
+    await db_session.commit()
+    item_id = str(item.id)
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.delete(f"/api/items/{item_id}")
+    assert response.status_code == 204
+    assert response.content == b""
+
+    # Item must no longer exist in DB.
+    gone = await repo.get_by_id_for_user(uuid.UUID(item_id), USER_ID)
+    assert gone is None
+
+
+async def test_delete_item_returns_404_for_other_users_item(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """DELETE /api/items/{id} for another user's item returns HTTP 404 without deleting it."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=OTHER_USER_ID, type=ItemType.note, content="other secret")
+    await db_session.commit()
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.delete(f"/api/items/{item.id}")
+    assert response.status_code == 404
+
+    # Item must still exist for its real owner.
+    still_there = await repo.get_by_id_for_user(item.id, OTHER_USER_ID)
+    assert still_there is not None
+
+
+def test_delete_item_returns_404_for_unknown_id(app_with_db: FastAPI) -> None:
+    """DELETE /api/items/{id} for a non-existent id returns HTTP 404."""
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.delete(f"/api/items/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+def test_delete_item_returns_400_for_invalid_uuid(app_with_db: FastAPI) -> None:
+    """DELETE /api/items/{id} returns HTTP 400 when id is not a valid UUID."""
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.delete("/api/items/not-a-valid-uuid")
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/items — bulk delete
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_delete_without_token_returns_401(web_config: Config) -> None:
+    """DELETE /api/items without Authorization header returns HTTP 401."""
+    with patch("web.main.init_db"):
+        bare_app = create_app(web_config)
+    with TestClient(bare_app, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": []})
+    assert response.status_code == 401
+
+
+def test_bulk_delete_empty_ids_returns_zero(app_with_db: FastAPI) -> None:
+    """DELETE /api/items with empty ids list returns {"deleted": 0} without error."""
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": []})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0}
+
+
+async def test_bulk_delete_own_items_returns_correct_count(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """DELETE /api/items deletes all own ids and returns the correct deleted count."""
+    items = await _seed_many(db_session, USER_ID, 3)
+    ids = [str(item.id) for item in items]
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": ids})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 3}
+
+    # All three items must be gone.
+    repo = ItemRepository(db_session)
+    for item in items:
+        assert await repo.get_by_id_for_user(item.id, USER_ID) is None
+
+
+async def test_bulk_delete_mixed_ids_ignores_foreign_and_missing(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """Bulk delete with own, foreign, and non-existent ids returns only own-item count."""
+    repo = ItemRepository(db_session)
+    own_item = await repo.create(user_id=USER_ID, type=ItemType.note, content="mine")
+    other_item = await repo.create(user_id=OTHER_USER_ID, type=ItemType.note, content="not mine")
+    await db_session.commit()
+
+    ids = [
+        str(own_item.id),
+        str(other_item.id),  # foreign — must be silently ignored
+        str(uuid.uuid4()),  # non-existent — must be silently ignored
+    ]
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": ids})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1}
+
+    # Own item deleted; other user's item untouched.
+    assert await repo.get_by_id_for_user(own_item.id, USER_ID) is None
+    assert await repo.get_by_id_for_user(other_item.id, OTHER_USER_ID) is not None
+
+
+async def test_bulk_delete_all_foreign_ids_returns_zero(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """Bulk delete where every id belongs to another user returns {"deleted": 0}."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=OTHER_USER_ID, type=ItemType.note, content="not mine")
+    await db_session.commit()
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": [str(item.id)]})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0}
+
+
+async def test_bulk_delete_duplicate_ids_counted_once(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> None:
+    """Bulk delete with duplicate ids for the same item counts it only once."""
+    repo = ItemRepository(db_session)
+    item = await repo.create(user_id=USER_ID, type=ItemType.note, content="unique")
+    await db_session.commit()
+    dup_id = str(item.id)
+
+    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+        response = client.request("DELETE", "/api/items", json={"ids": [dup_id, dup_id, dup_id]})
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1}

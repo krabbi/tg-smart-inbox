@@ -1,5 +1,6 @@
-"""Items router — GET /api/items and GET /api/items/{id}."""
+"""Items router — GET /api/items, GET /api/items/{id}, DELETE /api/items/{id}, DELETE /api/items."""
 
+import contextlib
 import math
 import uuid
 from typing import Annotated
@@ -51,6 +52,18 @@ class ItemListResponse(BaseModel):
     items: list[ItemSummary]
     page: int
     total_pages: int
+
+
+class BulkDeleteRequest(BaseModel):
+    """Request body for bulk delete."""
+
+    ids: list[str]
+
+
+class BulkDeleteResponse(BaseModel):
+    """Response for bulk delete — reports how many items were actually deleted."""
+
+    deleted: int
 
 
 # ---------------------------------------------------------------------------
@@ -173,3 +186,60 @@ async def get_item(
         raise HTTPException(status_code=404, detail="Item not found")
 
     return _item_to_detail(item)
+
+
+@router.delete("/{item_id}", status_code=204)
+async def delete_item(
+    item_id: str,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> None:
+    """Delete a single item owned by the authenticated user.
+
+    Returns HTTP 404 when the item does not exist or belongs to a different user.
+    Returns HTTP 400 when item_id is not a valid UUID.
+    """
+    try:
+        parsed_id = uuid.UUID(item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid item id") from exc
+
+    user_id = int(current_user["sub"])
+    repo = ItemRepository(session)
+    deleted = await repo.delete_for_user(parsed_id, user_id)
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    await session.commit()
+
+
+@router.delete("", response_model=BulkDeleteResponse)
+async def bulk_delete_items(
+    body: BulkDeleteRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> BulkDeleteResponse:
+    """Delete multiple items owned by the authenticated user in one request.
+
+    Silently ignores ids that don't exist or belong to a different user.
+    Returns the count of items actually deleted.
+    An empty `ids` list is accepted and returns `{"deleted": 0}`.
+    """
+    if not body.ids:
+        return BulkDeleteResponse(deleted=0)
+
+    # Parse UUIDs, silently dropping any malformed entries.
+    parsed_ids: list[uuid.UUID] = []
+    for raw_id in body.ids:
+        with contextlib.suppress(ValueError):
+            parsed_ids.append(uuid.UUID(raw_id))
+
+    user_id = int(current_user["sub"])
+    repo = ItemRepository(session)
+    count = await repo.bulk_delete_for_user(parsed_ids, user_id)
+
+    if count:
+        await session.commit()
+
+    return BulkDeleteResponse(deleted=count)
