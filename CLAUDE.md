@@ -205,7 +205,7 @@ web/
   routers/
     __init__.py         # empty package marker
     auth.py             # POST /api/auth/telegram, GET /api/auth/me
-    items.py            # GET /api/items, GET /api/items/{id}
+    items.py            # GET /api/items, GET /api/items/{id}, DELETE /api/items/{id}, DELETE /api/items
 tests/
   conftest.py           # fake_config, db_session fixtures
   unit/

@@ -221,6 +221,32 @@ class ItemRepository:
         )
         return result.scalar_one()
 
+    async def delete_for_user(self, item_id: uuid.UUID, user_id: int) -> bool:
+        """Delete the item only if it belongs to user_id; return True when deleted, False otherwise."""
+        result = await self._session.execute(
+            select(Item).where(Item.id == item_id, Item.user_id == user_id)
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        await self._session.delete(item)
+        await self._session.flush()
+        return True
+
+    async def bulk_delete_for_user(self, item_ids: list[uuid.UUID], user_id: int) -> int:
+        """Delete all items in item_ids that belong to user_id; return count of deleted rows."""
+        if not item_ids:
+            return 0
+        result = await self._session.execute(
+            select(Item).where(Item.id.in_(item_ids), Item.user_id == user_id)
+        )
+        items = list(result.scalars().all())
+        for item in items:
+            await self._session.delete(item)
+        if items:
+            await self._session.flush()
+        return len(items)
+
     async def search_by_embedding(
         self, embedding: list[float], user_id: int, *, limit: int = 20
     ) -> list[tuple[Item, float]]:
