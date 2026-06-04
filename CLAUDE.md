@@ -207,6 +207,21 @@ web/
     auth.py             # POST /api/auth/telegram, GET /api/auth/me
     items.py            # GET /api/items, GET /api/items/{id}, DELETE /api/items/{id}, DELETE /api/items
     reminders.py        # GET /api/reminders, PATCH /api/reminders/{id}
+frontend/
+  index.html            # HTML shell — #app mount point, global CSS
+  src/
+    Main.ts             # app entry: init JWT check, update(), mount()
+    Model.ts            # AuthState, Route, Model types + initialModel
+    Messages.ts         # Msg union: auth, navigation, global events
+    views/
+      Layout.ts         # top-level shell: sidebar + content area (or login placeholder)
+    api/
+      client.ts         # Command<Msg> type, JWT helpers, apiRequest()
+      types.ts          # TypeScript mirrors of FastAPI response schemas
+      auth.ts           # postTelegramAuth(), getMe() → Command<AuthMsg>
+      items.ts          # getItems(), getItem(), deleteItem(), bulkDeleteItems()
+      reminders.ts      # getReminders(), patchReminder()
+      settings.ts       # getSettings(), patchSettings()
 tests/
   conftest.py           # fake_config, db_session fixtures
   unit/

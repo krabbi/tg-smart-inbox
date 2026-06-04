@@ -918,6 +918,47 @@ middleware uses — so both processes share a single connection pool when run to
 
 ---
 
+## Frontend SPA (`frontend/`)
+
+A Vite + TypeScript single-page application following the Elm Architecture (Model / update / view).
+Built with no UI framework dependency — state is plain immutable objects, side effects are
+`Command<Msg>` values (deferred callbacks). Served by nginx in production; Vite dev server
+proxied to `http://localhost:8000` during local development.
+
+### File layout
+
+| File | Responsibility |
+|------|---------------|
+| `frontend/index.html` | HTML shell — `#app` mount point and global CSS (sidebar layout, error banner, login placeholder). |
+| `frontend/src/Main.ts` | App entry point. Wires `Model`, `update`, and `view`. On init: no JWT → render login placeholder; JWT present → call `GET /api/auth/me` to validate; 401 response → `clearJwt()` + `SessionExpired` message. |
+| `frontend/src/Model.ts` | Defines `AuthState` (`unauthenticated` / `authenticated`), `Route` (`"all" \| "tasks" \| "notes" \| "links" \| "ideas" \| "reminders"`), and the top-level `Model` interface (`auth`, `currentRoute`, `isLoading`, `error`). |
+| `frontend/src/Messages.ts` | `Msg` union type — every event is a plain tagged-union value: `TelegramLoginSuccess`, `AuthSuccess`, `AuthFailed`, `SessionExpired`, `AccessDenied`, `MeLoaded`, `NavigateTo`, `ClearError`. |
+| `frontend/src/views/Layout.ts` | Top-level shell view. Unauthenticated → login-required placeholder (`#login-widget-slot`). Authenticated → sidebar with category tabs + `#view-slot` content area. Exports `view(model)` (returns HTML string) and `attachListeners(root, dispatch)` (wires click handlers after innerHTML is set). |
+| `frontend/src/api/client.ts` | Base HTTP fetch wrapper. Defines `Command<Msg>` (deferred side-effect primitive), JWT localStorage helpers (`getJwt`, `setJwt`, `clearJwt`), and `apiRequest` — handles 401 (clears JWT, dispatches `SessionExpired`), 403 (`AccessDenied`), network errors. |
+| `frontend/src/api/types.ts` | TypeScript types mirroring FastAPI response schemas: `TelegramLoginPayload`, `AuthTokenResponse`, `MeResponse`, `ItemSummary`, `ItemDetail`, `ItemListResponse`, `BulkDeleteResponse`, `ReminderResponse`, `ReminderAction`, `SettingsResponse`, `PatchSettingsRequest`. |
+| `frontend/src/api/auth.ts` | Commands for auth endpoints: `postTelegramAuth(payload)` → `AuthMsg`, `getMe()` → `AuthMsg`. |
+| `frontend/src/api/items.ts` | Commands for item endpoints: `getItems(params)`, `getItem(id)`, `deleteItem(id)`, `bulkDeleteItems(ids)`. All return `Command<ItemsMsg>`. |
+| `frontend/src/api/reminders.ts` | Commands for reminder endpoints: `getReminders()`, `patchReminder(id, action)`. All return `Command<RemindersMsg>`. |
+| `frontend/src/api/settings.ts` | Commands for settings endpoints: `getSettings()`, `patchSettings(body)`. All return `Command<SettingsMsg>`. |
+
+### Elm Architecture runtime
+
+The runtime in `Main.ts` is a minimal hand-rolled loop — no framework package required:
+
+1. `mount(rootId)` finds the root element, sets up `dispatch` and `render`.
+2. `dispatch(msg)` calls `update(model, msg)` → new model, then `render()`.
+3. `render()` sets `root.innerHTML = view(model)` then calls `attachListeners(root, dispatch)`.
+4. Side effects are `Command<Msg>` values returned by API helpers; the runtime calls `cmd.run(dispatch)`.
+
+### JWT lifecycle
+
+- `getJwt()` / `setJwt(token)` / `clearJwt()` — read/write/delete `tg_jwt` key in `localStorage`.
+- On startup: JWT present → `isLoading = true`, run `validateStoredJwt()` → `MeLoaded` or `SessionExpired`.
+- `SessionExpired` (from any 401 response or explicit handler): `clearJwt()`, `auth = unauthenticated`.
+- `AuthSuccess`: `setJwt(token)`, `auth = authenticated`.
+
+---
+
 ## Configuration
 
 All configuration is via environment variables (or `.env` file). Managed by
