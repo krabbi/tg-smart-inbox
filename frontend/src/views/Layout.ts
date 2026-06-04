@@ -5,8 +5,8 @@
  *   - Unauthenticated: delegates to Login.view(model), which renders the
  *     Telegram Login Widget card.
  *   - Authenticated: a sidebar (category tabs) on the left and a content
- *     area on the right. The content area holds a placeholder until child
- *     views are wired in.
+ *     area on the right. The content area renders ItemList or ItemDetail
+ *     for item routes, or a placeholder for the reminders route.
  *
  * view() is a pure function — it takes the Model and returns an HTML string.
  * The runtime in Main.ts sets innerHTML and wires the click listeners produced
@@ -16,6 +16,8 @@
 import type { Model, Route } from "../Model.ts";
 import type { Msg } from "../Messages.ts";
 import { view as loginView, attachLoginListeners } from "./Login.ts";
+import { view as itemListView, attachListListeners } from "./ItemList.ts";
+import { view as itemDetailView, attachDetailListeners } from "./ItemDetail.ts";
 
 // ---------------------------------------------------------------------------
 // Sidebar tab configuration
@@ -34,6 +36,11 @@ const TABS: TabConfig[] = [
   { route: "ideas", label: "Ideas" },
   { route: "reminders", label: "Reminders" },
 ];
+
+/** Return true when the route uses the item list/detail content area. */
+function isItemRoute(route: Route): boolean {
+  return route === "all" || route === "tasks" || route === "notes" || route === "links" || route === "ideas";
+}
 
 // ---------------------------------------------------------------------------
 // View functions
@@ -59,8 +66,22 @@ function viewTab(tab: TabConfig, isActive: boolean): string {
 }
 
 /**
+ * Render the content area body: ItemDetail when an item is selected,
+ * ItemList for item routes, or a placeholder for the reminders route.
+ */
+function viewContentBody(model: Model): string {
+  if (isItemRoute(model.currentRoute)) {
+    if (model.itemList.selectedItemId !== null) {
+      return itemDetailView(model, model.itemList.loadedDetail);
+    }
+    return itemListView(model);
+  }
+  // Reminders route — placeholder until the reminders view is implemented.
+  return `<p class="content-placeholder">Reminders coming soon.</p>`;
+}
+
+/**
  * Render the authenticated shell: sidebar on the left, content area on the right.
- * The content area holds a placeholder until child views are wired in.
  */
 function viewAuthenticated(model: Model): string {
   const tabsHtml = TABS.map((tab) =>
@@ -77,7 +98,7 @@ function viewAuthenticated(model: Model): string {
       </nav>
       <main class="content-area">
         <div id="view-slot">
-          <p class="content-placeholder">Select a category from the sidebar.</p>
+          ${viewContentBody(model)}
         </div>
       </main>
     </div>
@@ -119,6 +140,7 @@ export function view(model: Model): string {
  *
  * @param root      The root DOM element that was just rendered into.
  * @param dispatch  The dispatch function from the Foldkit runtime.
+ * @param model     The current model (used to decide which listeners to attach).
  */
 export function attachListeners(
   root: HTMLElement,
@@ -147,5 +169,14 @@ export function attachListeners(
   // Telegram Login Widget global callback — only needed when unauthenticated
   if (model.auth.tag === "unauthenticated") {
     attachLoginListeners(dispatch);
+  }
+
+  // Item list listeners — attached when showing an item route
+  if (model.auth.tag === "authenticated" && isItemRoute(model.currentRoute)) {
+    if (model.itemList.selectedItemId !== null) {
+      attachDetailListeners(root, dispatch);
+    } else {
+      attachListListeners(root, dispatch);
+    }
   }
 }
