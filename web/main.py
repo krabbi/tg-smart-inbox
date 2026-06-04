@@ -11,6 +11,7 @@ from bot.db import init_db
 from web.routers import auth as auth_router
 from web.routers import items as items_router
 from web.routers import reminders as reminders_router
+from web.routers import settings as settings_router
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -74,5 +75,8 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     # Reminders endpoints: GET /api/reminders and PATCH /api/reminders/{id}.
     app.include_router(reminders_router.router)
+
+    # Settings endpoints: GET /api/settings and PATCH /api/settings.
+    app.include_router(settings_router.router)
 
     return app
