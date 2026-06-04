@@ -186,9 +186,7 @@ async def long_content_app(app_with_db: FastAPI, db_session: AsyncSession) -> Fa
 
 
 @pytest_asyncio.fixture
-async def seeded_app_with_data(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> SeededData:
+async def seeded_app_with_data(app_with_db: FastAPI, db_session: AsyncSession) -> SeededData:
     """App seeded with one own reminder; returns SeededData for tests needing reminder IDs."""
     own_item = await _create_item(db_session, USER_ID, "acknowledge me")
     other_item = await _create_item(db_session, OTHER_USER_ID, "not yours")

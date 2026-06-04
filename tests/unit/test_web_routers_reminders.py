@@ -160,9 +160,11 @@ async def test_list_reminders_returns_empty_list_when_no_upcoming() -> None:
     session = _make_session()
     current_user = {"sub": str(USER_ID)}
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ), patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository"),
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_upcoming = AsyncMock(return_value=[])
         MockSvc.return_value = svc
@@ -179,9 +181,11 @@ async def test_list_reminders_returns_response_for_each_reminder() -> None:
     reminder1 = _make_reminder()
     reminder2 = _make_reminder()
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_upcoming = AsyncMock(return_value=[reminder1, reminder2])
         MockSvc.return_value = svc
@@ -203,9 +207,11 @@ async def test_list_reminders_truncates_item_preview_to_120_chars() -> None:
     current_user = {"sub": str(USER_ID)}
     reminder = _make_reminder()
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_upcoming = AsyncMock(return_value=[reminder])
         MockSvc.return_value = svc
@@ -224,9 +230,11 @@ async def test_list_reminders_uses_correct_user_id() -> None:
     session = _make_session()
     current_user = {"sub": "42"}
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ), patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository"),
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_upcoming = AsyncMock(return_value=[])
         MockSvc.return_value = svc
@@ -315,9 +323,11 @@ async def test_patch_reminder_not_found_raises_404() -> None:
     current_user = {"sub": str(USER_ID)}
     body = PatchReminderRequest(action="acknowledge")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ), patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository"),
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_by_id_for_user = AsyncMock(return_value=None)
         MockSvc.return_value = svc
@@ -347,9 +357,11 @@ async def test_patch_reminder_acknowledge_calls_service_and_returns_response() -
     updated_reminder = _make_reminder(reminder_id=reminder_id, is_acknowledged=True)
     body = PatchReminderRequest(action="acknowledge")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_by_id_for_user = AsyncMock(side_effect=[reminder, updated_reminder])
         svc.acknowledge = AsyncMock()
@@ -385,9 +397,11 @@ async def test_patch_reminder_cancel_calls_service_and_returns_response() -> Non
     updated_reminder = _make_reminder(reminder_id=reminder_id, is_cancelled=True)
     body = PatchReminderRequest(action="cancel")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_by_id_for_user = AsyncMock(side_effect=[reminder, updated_reminder])
         svc.cancel_for_user = AsyncMock()
@@ -422,9 +436,11 @@ async def test_patch_reminder_snooze_calls_svc_snooze_with_computed_time() -> No
     updated_reminder = _make_reminder(reminder_id=reminder_id, snooze_count=1)
     body = PatchReminderRequest(action="snooze", snooze_option="+1h")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_by_id_for_user = AsyncMock(side_effect=[reminder, updated_reminder])
         svc.snooze = AsyncMock()
@@ -459,9 +475,11 @@ async def test_patch_reminder_snooze_next_day_option_works() -> None:
     updated_reminder = _make_reminder(reminder_id=reminder_id, snooze_count=1)
     body = PatchReminderRequest(action="snooze", snooze_option="next_day")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         svc.get_by_id_for_user = AsyncMock(side_effect=[reminder, updated_reminder])
         svc.snooze = AsyncMock()
@@ -496,9 +514,11 @@ async def test_patch_reminder_returns_pre_action_snapshot_when_reload_returns_no
     reminder = _make_reminder(reminder_id=reminder_id)
     body = PatchReminderRequest(action="acknowledge")
 
-    with patch("web.routers.reminders.ReminderService") as MockSvc, patch(
-        "web.routers.reminders.ItemRepository"
-    ) as MockItemRepo, patch("web.routers.reminders.ReminderRepository"):
+    with (
+        patch("web.routers.reminders.ReminderService") as MockSvc,
+        patch("web.routers.reminders.ItemRepository") as MockItemRepo,
+        patch("web.routers.reminders.ReminderRepository"),
+    ):
         svc = MagicMock()
         # First call (ownership check) returns reminder; second call (reload) returns None.
         svc.get_by_id_for_user = AsyncMock(side_effect=[reminder, None])
