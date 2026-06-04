@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import NamedTuple
 from unittest.mock import patch
 
 import pytest
@@ -31,7 +32,7 @@ FUTURE = datetime(2099, 1, 1, 12, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — infrastructure
 # ---------------------------------------------------------------------------
 
 
@@ -120,6 +121,89 @@ async def _create_reminder(
 
 
 # ---------------------------------------------------------------------------
+# Fixtures — seeded apps
+# ---------------------------------------------------------------------------
+
+
+class SeededData(NamedTuple):
+    """Holds references to seeded ORM objects for tests that need them."""
+
+    app: FastAPI
+    reminder_id: uuid.UUID
+    item_id: uuid.UUID
+    other_reminder_id: uuid.UUID
+
+
+@pytest_asyncio.fixture
+async def seeded_app(app_with_db: FastAPI, db_session: AsyncSession) -> FastAPI:
+    """App with one upcoming reminder for USER_ID and one for OTHER_USER_ID."""
+    own_item = await _create_item(db_session, USER_ID, "buy milk")
+    other_item = await _create_item(db_session, OTHER_USER_ID, "their task")
+    await _create_reminder(db_session, own_item)
+    await _create_reminder(db_session, other_item)
+    await db_session.commit()
+    return app_with_db
+
+
+@pytest_asyncio.fixture
+async def sent_reminder_app(app_with_db: FastAPI, db_session: AsyncSession) -> FastAPI:
+    """App with one sent reminder for USER_ID."""
+    item = await _create_item(db_session, USER_ID, "sent task")
+    await _create_reminder(db_session, item, is_sent=True)
+    await db_session.commit()
+    return app_with_db
+
+
+@pytest_asyncio.fixture
+async def cancelled_reminder_app(app_with_db: FastAPI, db_session: AsyncSession) -> FastAPI:
+    """App with one cancelled reminder for USER_ID."""
+    item = await _create_item(db_session, USER_ID, "cancelled task")
+    await _create_reminder(db_session, item, is_cancelled=True)
+    await db_session.commit()
+    return app_with_db
+
+
+@pytest_asyncio.fixture
+async def two_reminders_app(app_with_db: FastAPI, db_session: AsyncSession) -> FastAPI:
+    """App with two reminders at different times for USER_ID (for ordering tests)."""
+    item = await _create_item(db_session, USER_ID, "task")
+    t1 = datetime(2099, 6, 1, tzinfo=UTC)
+    t2 = datetime(2099, 1, 1, tzinfo=UTC)
+    await _create_reminder(db_session, item, remind_at=t1)
+    await _create_reminder(db_session, item, remind_at=t2)
+    await db_session.commit()
+    return app_with_db
+
+
+@pytest_asyncio.fixture
+async def long_content_app(app_with_db: FastAPI, db_session: AsyncSession) -> FastAPI:
+    """App with a reminder whose item content is 200 chars (tests truncation)."""
+    long_content = "x" * 200
+    item = await _create_item(db_session, USER_ID, long_content)
+    await _create_reminder(db_session, item)
+    await db_session.commit()
+    return app_with_db
+
+
+@pytest_asyncio.fixture
+async def seeded_app_with_data(
+    app_with_db: FastAPI, db_session: AsyncSession
+) -> SeededData:
+    """App seeded with one own reminder; returns SeededData for tests needing reminder IDs."""
+    own_item = await _create_item(db_session, USER_ID, "acknowledge me")
+    other_item = await _create_item(db_session, OTHER_USER_ID, "not yours")
+    own_reminder = await _create_reminder(db_session, own_item)
+    other_reminder = await _create_reminder(db_session, other_item)
+    await db_session.commit()
+    return SeededData(
+        app=app_with_db,
+        reminder_id=own_reminder.id,
+        item_id=own_item.id,
+        other_reminder_id=other_reminder.id,
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /api/reminders — no auth
 # ---------------------------------------------------------------------------
 
@@ -146,15 +230,9 @@ def test_list_reminders_empty_returns_empty_list(app_with_db: FastAPI) -> None:
     assert response.json() == []
 
 
-async def test_list_reminders_returns_upcoming_for_user(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_returns_upcoming_for_user(seeded_app: FastAPI) -> None:
     """GET /api/reminders returns upcoming reminders for the authenticated user."""
-    item = await _create_item(db_session, USER_ID, "buy milk")
-    await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     assert response.status_code == 200
     data = response.json()
@@ -169,64 +247,35 @@ async def test_list_reminders_returns_upcoming_for_user(
     assert r["snooze_count"] == 0
 
 
-async def test_list_reminders_excludes_sent_reminders(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_excludes_sent_reminders(sent_reminder_app: FastAPI) -> None:
     """GET /api/reminders does not return reminders marked as sent."""
-    item = await _create_item(db_session, USER_ID, "sent task")
-    await _create_reminder(db_session, item, is_sent=True)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(sent_reminder_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     assert response.status_code == 200
     assert response.json() == []
 
 
-async def test_list_reminders_excludes_cancelled_reminders(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_excludes_cancelled_reminders(cancelled_reminder_app: FastAPI) -> None:
     """GET /api/reminders does not return cancelled reminders."""
-    item = await _create_item(db_session, USER_ID, "cancelled task")
-    await _create_reminder(db_session, item, is_cancelled=True)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(cancelled_reminder_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     assert response.status_code == 200
     assert response.json() == []
 
 
-async def test_list_reminders_scoped_to_authenticated_user(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_scoped_to_authenticated_user(seeded_app: FastAPI) -> None:
     """GET /api/reminders never returns another user's reminders."""
-    own_item = await _create_item(db_session, USER_ID, "my task")
-    other_item = await _create_item(db_session, OTHER_USER_ID, "their task")
-    await _create_reminder(db_session, own_item)
-    await _create_reminder(db_session, other_item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
-    assert data[0]["item_preview"] == "my task"
+    assert data[0]["item_preview"] == "buy milk"
 
 
-async def test_list_reminders_ordered_soonest_first(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_ordered_soonest_first(two_reminders_app: FastAPI) -> None:
     """GET /api/reminders returns reminders ordered soonest first."""
-    item = await _create_item(db_session, USER_ID, "task")
-    t1 = datetime(2099, 6, 1, tzinfo=UTC)
-    t2 = datetime(2099, 1, 1, tzinfo=UTC)
-    await _create_reminder(db_session, item, remind_at=t1)
-    await _create_reminder(db_session, item, remind_at=t2)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(two_reminders_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     data = response.json()
     assert len(data) == 2
@@ -234,16 +283,9 @@ async def test_list_reminders_ordered_soonest_first(
     assert data[0]["remind_at"] < data[1]["remind_at"]
 
 
-async def test_list_reminders_item_preview_truncated_at_120_chars(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_list_reminders_item_preview_truncated_at_120_chars(long_content_app: FastAPI) -> None:
     """GET /api/reminders truncates item_preview to 120 characters."""
-    long_content = "x" * 200
-    item = await _create_item(db_session, USER_ID, long_content)
-    await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(long_content_app, raise_server_exceptions=True) as client:
         response = client.get("/api/reminders")
     data = response.json()
     assert len(data[0]["item_preview"]) == 120
@@ -268,35 +310,32 @@ def test_patch_reminder_without_token_returns_401(web_config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_patch_acknowledge_returns_200(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_patch_acknowledge_returns_200(seeded_app_with_data: SeededData) -> None:
     """PATCH acknowledge returns HTTP 200 with reminder data."""
-    item = await _create_item(db_session, USER_ID, "acknowledge me")
-    # Mark as sent so acknowledge works (service allows it either way, but realistic)
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
-        response = client.patch(f"/api/reminders/{reminder.id}", json={"action": "acknowledge"})
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
+        response = client.patch(
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
+            json={"action": "acknowledge"},
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(reminder.id)
+    assert data["id"] == str(seeded_app_with_data.reminder_id)
     assert data["item_preview"] == "acknowledge me"
 
 
 async def test_patch_acknowledge_sets_is_acknowledged(
-    app_with_db: FastAPI, db_session: AsyncSession
+    seeded_app_with_data: SeededData, db_session: AsyncSession
 ) -> None:
     """PATCH acknowledge marks the reminder as acknowledged in the DB."""
-    item = await _create_item(db_session, USER_ID, "ack task")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
+        client.patch(
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
+            json={"action": "acknowledge"},
+        )
 
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
-        client.patch(f"/api/reminders/{reminder.id}", json={"action": "acknowledge"})
-
-    await db_session.refresh(reminder)
+    repo = ReminderRepository(db_session)
+    reminder = await repo.get_by_id_for_user(seeded_app_with_data.reminder_id, USER_ID)
+    assert reminder is not None
     assert reminder.is_acknowledged is True
 
 
@@ -305,31 +344,31 @@ async def test_patch_acknowledge_sets_is_acknowledged(
 # ---------------------------------------------------------------------------
 
 
-async def test_patch_cancel_returns_200(app_with_db: FastAPI, db_session: AsyncSession) -> None:
+def test_patch_cancel_returns_200(seeded_app_with_data: SeededData) -> None:
     """PATCH cancel returns HTTP 200 with reminder data."""
-    item = await _create_item(db_session, USER_ID, "cancel me")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
-        response = client.patch(f"/api/reminders/{reminder.id}", json={"action": "cancel"})
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
+        response = client.patch(
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
+            json={"action": "cancel"},
+        )
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == str(reminder.id)
+    assert data["id"] == str(seeded_app_with_data.reminder_id)
 
 
 async def test_patch_cancel_sets_is_cancelled(
-    app_with_db: FastAPI, db_session: AsyncSession
+    seeded_app_with_data: SeededData, db_session: AsyncSession
 ) -> None:
     """PATCH cancel marks the reminder as cancelled in the DB."""
-    item = await _create_item(db_session, USER_ID, "cancel task")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
+        client.patch(
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
+            json={"action": "cancel"},
+        )
 
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
-        client.patch(f"/api/reminders/{reminder.id}", json={"action": "cancel"})
-
-    await db_session.refresh(reminder)
+    repo = ReminderRepository(db_session)
+    reminder = await repo.get_by_id_for_user(seeded_app_with_data.reminder_id, USER_ID)
+    assert reminder is not None
     assert reminder.is_cancelled is True
 
 
@@ -338,81 +377,58 @@ async def test_patch_cancel_sets_is_cancelled(
 # ---------------------------------------------------------------------------
 
 
-async def test_patch_snooze_plus1h_returns_200(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_patch_snooze_plus1h_returns_200(seeded_app_with_data: SeededData) -> None:
     """PATCH snooze with +1h returns HTTP 200."""
-    item = await _create_item(db_session, USER_ID, "snooze +1h task")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
         response = client.patch(
-            f"/api/reminders/{reminder.id}",
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
             json={"action": "snooze", "snooze_option": "+1h"},
         )
     assert response.status_code == 200
 
 
-async def test_patch_snooze_plus24h_returns_200(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_patch_snooze_plus24h_returns_200(seeded_app_with_data: SeededData) -> None:
     """PATCH snooze with +24h returns HTTP 200."""
-    item = await _create_item(db_session, USER_ID, "snooze +24h task")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
         response = client.patch(
-            f"/api/reminders/{reminder.id}",
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
             json={"action": "snooze", "snooze_option": "+24h"},
         )
     assert response.status_code == 200
 
 
-async def test_patch_snooze_next_day_returns_200(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_patch_snooze_next_day_returns_200(seeded_app_with_data: SeededData) -> None:
     """PATCH snooze with next_day returns HTTP 200."""
-    item = await _create_item(db_session, USER_ID, "snooze next_day task")
-    reminder = await _create_reminder(db_session, item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
         response = client.patch(
-            f"/api/reminders/{reminder.id}",
+            f"/api/reminders/{seeded_app_with_data.reminder_id}",
             json={"action": "snooze", "snooze_option": "next_day"},
         )
     assert response.status_code == 200
 
 
 async def test_patch_snooze_acknowledges_original_and_creates_new(
-    app_with_db: FastAPI, db_session: AsyncSession
+    seeded_app_with_data: SeededData, db_session: AsyncSession
 ) -> None:
     """PATCH snooze marks original as acknowledged and a new reminder appears in upcoming."""
-    item = await _create_item(db_session, USER_ID, "snooze task")
-    reminder = await _create_reminder(db_session, item)
-    reminder_id = reminder.id
-    await db_session.commit()
+    reminder_id = seeded_app_with_data.reminder_id
 
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
         client.patch(
             f"/api/reminders/{reminder_id}",
             json={"action": "snooze", "snooze_option": "+1h"},
         )
 
-    await db_session.refresh(reminder)
-    # Original must be acknowledged.
-    assert reminder.is_acknowledged is True
+    repo = ReminderRepository(db_session)
+    original = await repo.get_by_id_for_user(reminder_id, USER_ID)
+    assert original is not None
+    assert original.is_acknowledged is True
 
     # A new snoozed reminder for the same item should exist.
-    # get_upcoming filters is_sent=False, is_cancelled=False — the acknowledged original
-    # still appears; the new snoozed copy is added alongside it.
-    repo = ReminderRepository(db_session)
     upcoming = await repo.get_upcoming(USER_ID)
     snoozed = [r for r in upcoming if r.snooze_count == 1]
     assert len(snoozed) == 1
-    assert snoozed[0].item_id == item.id
+    assert snoozed[0].item_id == seeded_app_with_data.item_id
 
 
 # ---------------------------------------------------------------------------
@@ -477,17 +493,12 @@ def test_patch_nonexistent_reminder_returns_404(app_with_db: FastAPI) -> None:
     assert response.status_code == 404
 
 
-async def test_patch_other_users_reminder_returns_404(
-    app_with_db: FastAPI, db_session: AsyncSession
-) -> None:
+def test_patch_other_users_reminder_returns_404(seeded_app_with_data: SeededData) -> None:
     """PATCH on another user's reminder returns HTTP 404."""
-    other_item = await _create_item(db_session, OTHER_USER_ID, "not yours")
-    other_reminder = await _create_reminder(db_session, other_item)
-    await db_session.commit()
-
-    with TestClient(app_with_db, raise_server_exceptions=True) as client:
+    with TestClient(seeded_app_with_data.app, raise_server_exceptions=True) as client:
         response = client.patch(
-            f"/api/reminders/{other_reminder.id}", json={"action": "acknowledge"}
+            f"/api/reminders/{seeded_app_with_data.other_reminder_id}",
+            json={"action": "acknowledge"},
         )
     assert response.status_code == 404
 
