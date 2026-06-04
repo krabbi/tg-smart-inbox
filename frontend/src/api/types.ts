@@ -102,3 +102,9 @@ export interface SettingsResponse {
   timezone: string;
   language: string;
 }
+
+/** Partial update payload for PATCH /api/settings. */
+export interface PatchSettingsRequest {
+  timezone?: string;
+  language?: string;
+}

@@ -24,15 +24,7 @@ export type Command<Msg> = {
  * Set VITE_API_BASE_URL=http://localhost:8000 in .env.local for local dev.
  * In production the nginx proxy forwards /api/ so the default "" works.
  */
-const API_BASE: string =
-  typeof import.meta !== "undefined" &&
-  // @ts-expect-error — Vite injects import.meta.env at build time
-  typeof import.meta.env !== "undefined" &&
-  // @ts-expect-error — Vite injects import.meta.env at build time
-  (import.meta.env["VITE_API_BASE_URL"] as string | undefined)
-    ? // @ts-expect-error — Vite injects import.meta.env at build time
-      (import.meta.env["VITE_API_BASE_URL"] as string)
-    : "";
+const API_BASE: string = import.meta.env["VITE_API_BASE_URL"] ?? "";
 
 // ---------------------------------------------------------------------------
 // JWT helpers
@@ -70,10 +62,11 @@ export interface RequestOptions {
 // HTTP error messages the dispatch layer understands
 // ---------------------------------------------------------------------------
 
-/** Canonical message type emitted by the HTTP layer on auth failures. */
+/** Canonical message type emitted by the HTTP layer on auth failures or HTTP errors. */
 export type HttpErrorMsg =
   | { type: "SessionExpired" }
-  | { type: "AccessDenied" };
+  | { type: "AccessDenied" }
+  | { type: "HttpError"; status: number };
 
 // ---------------------------------------------------------------------------
 // Core fetch wrapper
@@ -134,9 +127,9 @@ export function apiRequest<Msg, T>(
           }
 
           if (!response.ok) {
-            // Other non-2xx errors — treat as generic access denied for now.
-            // Callers can refine by inspecting the error msg type.
-            dispatch(onError({ type: "AccessDenied" }));
+            // Other non-2xx errors — dispatch HttpError with the actual status code
+            // so callers can distinguish 404, 422, 500, etc. from auth failures.
+            dispatch(onError({ type: "HttpError", status: response.status }));
             return;
           }
 

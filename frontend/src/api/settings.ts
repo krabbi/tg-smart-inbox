@@ -5,7 +5,7 @@
  */
 
 import { apiRequest, type Command, type HttpErrorMsg } from "./client.ts";
-import type { SettingsResponse } from "./types.ts";
+import type { PatchSettingsRequest, SettingsResponse } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Message types produced by settings commands
@@ -13,6 +13,7 @@ import type { SettingsResponse } from "./types.ts";
 
 export type SettingsMsg =
   | { type: "SettingsLoaded"; settings: SettingsResponse }
+  | { type: "SettingsUpdated"; settings: SettingsResponse }
   | { type: "SettingsError"; err: HttpErrorMsg };
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,19 @@ export function getSettings(): Command<SettingsMsg> {
     "/api/settings",
     { method: "GET" },
     (data) => ({ type: "SettingsLoaded", settings: data }),
+    (err) => ({ type: "SettingsError", err }),
+  );
+}
+
+/**
+ * Return a Command that PATCHes /api/settings with the given partial update
+ * and dispatches SettingsUpdated on success or SettingsError on failure.
+ */
+export function patchSettings(body: PatchSettingsRequest): Command<SettingsMsg> {
+  return apiRequest<SettingsMsg, SettingsResponse>(
+    "/api/settings",
+    { method: "PATCH", body },
+    (data) => ({ type: "SettingsUpdated", settings: data }),
     (err) => ({ type: "SettingsError", err }),
   );
 }

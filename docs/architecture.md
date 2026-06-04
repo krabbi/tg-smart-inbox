@@ -940,6 +940,7 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `JWT_SECRET` | Web only | `None` | Secret key used to sign JWT tokens by the web UI companion service (`web/main.py`). Not required for the bot process — the web app factory validates its presence at startup. |
 | `WEB_PORT` | No | `8000` | Port the FastAPI web service listens on. Has no effect on the bot process. |
 | `CORS_ORIGINS` | No | `[]` | Comma-separated list of allowed CORS origins for the web UI companion (e.g. `https://app.example.com`). Non-empty → credentialed requests allowed from listed origins only. Empty → wildcard `*` without credentials (dev convenience). |
+| `VITE_API_BASE_URL` | Frontend only | `""` | Base URL for API requests from the Vite/TypeScript frontend (`frontend/`). Set in `frontend/.env.local` for local development (e.g. `http://localhost:8000`). In production the nginx proxy forwards `/api/` so the default empty string works. Not read by the Python bot or web service. |
 
 ---
 
