@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.item import Item, ItemType
 from bot.repositories.item_repository import ItemRepository
 from web.dependencies import get_current_user, get_db_session
+from web.services.item_service import ItemService
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 
@@ -205,13 +206,11 @@ async def delete_item(
         raise HTTPException(status_code=400, detail="Invalid item id") from exc
 
     user_id = int(current_user["sub"])
-    repo = ItemRepository(session)
-    deleted = await repo.delete_for_user(parsed_id, user_id)
+    svc = ItemService(session=session, item_repo=ItemRepository(session))
+    deleted = await svc.delete_item(parsed_id, user_id)
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Item not found")
-
-    await session.commit()
 
 
 @router.delete("", response_model=BulkDeleteResponse)
@@ -236,10 +235,7 @@ async def bulk_delete_items(
             parsed_ids.append(uuid.UUID(raw_id))
 
     user_id = int(current_user["sub"])
-    repo = ItemRepository(session)
-    count = await repo.bulk_delete_for_user(parsed_ids, user_id)
-
-    if count:
-        await session.commit()
+    svc = ItemService(session=session, item_repo=ItemRepository(session))
+    count = await svc.bulk_delete_items(parsed_ids, user_id)
 
     return BulkDeleteResponse(deleted=count)
