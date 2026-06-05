@@ -218,6 +218,7 @@ frontend/
       Login.ts              # Telegram Login Widget card — view() + attachLoginListeners()
       ItemList.ts           # paginated item list with search, single/bulk delete
       ItemDetail.ts         # full item detail panel with back button
+      Reminders.ts          # reminders list with ack/snooze/cancel controls
     api/
       client.ts         # Command<Msg> type, JWT helpers, apiRequest()
       types.ts          # TypeScript mirrors of FastAPI response schemas
