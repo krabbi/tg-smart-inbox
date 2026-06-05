@@ -79,5 +79,41 @@ services:
     command: watchfiles --filter python "python -m bot" bot
     profiles: [dev]
 
+  # Web UI companion — FastAPI REST API for the Foldkit SPA.
+  # Shares the same PostgreSQL database as the bot.
+  # JWT_SECRET is required; the app fails fast at startup if it is not set.
+  web:
+    build:
+      context: .
+      target: base
+    command: uvicorn web.main:create_app --factory --host 0.0.0.0 --port ${WEB_PORT:-8000}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://inbox:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db/inbox
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      WEB_PORT: ${WEB_PORT:-8000}
+      TELEGRAM_BOT_TOKEN:
+      ANTHROPIC_API_KEY:
+      ALLOWED_USER_IDS:
+      CORS_ORIGINS:
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: [web]
+
+  # nginx reverse proxy: serves the Foldkit SPA and proxies /api/* to the web service.
+  # Requires a production frontend build at ./frontend/dist.
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+    profiles: [web]
+
 volumes:
   pgdata:
