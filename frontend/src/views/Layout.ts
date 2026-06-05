@@ -18,6 +18,7 @@ import type { Msg } from "../Messages.ts";
 import { view as loginView, attachLoginListeners } from "./Login.ts";
 import { view as itemListView, attachListListeners } from "./ItemList.ts";
 import { view as itemDetailView, attachDetailListeners } from "./ItemDetail.ts";
+import { view as remindersView, attachRemindersListeners } from "./Reminders.ts";
 
 // ---------------------------------------------------------------------------
 // Sidebar tab configuration
@@ -76,8 +77,8 @@ function viewContentBody(model: Model): string {
     }
     return itemListView(model);
   }
-  // Reminders route — placeholder until the reminders view is implemented.
-  return `<p class="content-placeholder">Reminders coming soon.</p>`;
+  // Reminders route.
+  return remindersView(model);
 }
 
 /**
@@ -178,5 +179,10 @@ export function attachListeners(
     } else {
       attachListListeners(root, dispatch);
     }
+  }
+
+  // Reminders listeners — attached when showing the reminders route
+  if (model.auth.tag === "authenticated" && model.currentRoute === "reminders") {
+    attachRemindersListeners(root, dispatch);
   }
 }

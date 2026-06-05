@@ -6,7 +6,7 @@
  * update() in Main.ts pattern-matches on Msg to produce the next Model.
  */
 
-import type { TelegramLoginPayload, MeResponse, ItemListResponse, ItemDetail } from "./api/types.ts";
+import type { TelegramLoginPayload, MeResponse, ItemListResponse, ItemDetail, ReminderResponse, SettingsResponse } from "./api/types.ts";
 import type { HttpErrorMsg } from "./api/client.ts";
 import type { Route } from "./Model.ts";
 
@@ -102,4 +102,36 @@ export type Msg =
   | { type: "ItemsBulkDeleted"; deleted: number }
 
   /** Dismiss the post-bulk-delete feedback message. */
-  | { type: "ClearItemFeedback" };
+  | { type: "ClearItemFeedback" }
+
+  // --- Reminders messages --------------------------------------------------
+
+  /** GET /api/reminders succeeded; carries the full list of upcoming reminders. */
+  | { type: "RemindersLoaded"; reminders: ReminderResponse[] }
+
+  /** GET /api/reminders failed. */
+  | { type: "RemindersError"; err: HttpErrorMsg }
+
+  /** User clicked Acknowledge on a reminder; kicks off PATCH and optimistic remove. */
+  | { type: "AckReminder"; id: string }
+
+  /** User clicked Cancel on a reminder; kicks off PATCH and optimistic remove. */
+  | { type: "CancelReminder"; id: string }
+
+  /** User selected a snooze option and clicked Snooze; kicks off PATCH and optimistic remove. */
+  | { type: "SnoozeReminder"; id: string; option: "+1h" | "+24h" | "next_day" }
+
+  /**
+   * PATCH /api/reminders/{id} succeeded (ack, cancel, or snooze).
+   * Removes the reminder from the list (the optimistic remove already happened,
+   * so this is a no-op in practice but keeps the model consistent).
+   */
+  | { type: "ReminderActioned"; id: string }
+
+  // --- Settings messages ---------------------------------------------------
+
+  /** GET /api/settings succeeded; carries user timezone and language. */
+  | { type: "SettingsLoaded"; settings: SettingsResponse }
+
+  /** GET /api/settings failed — timezone falls back to browser locale. */
+  | { type: "SettingsError"; err: HttpErrorMsg };

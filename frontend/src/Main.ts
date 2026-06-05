@@ -19,6 +19,15 @@
  *   - On SelectItem → fetch full item detail via GET /api/items/{id}.
  *   - On ConfirmDeleteItem → DELETE /api/items/{id}.
  *   - On ConfirmBulkDelete → DELETE /api/items (bulk).
+ *
+ * Reminders behaviour:
+ *   - On NavigateTo("reminders") → fetch reminders; fetch settings if not yet loaded.
+ *   - On AckReminder / CancelReminder / SnoozeReminder → optimistic remove + PATCH.
+ *   - On ReminderActioned → idempotent re-filter (PATCH confirmed by server).
+ *
+ * Settings behaviour:
+ *   - On SettingsLoaded → store in model.settings (used for timezone formatting).
+ *   - On SettingsError → log warning; timezone falls back to browser locale.
  */
 
 import { getJwt, setJwt, clearJwt, type Command } from "./api/client.ts";
@@ -35,6 +44,9 @@ import {
   bulkDeleteItems,
   type ItemsMsg,
 } from "./api/items.ts";
+import { getReminders, patchReminder, type RemindersMsg } from "./api/reminders.ts";
+import { getSettings, type SettingsMsg } from "./api/settings.ts";
+import type { ReminderAction } from "./api/types.ts";
 
 // ---------------------------------------------------------------------------
 // Route → ItemType mapping
@@ -208,6 +220,47 @@ function bulkDeleteCommand(ids: string[]): Command<Msg> {
   };
 }
 
+/** Build a Command that fetches the list of upcoming reminders. */
+function fetchRemindersCommand(): Command<Msg> {
+  const cmd = getReminders();
+  return {
+    run(dispatch) {
+      cmd.run((remindersMsg: RemindersMsg) => {
+        dispatch(remindersMsg as unknown as Msg);
+      });
+    },
+  };
+}
+
+/** Build a Command that PATCHes a reminder (ack / cancel / snooze). */
+function patchReminderCommand(id: string, action: ReminderAction): Command<Msg> {
+  const cmd = patchReminder(id, action);
+  return {
+    run(dispatch) {
+      cmd.run((remindersMsg: RemindersMsg) => {
+        if (remindersMsg.type === "ReminderUpdated") {
+          dispatch({ type: "ReminderActioned", id: remindersMsg.reminder.id });
+        } else {
+          // RemindersError — optimistic remove already happened; just log.
+          console.error("patchReminder failed", remindersMsg);
+        }
+      });
+    },
+  };
+}
+
+/** Build a Command that fetches user settings. */
+function fetchSettingsCommand(): Command<Msg> {
+  const cmd = getSettings();
+  return {
+    run(dispatch) {
+      cmd.run((settingsMsg: SettingsMsg) => {
+        dispatch(settingsMsg as unknown as Msg);
+      });
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // update — pure function: (Model, Msg) → { model: Model, commands: Command<Msg>[] }
 // ---------------------------------------------------------------------------
@@ -303,6 +356,7 @@ function update(model: Model, msg: Msg): UpdateResult {
     // -----------------------------------------------------------------------
 
     case "NavigateTo": {
+      const isReminders = msg.route === "reminders";
       const newModel: Model = {
         ...model,
         currentRoute: msg.route,
@@ -310,10 +364,19 @@ function update(model: Model, msg: Msg): UpdateResult {
           ...resetItemListState(),
           isLoading: isItemRoute(msg.route),
         },
+        reminders: isReminders
+          ? { ...model.reminders, isLoading: true, error: null }
+          : model.reminders,
       };
-      const commands: Command<Msg>[] = isItemRoute(msg.route)
-        ? [fetchItemsCommand(msg.route, 1, "")]
-        : [];
+      const commands: Command<Msg>[] = [];
+      if (isItemRoute(msg.route)) {
+        commands.push(fetchItemsCommand(msg.route, 1, ""));
+      } else if (isReminders) {
+        commands.push(fetchRemindersCommand());
+        if (model.settings === null) {
+          commands.push(fetchSettingsCommand());
+        }
+      }
       return { model: newModel, commands };
     }
 
@@ -605,6 +668,114 @@ function update(model: Model, msg: Msg): UpdateResult {
         model: { ...model, itemList: { ...model.itemList, feedback: null } },
         commands: [],
       };
+
+    // -----------------------------------------------------------------------
+    // Reminders
+    // -----------------------------------------------------------------------
+
+    case "RemindersLoaded":
+      return {
+        model: {
+          ...model,
+          reminders: {
+            reminders: msg.reminders,
+            isLoading: false,
+            error: null,
+          },
+        },
+        commands: [],
+      };
+
+    case "RemindersError":
+      return {
+        model: {
+          ...model,
+          reminders: {
+            ...model.reminders,
+            isLoading: false,
+            error:
+              msg.err.type === "SessionExpired"
+                ? null
+                : msg.err.type === "AccessDenied"
+                  ? "Access denied."
+                  : `Request failed (HTTP ${(msg.err as { type: "HttpError"; status: number }).status}).`,
+          },
+        },
+        commands:
+          msg.err.type === "SessionExpired"
+            ? [{ run: (d) => d({ type: "SessionExpired" }) }]
+            : [],
+      };
+
+    case "AckReminder":
+      return {
+        model: {
+          ...model,
+          reminders: {
+            ...model.reminders,
+            reminders: model.reminders.reminders.filter((r) => r.id !== msg.id),
+          },
+        },
+        commands: [patchReminderCommand(msg.id, { action: "acknowledge" })],
+      };
+
+    case "CancelReminder":
+      return {
+        model: {
+          ...model,
+          reminders: {
+            ...model.reminders,
+            reminders: model.reminders.reminders.filter((r) => r.id !== msg.id),
+          },
+        },
+        commands: [patchReminderCommand(msg.id, { action: "cancel" })],
+      };
+
+    case "SnoozeReminder":
+      return {
+        model: {
+          ...model,
+          reminders: {
+            ...model.reminders,
+            reminders: model.reminders.reminders.filter((r) => r.id !== msg.id),
+          },
+        },
+        commands: [
+          patchReminderCommand(msg.id, {
+            action: "snooze",
+            snooze_option: msg.option,
+          }),
+        ],
+      };
+
+    case "ReminderActioned":
+      // Optimistic remove already happened in AckReminder/CancelReminder/SnoozeReminder.
+      // This case keeps the model consistent if the server confirms the action.
+      return {
+        model: {
+          ...model,
+          reminders: {
+            ...model.reminders,
+            reminders: model.reminders.reminders.filter((r) => r.id !== msg.id),
+          },
+        },
+        commands: [],
+      };
+
+    // -----------------------------------------------------------------------
+    // Settings
+    // -----------------------------------------------------------------------
+
+    case "SettingsLoaded":
+      return {
+        model: { ...model, settings: msg.settings },
+        commands: [],
+      };
+
+    case "SettingsError":
+      // Non-critical — timezone falls back to browser locale. Just log.
+      console.warn("SettingsError — timezone will fall back to browser locale", msg.err);
+      return { model, commands: [] };
   }
 }
 

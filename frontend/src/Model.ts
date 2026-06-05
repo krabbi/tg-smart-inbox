@@ -5,7 +5,7 @@
  * app state. update() produces a new Model from the current one and a Msg.
  */
 
-import type { MeResponse, ItemSummary, ItemDetail } from "./api/types.ts";
+import type { MeResponse, ItemSummary, ItemDetail, ReminderResponse, SettingsResponse } from "./api/types.ts";
 
 // ---------------------------------------------------------------------------
 // UserInfo — the authenticated user's identity (from GET /api/auth/me)
@@ -85,6 +85,20 @@ export interface ItemListState {
 }
 
 // ---------------------------------------------------------------------------
+// RemindersState — state for the reminders content area
+// ---------------------------------------------------------------------------
+
+/** State for the reminders list panel. */
+export interface RemindersState {
+  /** Upcoming reminders currently displayed. */
+  reminders: ReminderResponse[];
+  /** True while a reminders fetch is in flight. */
+  isLoading: boolean;
+  /** Non-null when a reminders API call failed. */
+  error: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
@@ -100,6 +114,10 @@ export interface Model {
   error: string | null;
   /** State for the item list and detail content area. */
   itemList: ItemListState;
+  /** State for the reminders list panel. */
+  reminders: RemindersState;
+  /** User settings (timezone, language); null until first loaded. */
+  settings: SettingsResponse | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +137,12 @@ const initialItemListState: ItemListState = {
   feedback: null,
 };
 
+const initialRemindersState: RemindersState = {
+  reminders: [],
+  isLoading: false,
+  error: null,
+};
+
 /** Starting state before init has run. */
 export const initialModel: Model = {
   auth: { tag: "unauthenticated" },
@@ -126,6 +150,8 @@ export const initialModel: Model = {
   isLoading: false,
   error: null,
   itemList: initialItemListState,
+  reminders: initialRemindersState,
+  settings: null,
 };
 
 /** Produce a fresh ItemListState, preserving the current search query if desired. */
