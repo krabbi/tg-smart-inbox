@@ -207,6 +207,10 @@ web/
     auth.py             # POST /api/auth/telegram, GET /api/auth/me
     items.py            # GET /api/items, GET /api/items/{id}, DELETE /api/items/{id}, DELETE /api/items
     reminders.py        # GET /api/reminders, PATCH /api/reminders/{id}
+    settings.py         # GET /api/settings, PATCH /api/settings
+  services/
+    __init__.py         # empty package marker
+    item_service.py     # ItemService — delete_item, bulk_delete_items
 frontend/
   index.html            # HTML shell — #app mount point, global CSS
   src/

@@ -878,7 +878,44 @@ It shares the same database as the bot via `bot/db.py` — no second engine is c
 | `web/routers/items.py` | Items router mounted at `/api/items`: `GET /api/items` (paginated list with optional `type` filter and full-text search via `?q=`), `GET /api/items/{id}` (full item detail), `DELETE /api/items/{id}` (delete a single item), and `DELETE /api/items` (bulk delete by id list). All endpoints require a valid Bearer JWT and scope all queries to the authenticated user's `telegram_id`. |
 | `web/routers/reminders.py` | Reminders router mounted at `/api/reminders`: `GET /api/reminders` (list upcoming — non-sent, non-cancelled — reminders for the authenticated user, ordered soonest-first; returns UTC ISO8601 times), `PATCH /api/reminders/{id}` (acknowledge, cancel, or snooze a reminder; snooze accepts `+1h`, `+24h`, or `next_day`; returns HTTP 400 for unknown action or invalid snooze option, HTTP 404 for missing or foreign reminder). All endpoints require a valid Bearer JWT. |
 | `web/routers/settings.py` | Settings router mounted at `/api/settings`: `GET /api/settings` (return the authenticated user's timezone and language, or model defaults if no row exists yet), `PATCH /api/settings` (partial upsert — any combination of `timezone` and `language` may be provided; timezone validated against `zoneinfo.available_timezones()`, language validated against the bot's `SUPPORTED_LANGUAGES`; returns HTTP 422 for invalid values). All endpoints require a valid Bearer JWT. |
+| `web/services/__init__.py` | Empty package marker for the services sub-package |
 | `web/services/item_service.py` | `ItemService` — delete operations (`delete_item`, `bulk_delete_items`) that own the transaction boundary (`commit()`); called by the items router. |
+
+### File layout
+
+```
+web/
+  __init__.py           # empty package marker
+  main.py               # create_app() factory — CORS, lifespan, route registration
+  auth.py               # verify_telegram_login, create_jwt, decode_jwt, verify_jwt_token
+  dependencies.py       # get_db_session, get_current_user FastAPI deps
+  routers/
+    __init__.py         # empty package marker
+    auth.py             # POST /api/auth/telegram, GET /api/auth/me
+    items.py            # GET /api/items, GET /api/items/{id}, DELETE /api/items/{id}, DELETE /api/items
+    reminders.py        # GET /api/reminders, PATCH /api/reminders/{id}
+    settings.py         # GET /api/settings, PATCH /api/settings
+  services/
+    __init__.py         # empty package marker
+    item_service.py     # ItemService — delete_item, bulk_delete_items
+```
+
+### Auth flow
+
+```
+# Initial login
+Browser → POST /api/auth/telegram
+            └─ verify_telegram_login() — HMAC-SHA256(SHA256(bot_token), check_string) + 24h expiry
+            └─ allowlist check (ALLOWED_USER_IDS, if non-empty)
+            └─ create_jwt(telegram_id, jwt_secret) → {"token": "<HS256 JWT>"}
+
+# Authenticated requests
+Browser → GET /api/* — Authorization: Bearer <token>
+            └─ HTTPBearer extracts token
+            └─ verify_jwt_token(token, jwt_secret) — decode_jwt → payload or HTTP 401
+            └─ allowlist check on payload["sub"] → HTTP 403 if not allowed
+            └─ handler receives get_current_user payload dict
+```
 
 ### Starting the web service
 
@@ -903,6 +940,8 @@ When empty (the default), the CORS middleware uses `allow_origins=["*"]` with `a
 | GET | `/api/items/{id}` | Bearer JWT | Full detail for a single item owned by the authenticated user. Returns `id`, `type`, `content`, `title`, `description`, `scraped_text`, `created_at`. HTTP 404 if not found or owned by another user. HTTP 400 if `id` is not a valid UUID. |
 | DELETE | `/api/items/{id}` | Bearer JWT | Delete a single item owned by the authenticated user. Returns HTTP 204 on success. HTTP 404 if not found or owned by another user. HTTP 400 if `id` is not a valid UUID. |
 | DELETE | `/api/items` | Bearer JWT | Bulk delete items by id list. Request body: `{"ids": ["<uuid>", ...]}`. Silently ignores unknown or foreign ids. Returns `{"deleted": N}`. |
+| GET | `/api/reminders` | Bearer JWT | List upcoming (unsent, non-cancelled) reminders for the authenticated user, ordered soonest-first. Returns `[{"id": ..., "item_id": ..., "remind_at": "<UTC ISO8601>", "snooze_count": N, "item_preview": "..."}]`. |
+| PATCH | `/api/reminders/{id}` | Bearer JWT | Acknowledge, cancel, or snooze a reminder. Request body: `{"action": "acknowledge\|cancel\|snooze", "snooze_option": "+1h\|+24h\|next_day"}`. HTTP 400 for unknown action or invalid snooze option. HTTP 404 if not found or owned by another user. Returns updated reminder on success. |
 | GET | `/api/settings` | Bearer JWT | Return the authenticated user's settings. Returns `{"timezone": "...", "language": "..."}`. Falls back to model defaults (`UTC` / `en`) when no row exists. |
 | PATCH | `/api/settings` | Bearer JWT | Partial update of user settings. Request body: `{"timezone": "...", "language": "..."}` (all fields optional). Validates timezone against IANA `available_timezones()` and language against `{"ru", "en"}`. Returns HTTP 422 for invalid values, updated settings on success. |
 
