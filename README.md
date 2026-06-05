@@ -21,6 +21,8 @@ You forward links, photos, and notes to Telegram "Saved Messages" with the inten
 - **Transcribe voice messages** and process them through the same pipeline
 - **Search everything** you've ever sent it
 
+A **web dashboard** companion lets you browse, search, and delete your saved items and manage reminders from any browser — authenticated via the Telegram Login Widget.
+
 ## Features
 
 | What you send | What the bot does |
@@ -51,16 +53,19 @@ You forward links, photos, and notes to Telegram "Saved Messages" with the inten
 ## Architecture
 
 ```
-User (Telegram)
-     │
-     ▼
-aiogram bot (Python)
-     │
+User (Telegram)              User (Browser)
+     │                             │
+     ▼                             ▼
+aiogram bot (Python)         nginx reverse proxy
+     │                             │
      ├── Claude API     — classification, summarization, time parsing, idea tags
      ├── SQLite / PostgreSQL  — items, reminders, ideas
      ├── APScheduler    — due-reminder dispatch + auto-resend every 60s
      ├── Groq Whisper   — voice transcription (optional)
-     └── Google Drive   — photo/file storage (optional)
+     ├── Google Drive   — photo/file storage (optional)
+     └── FastAPI web app — REST API + Telegram Login Widget auth (JWT)
+              │
+              └── Foldkit SPA (TypeScript) — item list/detail, reminders, search, delete
 ```
 
 ## Getting Started
@@ -173,10 +178,12 @@ docker compose --profile prod pull
 docker compose --profile prod up -d
 ```
 
-The `prod` profile starts three containers:
+The `prod` profile starts five containers:
 
 - `db` — Postgres with the `pgvector` extension
-- `bot` — the bot itself (`ghcr.io/krabbi/tg-smart-inbox:latest`)
+- `bot` — the Telegram bot (`ghcr.io/krabbi/tg-smart-inbox:latest`)
+- `web` — FastAPI REST API for the web dashboard (same image, different entrypoint)
+- `nginx` — reverse proxy: serves the Foldkit SPA and forwards `/api/*` to `web`
 - `watchtower` — auto-updater (see below)
 
 ### 4. Auto-updates with Watchtower
@@ -296,7 +303,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 - [x] Google Drive media upload with per-user folder isolation (v1: shared bot-owner Drive quota)
 - [ ] Google Drive v2: per-user OAuth so files land in each user's own Drive
 - [ ] Morning digest with curated content
-- [ ] Web dashboard for browsing saved items
+- [x] Web dashboard — browse, search, and delete items; manage reminders (Telegram Login Widget + JWT)
 
 ## License
 
