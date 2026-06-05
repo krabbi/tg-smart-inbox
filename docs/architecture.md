@@ -962,6 +962,96 @@ The runtime in `Main.ts` is a minimal hand-rolled loop — no framework package 
 
 ---
 
+## Docker Compose Deployment
+
+`docker-compose.yml` defines all services. Services are grouped into named profiles so each
+runtime context starts only what it needs.
+
+### Profiles
+
+| Profile | Services started | Purpose |
+|---------|-----------------|---------|
+| `prod` | `db`, `bot`, `watchtower` | Production bot — pulls pre-built GHCR image, Watchtower auto-updates |
+| `dev` | `db`, `bot-dev` | Local bot development — source mounted, hot-reload via watchfiles |
+| `web` | `db`, `web`, `nginx` | Web UI companion — FastAPI + nginx reverse proxy |
+
+Profiles can be combined: `docker compose --profile prod --profile web up -d` starts all
+five services together.
+
+### `web` service
+
+Builds from the same `Dockerfile` (`target: base`) as the production bot image so both the
+bot and the web API share a single image. The `web/` package is copied in the `base` stage.
+
+```
+command: uvicorn web.main:create_app --factory --host 0.0.0.0 --port ${WEB_PORT:-8000}
+```
+
+Required environment variables:
+
+| Variable | Behaviour when absent |
+|----------|-----------------------|
+| `JWT_SECRET` | `docker-compose.yml` uses `:?` syntax — Compose exits immediately with an error message |
+| `POSTGRES_PASSWORD` | Same `:?` guard — shared with all other services |
+| `DATABASE_URL` | Constructed from `POSTGRES_PASSWORD`; points at the `db` service |
+
+Optional variables forwarded to the container: `WEB_PORT` (default `8000`),
+`TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `ALLOWED_USER_IDS`, `CORS_ORIGINS`.
+
+The service has `depends_on: db` with a `service_healthy` condition so it never starts
+before PostgreSQL is ready to accept connections.
+
+### `nginx` service
+
+Uses the official `nginx:alpine` image. Mounts two read-only bind volumes:
+
+- `./nginx/nginx.conf` → `/etc/nginx/conf.d/default.conf` — reverse-proxy + SPA config
+- `./frontend/dist` → `/usr/share/nginx/html` — production frontend build output
+
+Exposes port `80` on the host. All traffic flows through nginx; there is no direct host
+port for the `web` service container.
+
+### `nginx/nginx.conf`
+
+Two location blocks:
+
+```nginx
+location /api/ {
+    proxy_pass http://web:8000;
+    ...
+}
+
+location / {
+    root /usr/share/nginx/html;
+    try_files $uri $uri/ /index.html;   # SPA client-side routing fallback
+}
+```
+
+The upstream port is hardcoded to `8000` because nginx does not support shell variable
+expansion in config files. If `WEB_PORT` is changed in `docker-compose.yml`, the
+`proxy_pass` line in `nginx/nginx.conf` must be updated to match.
+
+### Starting the web UI locally
+
+```bash
+# 1. Build the frontend (produces frontend/dist)
+cd frontend && npm run build && cd ..
+
+# 2. Set required env vars
+export POSTGRES_PASSWORD=secret
+export JWT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+
+# 3. Start db + web + nginx
+docker compose --profile web up -d
+
+# Verify
+curl http://localhost/api/health          # {"status": "ok"}
+curl http://localhost/api/auth/me         # HTTP 401 (no token)
+curl http://localhost/                    # serves index.html
+```
+
+---
+
 ## Configuration
 
 All configuration is via environment variables (or `.env` file). Managed by
