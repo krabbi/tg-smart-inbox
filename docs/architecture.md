@@ -1047,8 +1047,8 @@ Uses the official `nginx:alpine` image. Mounts two read-only bind volumes:
 - `./nginx/nginx.conf` → `/etc/nginx/conf.d/default.conf` — reverse-proxy + SPA config
 - `./frontend/dist` → `/usr/share/nginx/html` — production frontend build output
 
-Exposes port `80` on the host. All traffic flows through nginx; there is no direct host
-port for the `web` service container.
+Exposes container port `80` on the host port `NGINX_PORT` (default `4000`). All traffic
+flows through nginx; there is no direct host port for the `web` service container.
 
 ### `nginx/nginx.conf`
 
@@ -1083,10 +1083,10 @@ export JWT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
 # 3. Start db + web + nginx
 docker compose --profile web up -d
 
-# Verify
-curl http://localhost/api/health          # {"status": "ok"}
-curl http://localhost/api/auth/me         # HTTP 401 (no token)
-curl http://localhost/                    # serves index.html
+# Verify (nginx listens on NGINX_PORT, default 4000)
+curl http://localhost:4000/api/health     # {"status": "ok"}
+curl http://localhost:4000/api/auth/me    # HTTP 401 (no token)
+curl http://localhost:4000/               # serves index.html
 ```
 
 ---
@@ -1112,6 +1112,7 @@ All configuration is via environment variables (or `.env` file). Managed by
 | `GHCR_TOKEN` | Prod only | — | GitHub Personal Access Token with the `read:packages` scope. Used by Watchtower to pull `ghcr.io/krabbi/tg-smart-inbox:latest`. Required when running the `prod` profile. |
 | `JWT_SECRET` | Web only | `None` | Secret key used to sign JWT tokens by the web UI companion service (`web/main.py`). Not required for the bot process — the web app factory validates its presence at startup. |
 | `WEB_PORT` | No | `8000` | Port the FastAPI web service listens on. Has no effect on the bot process. |
+| `NGINX_PORT` | No | `4000` | Host port the nginx reverse proxy is published on (`docker-compose.yml`, `web` profile). The container always listens on `80` internally. |
 | `CORS_ORIGINS` | No | `[]` | Comma-separated list of allowed CORS origins for the web UI companion (e.g. `https://app.example.com`). Non-empty → credentialed requests allowed from listed origins only. Empty → wildcard `*` without credentials (dev convenience). |
 | `VITE_API_BASE_URL` | Frontend only | `""` | Base URL for API requests from the Vite/TypeScript frontend (`frontend/`). Set in `frontend/.env.local` for local development (e.g. `http://localhost:8000`). In production the nginx proxy forwards `/api/` so the default empty string works. Not read by the Python bot or web service. |
 | `VITE_BOT_USERNAME` | Frontend only | `""` | Telegram bot username (without `@`) used by the Login Widget in `frontend/src/views/Login.ts` (the `data-telegram-login` attribute). Set in `frontend/.env.local` for local development or in the CI/CD build environment. If unset the widget renders with an empty attribute and Telegram will reject the embed. Not read by the Python bot or web service. |

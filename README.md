@@ -266,6 +266,8 @@ EMBEDDING_DIM=1024
 # The bot process starts without it.
 JWT_SECRET=change_me_to_a_long_random_string
 WEB_PORT=8000
+# Host port the nginx reverse proxy is published on (web profile). Container port stays 80.
+NGINX_PORT=4000
 # Comma-separated list of allowed CORS origins for the web UI companion.
 # Non-empty → credentialed requests are allowed from these origins only (production).
 # Empty (default) → wildcard "*" without credentials is used (dev convenience).
