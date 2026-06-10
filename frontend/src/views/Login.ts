@@ -34,11 +34,13 @@ if (BOT_USERNAME === "") {
 // ---------------------------------------------------------------------------
 
 /**
- * Render the login card containing the Telegram Login Widget script tag.
+ * Render the login card with an empty container for the Telegram Login Widget.
  *
- * The widget is rendered as an inline <script> so that Telegram's loader can
- * locate the script element and replace it with the actual button iframe.
- * The data-onauth attribute names the global callback defined below.
+ * The widget <script> element cannot be part of this HTML string: the runtime
+ * injects views via innerHTML, and scripts inserted through innerHTML are never
+ * executed by the browser. Instead, attachLoginListeners() creates the script
+ * element programmatically and appends it into #telegram-login-widget after
+ * every render.
  */
 export function view(model: Model): string {
   const loadingHtml = model.isLoading
@@ -51,16 +53,7 @@ export function view(model: Model): string {
         <h1 class="login-title">tg-smart-inbox</h1>
         <p class="login-subtitle">Sign in with your Telegram account</p>
         ${loadingHtml}
-        <div id="telegram-login-widget">
-          <script
-            async
-            src="https://telegram.org/js/telegram-widget.js?22"
-            data-telegram-login="${BOT_USERNAME}"
-            data-size="large"
-            data-onauth="onTelegramAuth"
-            data-request-access="write"
-          ></script>
-        </div>
+        <div id="telegram-login-widget"></div>
       </div>
     </div>
   `.trim();
@@ -84,4 +77,31 @@ export function attachLoginListeners(
     (user: TelegramLoginPayload) => {
       dispatch({ type: "TelegramLoginSuccess", payload: user });
     };
+
+  injectWidgetScript();
+}
+
+/**
+ * Create the Telegram Login Widget <script> element programmatically and
+ * append it into the #telegram-login-widget container.
+ *
+ * Scripts inserted via innerHTML are inert, so this is the only way the widget
+ * loader can run after a render. Each render wipes the container, so the
+ * script is re-appended every time; the emptiness check guards against
+ * double-injection within a single render cycle.
+ */
+function injectWidgetScript(): void {
+  const container = document.getElementById("telegram-login-widget");
+  if (container === null || container.childElementCount > 0) {
+    return;
+  }
+
+  const script = document.createElement("script");
+  script.async = true;
+  script.src = "https://telegram.org/js/telegram-widget.js?22";
+  script.setAttribute("data-telegram-login", BOT_USERNAME);
+  script.setAttribute("data-size", "large");
+  script.setAttribute("data-onauth", "onTelegramAuth(user)");
+  script.setAttribute("data-request-access", "write");
+  container.appendChild(script);
 }
