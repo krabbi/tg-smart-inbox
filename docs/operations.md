@@ -32,6 +32,29 @@ POSTGRES_PASSWORD=secret GHCR_USER=... GHCR_TOKEN=... docker compose --profile p
 POSTGRES_PASSWORD=secret docker compose --profile dev up
 ```
 
+### Web UI companion (`web` profile)
+
+```bash
+# 1. Build the frontend SPA (requires Node 18+, or use a one-off container):
+cd frontend
+docker run --rm -v "$PWD":/app -w /app node:20-alpine sh -c "npm install && npm run build"
+cd ..
+
+# 2. Start FastAPI + nginx (db starts automatically; the bot is not touched):
+docker compose --profile web up -d --build
+```
+
+Requirements: `JWT_SECRET` must be set in `.env`; nginx serves `./frontend/dist`
+(bind mount — rebuilding the frontend is picked up without a container restart).
+The host port is `NGINX_PORT` (default `4000`). The Telegram Login Widget only
+works on a domain linked to the bot via BotFather `/setdomain` — not on a raw IP.
+See [`docs/architecture.md`](architecture.md) for the full web stack reference.
+
+TLS termination is deployment-specific and intentionally not part of the repo:
+add a `docker-compose.override.yml` next to `docker-compose.yml` (auto-merged by
+Docker Compose, ignored by git) that publishes `443` and mounts certificates plus
+an extra nginx `server` block.
+
 The dev profile mounts `./bot` as a volume and uses `watchfiles` to restart on
 any Python file change. It still builds the image locally from the `dev` stage
 of the `Dockerfile`.
