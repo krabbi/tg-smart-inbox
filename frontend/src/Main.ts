@@ -43,6 +43,7 @@ import {
   deleteItem,
   bulkDeleteItems,
   type ItemsMsg,
+  type GetItemsParams,
 } from "./api/items.ts";
 import { getReminders, patchReminder, type RemindersMsg } from "./api/reminders.ts";
 import { getSettings, type SettingsMsg } from "./api/settings.ts";
@@ -140,8 +141,8 @@ function telegramAuthCommand(payload: TelegramLoginPayload): Command<Msg> {
               };
             },
           ).run(dispatch);
-        } else {
-          // authMsg.type === "AuthError"
+        } else if (authMsg.type === "AuthError") {
+          // postTelegramAuth never produces MeLoaded — only AuthSuccess | AuthError.
           const err = authMsg.err;
           if (err.type === "AccessDenied") {
             dispatch({
@@ -170,11 +171,11 @@ function fetchItemsCommand(
   searchQuery: string,
 ): Command<Msg> {
   const itemType = routeToItemType(route);
-  const cmd = getItems({
-    type: itemType,
-    page,
-    q: searchQuery !== "" ? searchQuery : undefined,
-  });
+  // Build params without explicit undefined values (exactOptionalPropertyTypes).
+  const params: GetItemsParams = { page };
+  if (itemType !== undefined) params.type = itemType;
+  if (searchQuery !== "") params.q = searchQuery;
+  const cmd = getItems(params);
   return {
     run(dispatch) {
       cmd.run((itemsMsg: ItemsMsg) => {
