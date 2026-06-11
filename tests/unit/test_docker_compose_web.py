@@ -131,10 +131,10 @@ def test_nginx_service_uses_alpine_image(compose: dict) -> None:
 
 
 def test_nginx_service_exposes_port_80(compose: dict) -> None:
-    """nginx service maps host port 80 to container port 80."""
+    """nginx service maps the configurable NGINX_PORT (default 4000) to container port 80."""
     nginx = compose["services"]["nginx"]
     ports = nginx["ports"]
-    assert "80:80" in ports
+    assert "${NGINX_PORT:-4000}:80" in ports
 
 
 def test_nginx_service_mounts_conf(compose: dict) -> None:
