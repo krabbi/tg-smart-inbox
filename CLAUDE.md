@@ -136,6 +136,12 @@ When your change affects any of the following, update the corresponding file **i
 | `docs/architecture.md` | For DB schema, DI wiring, scheduler, config reference |
 | `docs/user_guide.md` | For user-facing behaviour, commands, flows |
 
+### Do NOT read
+
+- `.understand-anything/` — generated knowledge-graph artifacts (gitignored). Exists only for
+  human visualization via the dashboard. Never read it for development context: it is large,
+  low-signal-per-token, and goes stale. Use `docs/` and the code itself instead.
+
 ---
 
 ## File layout

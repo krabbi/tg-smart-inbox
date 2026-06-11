@@ -10,3 +10,6 @@ Detail files live in `.claude/` (not `.Codex/`):
 | `.claude/coding-patterns.md` | Handler / service / repository code examples |
 | `.claude/testing-guide.md` | Test patterns and conventions |
 | `.claude/agents/` | Subagent definitions |
+
+Do **not** read `.understand-anything/` (generated knowledge-graph artifacts, gitignored) —
+it is for human visualization only. Use `docs/` and the code for development context.
